@@ -5285,8 +5285,38 @@ function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
         && !card.classList.contains('home-device--sensor')
         && !card.classList.contains('home-device--door');
     card.classList.toggle('is-on', lit);
+    const device = homeDeviceRecord(id);
+    if (typeof extras.motor_pending_off === 'boolean' && device) {
+        device.motor_pending_off = extras.motor_pending_off;
+    }
+    const pendingOff = Boolean(on) && (Boolean(extras.motor_pending_off) || Boolean(device?.motor_pending_off));
+    card.classList.toggle('is-pending-off', pendingOff);
     const btn = card.querySelector('[data-home-toggle]');
-    if (btn) btn.textContent = on ? 'Off' : 'On';
+    if (btn) {
+        btn.textContent = pendingOff ? 'Cancel off' : (on ? 'Off' : 'On');
+        btn.classList.toggle('is-pending-off', pendingOff);
+        btn.title = pendingOff ? 'Off queued until load drops — tap to cancel' : '';
+    }
+    let chip = card.querySelector('[data-home-pending-off]');
+    if (pendingOff) {
+        if (!chip && btn) {
+            chip = document.createElement('span');
+            chip.className = 'home-pending-off';
+            chip.setAttribute('data-home-pending-off', '');
+            chip.title = 'Still on. Turns off when the draw drops below the motor-mode limit.';
+            chip.textContent = 'Off queued';
+            btn.insertAdjacentElement('afterend', chip);
+        }
+    } else if (chip) {
+        chip.remove();
+    }
+    const hasMeter = extras.power_w != null || extras.voltage_v != null || extras.current_a != null;
+    if (hasMeter && device && String(device.kind || extras.kind || '') === 'plug') {
+        if (extras.power_w != null) device.power_w = extras.power_w;
+        if (extras.voltage_v != null) device.voltage_v = extras.voltage_v;
+        if (extras.current_a != null) device.current_a = extras.current_a;
+        patchHomePlugMeter(card, device);
+    }
     card.querySelectorAll('[data-home-power]').forEach((el) => {
         const want = el.getAttribute('data-home-power') === 'on';
         el.classList.toggle('is-active', Boolean(on) === want);
@@ -5421,11 +5451,19 @@ function patchHomeDashboard(data) {
     }
     const next = [...(data.devices || []), ...(data.hidden_devices || [])];
     next.forEach((d) => {
-        const sticky = homeStickyOn(d.id);
-        if (sticky !== null) d.on = sticky;
+        if (d.motor_pending_off) {
+            d.on = true;
+        } else {
+            const sticky = homeStickyOn(d.id);
+            if (sticky !== null) d.on = sticky;
+        }
         const rec = homeDeviceRecord(d.id);
         if (rec) {
             if (typeof d.on === 'boolean') rec.on = Boolean(d.on);
+            if (typeof d.motor_pending_off === 'boolean') rec.motor_pending_off = d.motor_pending_off;
+            if (d.power_w != null) rec.power_w = d.power_w;
+            if (d.voltage_v != null) rec.voltage_v = d.voltage_v;
+            if (d.current_a != null) rec.current_a = d.current_a;
             if (d.brightness != null) rec.brightness = d.brightness;
             if (d.color_hex) rec.color_hex = d.color_hex;
             if (d.color_temp != null) rec.color_temp = d.color_temp;
@@ -5982,6 +6020,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const toggleClass = canToggle ? ' home-device--toggle' : '';
     const unavailableClass = d.available === false ? ' home-device--unavailable' : '';
     const lit = on && homeTileLightsUp(d);
+    const pendingOff = !hidden && String(d.kind || '') === 'plug' && Boolean(d.motor_pending_off) && on;
     const manage = hidden
         ? `<button type="button" class="btn btn-secondary btn-compact" data-home-unhide="${escapeHtml(d.id)}">Unhide</button>
            <button type="button" class="btn btn-secondary btn-compact" data-home-remove="${escapeHtml(d.id)}">Remove</button>`
@@ -5999,7 +6038,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ? ` style="background:${escapeHtml(d.color_hex)};box-shadow:0 0 0.35rem ${escapeHtml(d.color_hex)}"`
         : '';
     const actions = hidden ? '' : homeDeviceActionsHtml(d, bright, color);
-    return `<article class="home-device${lit ? ' is-on' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${sensor ? ' home-device--sensor' : ''}${doorLike ? ' home-device--door' : ''}${toggleClass}${unavailableClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
+    return `<article class="home-device${lit ? ' is-on' : ''}${pendingOff ? ' is-pending-off' : ''}${hidden ? ' home-device--hidden' : ''}${unifi ? ' home-device--unifi' : ''}${heater ? ' home-device--heater' : ''}${vacuum ? ' home-device--vacuum' : ''}${camera ? ' home-device--camera' : ''}${sensor ? ' home-device--sensor' : ''}${doorLike ? ' home-device--door' : ''}${toggleClass}${unavailableClass}" data-home-id="${escapeHtml(d.id)}" title="${escapeHtml(meta)}">
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
@@ -6209,11 +6248,15 @@ function homeDeviceActionsHtml(d, bright, color) {
         ? `<label class="home-adaptive" title="Warm at night, cooler in the day"><input type="checkbox" data-home-adaptive="${escapeHtml(d.id)}" ${adaptive ? 'checked' : ''}> Time of day</label>`
         : '';
     const electrical = String(d.kind || '') === 'plug' ? homePlugElectricalMetaHtml(d) : '';
-    const pendingOff = String(d.kind || '') === 'plug' && Boolean(d.motor_pending_off);
+    const pendingOff = String(d.kind || '') === 'plug' && Boolean(d.motor_pending_off) && on;
     const toggleLabel = pendingOff ? 'Cancel off' : (on ? 'Off' : 'On');
+    const pendingChip = pendingOff
+        ? `<span class="home-pending-off" data-home-pending-off title="Still on. Turns off when the draw drops below the motor-mode limit.">Off queued</span>`
+        : '';
     const countdown = String(d.kind || '') === 'plug' ? autoOffCountdownHtml(d) : '';
     return `<div class="home-device-actions">
-            <button type="button" class="btn btn-secondary btn-compact${pendingOff ? ' is-active' : ''}" data-home-toggle="${escapeHtml(d.id)}" title="${pendingOff ? 'Off queued until load drops — tap to cancel' : ''}">${toggleLabel}</button>
+            <button type="button" class="btn btn-secondary btn-compact${pendingOff ? ' is-pending-off' : ''}" data-home-toggle="${escapeHtml(d.id)}" title="${pendingOff ? 'Off queued until load drops — tap to cancel' : ''}">${toggleLabel}</button>
+            ${pendingChip}
             ${countdown}
             ${electrical}
             ${bright}
@@ -6222,20 +6265,45 @@ function homeDeviceActionsHtml(d, bright, color) {
         </div>`;
 }
 
-function homePlugElectricalMetaHtml(d) {
+function homePlugElectricalText(d) {
     const parts = [];
-    if (d.power_w != null && d.power_w !== '' && Number.isFinite(Number(d.power_w))) {
+    if (d?.power_w != null && d.power_w !== '' && Number.isFinite(Number(d.power_w))) {
         parts.push(`${Number(d.power_w)} W`);
     }
-    if (d.voltage_v != null && d.voltage_v !== '' && Number.isFinite(Number(d.voltage_v))) {
+    if (d?.voltage_v != null && d.voltage_v !== '' && Number.isFinite(Number(d.voltage_v))) {
         parts.push(`${Number(d.voltage_v)} V`);
     }
-    if (d.current_a != null && d.current_a !== '' && Number.isFinite(Number(d.current_a))) {
+    if (d?.current_a != null && d.current_a !== '' && Number.isFinite(Number(d.current_a))) {
         const amps = Number(d.current_a);
         parts.push(`${amps < 1 ? amps.toFixed(3) : amps.toFixed(2)} A`);
     }
-    if (!parts.length) return '';
-    return `<span class="home-device-meta home-device-power" data-home-power-w title="Live electrical readings">${escapeHtml(parts.join(' · '))}</span>`;
+    return parts.join(' · ');
+}
+
+function homePlugElectricalMetaHtml(d) {
+    const text = homePlugElectricalText(d);
+    if (!text) return '';
+    return `<span class="home-device-meta home-device-power" data-home-power-w title="Live electrical readings">${escapeHtml(text)}</span>`;
+}
+
+function patchHomePlugMeter(card, device) {
+    if (!card || String(device?.kind || '') !== 'plug') return;
+    const text = homePlugElectricalText(device);
+    let el = card.querySelector('[data-home-power-w]');
+    if (!text) {
+        if (el) el.remove();
+        return;
+    }
+    if (!el) {
+        el = document.createElement('span');
+        el.className = 'home-device-meta home-device-power';
+        el.setAttribute('data-home-power-w', '');
+        el.title = 'Live electrical readings';
+        const anchor = card.querySelector('[data-home-pending-off]') || card.querySelector('[data-home-toggle]');
+        if (anchor) anchor.insertAdjacentElement('afterend', el);
+        else card.querySelector('.home-device-actions')?.prepend(el);
+    }
+    if (el && el.textContent !== text) el.textContent = text;
 }
 
 function homeVacuumStatusName(d) {
