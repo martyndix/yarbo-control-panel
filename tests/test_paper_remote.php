@@ -207,7 +207,7 @@ foreach ([
     'Do not clear usingRemote here',
     'X-Yarbo-Paper-Net',
     'paperNetAddIdentityHeaders',
-    '#define PAPERMONO_FW_VERSION "0.2.30-colour"',
+    '#define PAPERMONO_FW_VERSION "0.2.31-colour"',
     'void finishEpdFrame()',
     'M5.Display.startWrite();',
 ] as $needle) {
