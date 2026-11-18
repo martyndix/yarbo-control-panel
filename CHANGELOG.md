@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.378] - 2026-11-18
+
+### Fixed
+
+- **Build Paper Colour firmware** failed on the Plans page. The **NEXT 1/2** label is an Arduino string, and the button only accepted a C string (`cannot convert 'StringSumHelper' to 'const char*'`). Buttons now take that string, so the build can finish. Firmware **0.2.31-colour** — build again, then flash or use Wi-Fi Update.
+
 ## [4.0.377] - 2026-11-18
 
 ### Fixed

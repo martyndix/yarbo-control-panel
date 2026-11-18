@@ -434,7 +434,7 @@ int stepEnabledPage(int from, int dir)
     return firstEnabledPage();
 }
 
-void drawButton(int x, int y, int w, int h, const char *label, bool invert)
+void drawButton(int x, int y, int w, int h, const String &label, bool invert)
 {
     uint16_t bg = invert ? TFT_BLACK : TFT_WHITE;
     uint16_t fg = invert ? TFT_WHITE : TFT_BLACK;

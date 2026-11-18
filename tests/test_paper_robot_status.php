@@ -27,7 +27,7 @@ assert_true(str_contains($php, "'MOWING' => 'Mowing'"), 'lymow friendly MOWING')
 assert_true(str_contains($php, "'DOCKING' => 'Heading home'"), 'lymow friendly DOCKING');
 
 assert_true(str_contains($monoVer, '0.1.97'), 'PaperMono 0.1.97');
-assert_true(str_contains($colourVer, '0.2.30-colour'), 'Paper Colour 0.2.30');
+assert_true(str_contains($colourVer, '0.2.31-colour'), 'Paper Colour 0.2.31');
 assert_true(str_contains($mono, 'statusLabel'), 'firmware statusLabel');
 assert_true(str_contains($mono, 'Charge  "'), 'Plans charge line');
 assert_true(str_contains($mono, 'lymowCharging'), 'Lymow charge line');
