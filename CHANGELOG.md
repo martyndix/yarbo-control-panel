@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.373] - 2026-11-18
+
+### Fixed
+
+- An IKEA TIMMERFLOTTE that Apple Home names as two sensors (temperature and humidity) now shows as one Home row, with both readings on the same line and the same climate graph. A contact sensor on that node stays its own row. Matter agent **v118**.
+
 ## [4.0.372] - 2026-11-18
 
 ### Fixed

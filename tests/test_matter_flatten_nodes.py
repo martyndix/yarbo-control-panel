@@ -919,6 +919,48 @@ def main() -> int:
         raise SystemExit(f"climate sensor flatten {clim}")
     if "°" not in str(clim.get("status") or "") or "RH" not in str(clim.get("status") or ""):
         raise SystemExit(f"climate status {clim}")
+    timmer = {
+        "node_id": 90,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "TIMMERFLOTTE",
+            "1/29/0": [{"deviceType": 0x0302, "revision": 1}],
+            "1/40/5": "Workshop Temperature",
+            "1/1026/0": 2340,
+            "2/29/0": [{"deviceType": 0x0307, "revision": 1}],
+            "2/40/5": "Workshop Humidity",
+            "2/1029/0": 4900,
+            "3/29/0": [{"deviceType": 0x0015, "revision": 1}],
+            "3/40/5": "Workshop Door",
+            "3/69/0": True,
+        },
+    }
+    timmer_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [timmer]})}
+    workshop = timmer_rows.get("90:1") or {}
+    if "90:2" in timmer_rows:
+        raise SystemExit(f"humidity endpoint must join the temperature row {timmer_rows.keys()}")
+    if workshop.get("name") != "Workshop" or workshop.get("temperature") != 23.4 or workshop.get("humidity") != 49.0:
+        raise SystemExit(f"timmerflotte combined row {workshop}")
+    if "°" not in str(workshop.get("status") or "") or "RH" not in str(workshop.get("status") or ""):
+        raise SystemExit(f"timmerflotte status {workshop}")
+    if workshop.get("climate_endpoints") != [1, 2]:
+        raise SystemExit(f"timmerflotte endpoints {workshop.get('climate_endpoints')}")
+    door = timmer_rows.get("90:3") or {}
+    if door.get("kind") != "sensor" or door.get("has_open") is not True or door.get("open") is not False:
+        raise SystemExit(f"contact on the same node stays its own row {door}")
+    agent.remember_live_devices([dict(workshop), dict(door)])
+    agent.apply_attribute_event({"node_id": 90, "attribute_path": "2/1029/0", "value": 5100})
+    live_climate = {d["id"]: d for d in agent.current_live_devices()}
+    if "90:2" in live_climate:
+        raise SystemExit(f"humidity update recreated a second row {live_climate.keys()}")
+    updated = live_climate.get("90:1") or {}
+    if updated.get("temperature") != 23.4 or updated.get("humidity") != 51.0:
+        raise SystemExit(f"humidity update missed the combined row {updated}")
+    if "°" not in str(updated.get("status") or "") or "RH" not in str(updated.get("status") or ""):
+        raise SystemExit(f"combined status after update {updated}")
+    if "90:3" not in live_climate:
+        raise SystemExit("combined climate row dropped the door")
     cont = sensor_rows.get("81:1") or {}
     if cont.get("kind") != "sensor" or cont.get("has_open") is not True or cont.get("open") is not False:
         raise SystemExit(f"contact sensor flatten {cont}")

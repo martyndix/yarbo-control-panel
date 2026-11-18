@@ -541,6 +541,7 @@ final class YarboHome
         $live = $this->devicesWithLiveState();
         $live['devices'] = $this->mergeUnifiDevices($live['devices']);
         $store = $this->adoptLoneHeaterIds($this->load(), $live['devices']);
+        $store = $this->adoptSplitClimateIds($store, $live['devices']);
         $hidden = array_fill_keys($store['hidden'], true);
         $adaptiveIds = array_fill_keys($this->adaptiveDeviceIds(), true);
         $triggers = is_array($store['last_trigger'] ?? null) ? $store['last_trigger'] : [];
@@ -562,7 +563,25 @@ final class YarboHome
             }
             $defaultName = (string) ($device['name'] ?? $id);
             $name = $store['names'][$id] ?? $defaultName;
+            $climateEps = $device['climate_endpoints'] ?? null;
+            if (is_array($climateEps) && count($climateEps) > 1) {
+                $stem = YarboMatterFabric::climateNameStem((string) $name);
+                if ($stem !== '' && $stem !== $name) {
+                    $name = $stem;
+                }
+            }
             $roomId = (string) ($store['rooms'][$id] ?? '');
+            if ($roomId === '' && is_array($climateEps) && count($climateEps) > 1) {
+                $nid = (int) ($device['node_id'] ?? 0);
+                foreach ($climateEps as $ep) {
+                    $sib = $nid . ':' . (int) $ep;
+                    $sibRoom = trim((string) ($store['rooms'][$sib] ?? ''));
+                    if ($sib !== $id && $sibRoom !== '') {
+                        $roomId = $sibRoom;
+                        break;
+                    }
+                }
+            }
             $roomName = '';
             if ($roomId !== '') {
                 foreach ($store['room_defs'] as $def) {
@@ -4021,6 +4040,23 @@ final class YarboHome
             return $devices;
         }
         $heatersByNode = [];
+        $climateCovered = [];
+        foreach ($byId as $liveId => $live) {
+            $eps = $live['climate_endpoints'] ?? null;
+            if (!is_array($eps) || count($eps) < 2) {
+                continue;
+            }
+            $nid = self::rowNodeId($live, (string) $liveId);
+            if ($nid <= 0) {
+                continue;
+            }
+            foreach ($eps as $ep) {
+                $ep = (int) $ep;
+                if ($ep > 0) {
+                    $climateCovered[$nid . ':' . $ep] = (string) $liveId;
+                }
+            }
+        }
         foreach ($byId as $liveId => $live) {
             if (!self::liveRowLooksHeater($live)) {
                 continue;
@@ -4037,6 +4073,12 @@ final class YarboHome
                 continue;
             }
             $id = (string) ($device['id'] ?? '');
+            if ($id !== '' && isset($used[$id])) {
+                continue;
+            }
+            if ($id !== '' && isset($climateCovered[$id]) && $climateCovered[$id] !== $id) {
+                continue;
+            }
             if ($id !== '' && isset($byId[$id])) {
                 $out[] = self::copyLiveDeviceFields($device, $byId[$id]);
                 $used[$id] = true;
@@ -4080,6 +4122,11 @@ final class YarboHome
                 continue;
             }
             if (self::liveRowLooksAddableDevice($live)) {
+                $out[] = $live;
+                continue;
+            }
+            $eps = $live['climate_endpoints'] ?? null;
+            if (is_array($eps) && count($eps) > 1) {
                 $out[] = $live;
             }
         }
@@ -4439,6 +4486,23 @@ final class YarboHome
         }
         if (array_key_exists('status', $live) && is_string($live['status']) && $live['status'] !== '') {
             $device['status'] = $live['status'];
+        }
+        if (array_key_exists('temperature', $live)) {
+            $celsius = self::optionalCelsius($live['temperature']);
+            if ($celsius !== null) {
+                $device['temperature'] = $celsius;
+            }
+        }
+        if (array_key_exists('humidity', $live) && is_numeric($live['humidity'])) {
+            $device['humidity'] = round((float) $live['humidity'], 1);
+        }
+        $eps = $live['climate_endpoints'] ?? null;
+        if (is_array($eps) && $eps !== []) {
+            $device['climate_endpoints'] = array_values(array_map(static fn ($ep): int => (int) $ep, $eps));
+            $liveName = trim((string) ($live['name'] ?? ''));
+            if (count($device['climate_endpoints']) > 1 && $liveName !== '') {
+                $device['name'] = $liveName;
+            }
         }
 
         return $device;
@@ -4971,6 +5035,9 @@ final class YarboHome
                 if (isset($row['status']) && is_string($row['status']) && $row['status'] !== '') {
                     $slim['status'] = $row['status'];
                 }
+                if (is_array($row['climate_endpoints'] ?? null) && $row['climate_endpoints'] !== []) {
+                    $slim['climate_endpoints'] = array_values(array_map(static fn ($ep): int => (int) $ep, $row['climate_endpoints']));
+                }
             }
             if ($kind === self::KIND_PLUG) {
                 if (isset($row['power_w']) && is_numeric($row['power_w'])) {
@@ -5207,6 +5274,97 @@ final class YarboHome
                 foreach ($order as $i => $oldId) {
                     if (is_string($oldId) && str_starts_with($oldId, $prefix) && $oldId !== $newId) {
                         $store['device_order'][$i] = $newId;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if ($changed) {
+            $store['hidden'] = $this->normalizeIdList($store['hidden'] ?? []);
+            $this->write($store);
+        }
+
+        return $store;
+    }
+
+    /**
+     * TIMMERFLOTTE temperature and humidity endpoints share one id.
+     * Keep the room, group, and a single name on that id.
+     *
+     * @param array<string, mixed> $store
+     * @param list<array<string, mixed>> $devices
+     * @return array<string, mixed>
+     */
+    public function adoptSplitClimateIds(array $store, array $devices): array
+    {
+        $changed = false;
+        foreach ($devices as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $eps = $device['climate_endpoints'] ?? null;
+            if (!is_array($eps) || count($eps) < 2) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            $nid = (int) ($device['node_id'] ?? 0);
+            if ($id === '' || $nid <= 0) {
+                continue;
+            }
+            $siblings = [];
+            foreach ($eps as $ep) {
+                $sib = $nid . ':' . (int) $ep;
+                if ($sib !== $id) {
+                    $siblings[] = $sib;
+                }
+            }
+            foreach (['rooms', 'groups', 'contact_kind'] as $key) {
+                $map = is_array($store[$key] ?? null) ? $store[$key] : [];
+                if (isset($map[$id]) && trim((string) $map[$id]) !== '') {
+                    continue;
+                }
+                foreach ($siblings as $sib) {
+                    if (isset($map[$sib]) && trim((string) $map[$sib]) !== '') {
+                        $store[$key][$id] = $map[$sib];
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+            $labels = [];
+            foreach (array_merge([$id], $siblings) as $sid) {
+                $saved = trim((string) ($store['names'][$sid] ?? ''));
+                if ($saved !== '') {
+                    $labels[] = $saved;
+                }
+            }
+            $deviceName = trim((string) ($device['name'] ?? ''));
+            if ($deviceName !== '') {
+                $labels[] = $deviceName;
+            }
+            $stem = YarboMatterFabric::combinedClimateName($labels, (string) ($device['product'] ?? ''));
+            $current = trim((string) ($store['names'][$id] ?? ''));
+            $currentIsMetric = $current !== '' && YarboMatterFabric::climateNameStem($current) !== $current;
+            if ($stem !== '' && ($current === '' || $currentIsMetric) && $current !== $stem) {
+                $store['names'][$id] = $stem;
+                $changed = true;
+            }
+            $hidden = is_array($store['hidden'] ?? null) ? $store['hidden'] : [];
+            if (!in_array($id, $hidden, true)) {
+                foreach ($hidden as $i => $oldId) {
+                    if (is_string($oldId) && in_array($oldId, $siblings, true)) {
+                        $store['hidden'][$i] = $id;
+                        $changed = true;
+                        break;
+                    }
+                }
+            }
+            $order = is_array($store['device_order'] ?? null) ? $store['device_order'] : [];
+            if (!in_array($id, $order, true)) {
+                foreach ($order as $i => $oldId) {
+                    if (is_string($oldId) && in_array($oldId, $siblings, true)) {
+                        $store['device_order'][$i] = $id;
                         $changed = true;
                         break;
                     }

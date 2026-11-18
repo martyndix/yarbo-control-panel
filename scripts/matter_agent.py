@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 117
+AGENT_VERSION = 118
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -167,6 +167,8 @@ DEVTYPE_THERMOSTAT = 0x0300
 DEVTYPE_HEATING_COOLING = 0x0301
 DEVTYPE_TEMP_SENSOR = 0x0302
 DEVTYPE_HUMIDITY_SENSOR = 0x0303
+# Matter device library: relative humidity sensor.
+DEVTYPE_RELATIVE_HUMIDITY_SENSOR = 0x0307
 DEVTYPE_CONTACT_SENSOR = 0x0015
 DEVTYPE_OCCUPANCY_SENSOR = 0x0107
 DEVTYPE_RVC = 0x0074
@@ -206,6 +208,8 @@ _restore_lock = threading.Lock()
 _preferred_shared = False
 _live_lock = threading.Lock()
 _live_devices: list[dict[str, Any]] = []
+# node:endpoint -> canonical id when temperature and humidity are split endpoints.
+_climate_alias: dict[str, str] = {}
 _motor_mode_cache: dict[str, int] = {}
 _motor_mode_mtime: float = 0.0
 _motor_high_until: dict[str, float] = {}
@@ -4874,7 +4878,9 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
                 item["_sticky_keys"] = [str(key) for key in keys if not str(key).startswith("_")]
             merged.append(item)
         if merged:
+            merged = merge_split_climate_sensors(merged)
             _live_devices = merged
+            index_climate_aliases(merged)
 
 
 def current_live_devices() -> list[dict[str, Any]]:
@@ -6925,6 +6931,8 @@ def apply_attribute_event(data: Any) -> None:
         return
     endpoint, cluster, attr = parts
     device_id = f"{node_id}:{endpoint}"
+    if cluster in (TEMP_MEASUREMENT, HUMIDITY_MEASUREMENT):
+        device_id = climate_canonical_id(node_id, endpoint, device_id)
     if cluster in (THERMOSTAT, TEMP_MEASUREMENT) and live_row(device_id) is None:
         for row in current_live_devices():
             if not isinstance(row, dict):
@@ -7123,6 +7131,8 @@ def apply_attribute_event(data: Any) -> None:
             live_before = live_row(device_id) or {}
             was_on = bool(live_before.get("on"))
         patch_live_device(device_id, fields)
+        if "temperature" in fields or "humidity" in fields:
+            coalesce_live_climate()
         if "on" in fields and was_on is True and fields.get("on") is False:
             maybe_motor_mode_reon(device_id, False)
 
@@ -7143,8 +7153,10 @@ def merge_live_nodes(nodes: list[dict[str, Any]]) -> None:
             merged = dict(prev)
             merged.update(row)
             by_id[device_id] = stabilize_motion(prev or None, merged)
+        merged_rows = merge_split_climate_sensors(list(by_id.values()))
         _live_devices.clear()
-        _live_devices.extend(by_id.values())
+        _live_devices.extend(merged_rows)
+        index_climate_aliases(list(_live_devices))
 
 
 def ingest_ws_message(msg: dict[str, Any]) -> None:
@@ -7291,6 +7303,7 @@ def device_kind(types: Any) -> str:
         i in (
             DEVTYPE_TEMP_SENSOR,
             DEVTYPE_HUMIDITY_SENSOR,
+            DEVTYPE_RELATIVE_HUMIDITY_SENSOR,
             DEVTYPE_CONTACT_SENSOR,
             DEVTYPE_OCCUPANCY_SENSOR,
         )
@@ -10543,6 +10556,225 @@ def fallback_kind(attributes: dict[str, Any], endpoint: int) -> str:
     return "switch"
 
 
+_CLIMATE_METRIC_TAIL = re.compile(
+    r"(?i)(?:\s*[-–—:/|]\s*|\s+)(temperature|temp|humidity|humid|rh)\.?$"
+)
+
+
+def climate_name_stem(name: str) -> str:
+    """Drop a trailing Temperature / Humidity label so both halves share one title."""
+    text = str(name or "").strip()
+    prev = None
+    while text and text != prev:
+        prev = text
+        text = _CLIMATE_METRIC_TAIL.sub("", text).strip(" -–—:/|")
+    return text
+
+
+def combined_climate_name(rows: list[dict[str, Any]]) -> str:
+    stems: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        stem = climate_name_stem(str(row.get("name") or ""))
+        key = stem.lower()
+        if stem and key not in seen:
+            seen.add(key)
+            stems.append(stem)
+    if len(stems) == 1:
+        return stems[0]
+    if len(stems) >= 2:
+        first, second = stems[0], stems[1]
+        count = 0
+        for left, right in zip(first, second):
+            if left.lower() != right.lower():
+                break
+            count += 1
+        prefix = first[:count].strip(" -–—:/|")
+        if len(prefix) >= 3:
+            return prefix
+    for row in rows:
+        product = str(row.get("product") or "").strip()
+        if product and product.lower() not in ("sensor", "matter"):
+            return product
+    if stems:
+        return stems[0]
+    return str((rows[0].get("name") if rows else "") or "Sensor")
+
+
+def climate_status_text(row: dict[str, Any]) -> str:
+    parts: list[str] = []
+    temp = row.get("temperature")
+    if temp is not None:
+        parts.append(f"{temp}°")
+    hum = row.get("humidity")
+    if hum is not None:
+        try:
+            parts.append(f"{int(round(float(hum)))}% RH")
+        except (TypeError, ValueError):
+            pass
+    return " · ".join(parts)
+
+
+def _climate_node_id(row: dict[str, Any]) -> int:
+    try:
+        node_id = int(row.get("node_id") or 0)
+    except (TypeError, ValueError):
+        node_id = 0
+    if node_id > 0:
+        return node_id
+    ident = str(row.get("id") or "")
+    head = ident.split(":", 1)[0]
+    if head.isdigit():
+        return int(head)
+    return 0
+
+
+def _climate_endpoint(row: dict[str, Any]) -> int:
+    try:
+        endpoint = int(row.get("endpoint") or 0)
+    except (TypeError, ValueError):
+        endpoint = 0
+    if endpoint > 0:
+        return endpoint
+    ident = str(row.get("id") or "")
+    if ":" not in ident:
+        return 0
+    tail = ident.split(":", 1)[1]
+    return int(tail) if tail.isdigit() else 0
+
+
+def is_split_climate_row(row: dict[str, Any]) -> bool:
+    """A temperature or humidity endpoint with no contact, motion, or switch."""
+    if not isinstance(row, dict):
+        return False
+    if str(row.get("kind") or "") not in ("sensor", ""):
+        return False
+    if row.get("has_open") or row.get("has_motion") or row.get("has_on_off"):
+        return False
+    if row.get("open") is not None or row.get("motion") is not None:
+        return False
+    return row.get("temperature") is not None or row.get("humidity") is not None
+
+
+def index_climate_aliases(devices: list[dict[str, Any]]) -> None:
+    global _climate_alias
+    alias: dict[str, str] = {}
+    for row in devices:
+        if not isinstance(row, dict):
+            continue
+        canon = str(row.get("id") or "")
+        endpoints = row.get("climate_endpoints")
+        node_id = _climate_node_id(row)
+        if canon == "" or node_id <= 0 or not isinstance(endpoints, list):
+            continue
+        for endpoint in endpoints:
+            try:
+                ep = int(endpoint)
+            except (TypeError, ValueError):
+                continue
+            if ep > 0:
+                alias[f"{node_id}:{ep}"] = canon
+    _climate_alias = alias
+
+
+def merge_split_climate_sensors(devices: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One Home row when one Matter node exposes temperature and humidity apart.
+
+    IKEA TIMMERFLOTTE (and Apple Home names like Workshop Temperature / Workshop
+    Humidity) is one device with two endpoints. UniFi UP Sense already shows
+    both readings on one line.
+    """
+    groups: dict[int, list[dict[str, Any]]] = {}
+    for row in devices:
+        if not is_split_climate_row(row):
+            continue
+        node_id = _climate_node_id(row)
+        if node_id <= 0:
+            continue
+        groups.setdefault(node_id, []).append(row)
+    drop: set[str] = set()
+    merged_by_id: dict[str, dict[str, Any]] = {}
+    for node_id, rows in groups.items():
+        if len(rows) < 2:
+            continue
+        if not any(row.get("temperature") is not None for row in rows):
+            continue
+        if not any(row.get("humidity") is not None for row in rows):
+            continue
+        if all(row.get("temperature") is not None and row.get("humidity") is not None for row in rows):
+            continue
+        rows_sorted = sorted(rows, key=_climate_endpoint)
+        base = dict(rows_sorted[0])
+        endpoints: list[int] = []
+        for row in rows_sorted:
+            endpoint = _climate_endpoint(row)
+            if endpoint > 0 and endpoint not in endpoints:
+                endpoints.append(endpoint)
+            if base.get("temperature") is None and row.get("temperature") is not None:
+                base["temperature"] = row["temperature"]
+            if base.get("humidity") is None and row.get("humidity") is not None:
+                base["humidity"] = row["humidity"]
+        base["available"] = any(row.get("available") is not False for row in rows_sorted)
+        base["name"] = combined_climate_name(rows_sorted)
+        base["status"] = climate_status_text(base)
+        base["kind"] = "sensor"
+        base["on"] = False
+        base["climate_endpoints"] = endpoints
+        base["node_id"] = node_id
+        if endpoints:
+            base["endpoint"] = endpoints[0]
+        canon = str(base.get("id") or (f"{node_id}:{endpoints[0]}" if endpoints else ""))
+        base["id"] = canon
+        merged_by_id[canon] = base
+        for endpoint in endpoints:
+            key = f"{node_id}:{endpoint}"
+            if key != canon:
+                drop.add(key)
+    out: list[dict[str, Any]] = []
+    emitted: set[str] = set()
+    for row in devices:
+        if not isinstance(row, dict):
+            continue
+        rid = str(row.get("id") or "")
+        if rid in drop:
+            continue
+        if rid in merged_by_id:
+            if rid in emitted:
+                continue
+            emitted.add(rid)
+            out.append(merged_by_id[rid])
+            continue
+        out.append(row)
+    return out
+
+
+def climate_canonical_id(node_id: int, endpoint: int, device_id: str) -> str:
+    mapped = _climate_alias.get(f"{node_id}:{endpoint}")
+    if mapped:
+        return mapped
+    for row in current_live_devices():
+        if not isinstance(row, dict) or _climate_node_id(row) != node_id:
+            continue
+        endpoints = row.get("climate_endpoints")
+        if not isinstance(endpoints, list):
+            continue
+        try:
+            eps = [int(ep) for ep in endpoints]
+        except (TypeError, ValueError):
+            continue
+        if endpoint in eps:
+            return str(row.get("id") or device_id)
+    return device_id
+
+
+def coalesce_live_climate() -> None:
+    global _live_devices
+    with _live_lock:
+        merged = merge_split_climate_sensors(list(_live_devices))
+        _live_devices = merged
+        index_climate_aliases(merged)
+
+
 def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
     nodes = nodes_from_result(raw)
     devices: list[dict[str, Any]] = []
@@ -10694,6 +10926,7 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                     "color_hex": "",
                 }
             )
+    devices = merge_split_climate_sensors(devices)
     devices.sort(key=lambda d: (str(d.get("source") or "").lower(), d["name"].lower(), d["id"]))
     return devices
 
@@ -10787,6 +11020,7 @@ def dispatch(body: dict[str, Any]) -> dict[str, Any]:
     if op == "states":
         start_state_poll()
         expire_stale_motion()
+        coalesce_live_climate()
         return {
             "ok": True,
             "devices": current_live_devices(),
