@@ -5457,6 +5457,19 @@ button.unifi-live-open:focus-visible img {
     max-width: 7.5rem;
 }
 
+.auto-chip--button {
+    border-radius: 12px;
+}
+
+.auto-chip--button select {
+    max-width: 11rem;
+}
+
+.auto-chip-join {
+    color: var(--muted);
+    font-size: 0.8rem;
+}
+
 .auto-chip [data-auto-if-id] {
     max-width: min(18rem, 70vw);
     min-width: 9rem;

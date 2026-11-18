@@ -126,6 +126,10 @@ $saved = $auto->save([
 assert_true(($saved['ok'] ?? false) === true, 'save ' . json_encode($saved));
 $rule = $saved['automations'][0] ?? [];
 assert_true(($rule['triggers'][0]['stop_event'] ?? '') === 'hold', 'stop stored');
+assert_true(
+    str_contains(YarboHomeAutomations::whenPhrase($rule['triggers'][0], ['9:1' => 'Bilresa']), 'held turns it off'),
+    'button phrase names the off gesture'
+);
 assert_true(($rule['actions'][0]['input'] ?? '') === '4', 'input stored');
 assert_true((int) ($rule['actions'][0]['off_after_sec'] ?? 0) === 60, 'off after stored');
 

@@ -1913,7 +1913,13 @@ final class YarboHomeAutomations
             return $phrase === '' ? $name . ' ' . self::formatDuration($for) : ($name . ' ' . $phrase . ' ' . self::formatDuration($for));
         }
 
-        return $phrase === '' ? $name : ($name . ' ' . $phrase);
+        $text = $phrase === '' ? $name : ($name . ' ' . $phrase);
+        $stop = strtolower(trim((string) ($trigger['stop_event'] ?? '')));
+        if (in_array($event, self::BUTTON_EVENTS, true) && in_array($stop, self::BUTTON_EVENTS, true) && $stop !== $event) {
+            $text .= ', ' . ($labels[$stop] ?? $stop) . ' turns it off';
+        }
+
+        return $text;
     }
 
     /**
