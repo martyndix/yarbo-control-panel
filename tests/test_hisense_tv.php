@@ -73,6 +73,21 @@ $heard = YarboHisense::heardSummary([[
     'payload' => '{"statetype":"remote_launcher","accesstoken":"secret"}',
 ]]);
 assert_true(str_contains($heard, 'broadcast/ui_service/state') && !str_contains($heard, 'secret'), 'heard hides the token ' . $heard);
+$accepted = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/x/ui_service/data/authenticationcode',
+    'payload' => '{"result":1}',
+]]);
+assert_true(($accepted['pin_result'] ?? null) === 1 && ($accepted['needs_pin'] ?? true) === false, 'code result 1 ' . json_encode($accepted));
+$rejected = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/x/ui_service/data/authenticationcode',
+    'payload' => '{"result":100}',
+]]);
+assert_true(($rejected['pin_result'] ?? null) === 100, 'code result 100 ' . json_encode($rejected));
+$issued = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/x/ui_service/data/authenticationcode',
+    'payload' => '{"accesstoken":"ACCESS","refreshtoken":"REFRESH"}',
+]]);
+assert_true(($issued['token'] ?? '') === 'ACCESS' && ($issued['refresh_token'] ?? '') === 'REFRESH', 'token on the code reply ' . json_encode($issued));
 
 $root = sys_get_temp_dir() . '/yarbo-hisense-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
@@ -334,12 +349,74 @@ $silent = $tv->command('hisense:192.168.1.50', 'off', []);
 assert_true(($silent['ok'] ?? false) === true && ($silent['on'] ?? null) === false, 'second login hears standby ' . json_encode($silent));
 assert_true($tries >= 2, 'a silent login is not the last try ' . $tries);
 
-$tv->setTransport(static function (string $host, array $profile, array $outgoing): array {
+$asked = [];
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$asked): array {
+    foreach ($outgoing as $item) {
+        $asked[] = (string) ($item['topic'] ?? '');
+    }
+
     return ['ok' => true, 'messages' => []];
 });
 $code = $tv->command('hisense:192.168.1.50', 'on', []);
-assert_true(($code['ok'] ?? true) === false, 'code request does not pretend to turn on ' . json_encode($code));
-assert_true(($code['tv']['needs_pin'] ?? false) === true, 'a code on the screen opens the box ' . json_encode($code));
-assert_true(str_contains((string) ($code['error'] ?? ''), 'Enter the code'), 'tells you to type the code ' . json_encode($code));
+assert_true(($code['ok'] ?? true) === false, 'unknown power does not pretend to turn on ' . json_encode($code));
+assert_true(!in_array('vidaa_app_connect', $asked, true), 'On must not show a new code ' . json_encode($asked));
+assert_true(($code['tv']['needs_pin'] ?? false) === true, 'settings can ask for the code ' . json_encode($code));
+assert_true(str_contains((string) ($code['error'] ?? ''), 'Show code'), 'points at the gear ' . json_encode($code));
+
+$asked = [];
+$shown = $tv->requestCode('hisense:192.168.1.50');
+assert_true(($shown['ok'] ?? false) === true, 'show code ' . json_encode($shown));
+assert_true(in_array('vidaa_app_connect', $asked, true), 'Show code asks once ' . json_encode($asked));
+
+$asked = [];
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$asked): array {
+    foreach ($outgoing as $item) {
+        $asked[] = $item;
+    }
+    $topics = array_map(static fn (array $item): string => (string) ($item['topic'] ?? ''), $outgoing);
+    if (in_array('authenticationcode', $topics, true)) {
+        return ['ok' => true, 'messages' => [
+            [
+                'topic' => '/remoteapp/mobile/x/ui_service/data/authenticationcode',
+                'payload' => '{"result":1,"accesstoken":"ACCESS","refreshtoken":"REFRESH"}',
+            ],
+            [
+                'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+                'payload' => '{"statetype":"remote_launcher"}',
+            ],
+        ]];
+    }
+
+    return [
+        'ok' => true,
+        'messages' => [[
+            'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+            'payload' => '{"statetype":"remote_launcher"}',
+        ]],
+    ];
+});
+$saved = $tv->submitPin('hisense:192.168.1.50', '1234');
+assert_true(($saved['ok'] ?? false) === true && ($saved['tv']['paired'] ?? false) === true, 'code stores the login ' . json_encode($saved));
+assert_true(($saved['tv']['on'] ?? null) === true, 'watching counts as on ' . json_encode($saved));
+$pinPayloads = array_map(static fn (array $item): string => (string) ($item['payload'] ?? ''), $asked);
+assert_true(in_array('{"authNum":1234}', $pinPayloads, true), 'code is sent as a number ' . json_encode($pinPayloads));
+
+$asked = [];
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$asked): array {
+    foreach ($outgoing as $item) {
+        $asked[] = (string) ($item['topic'] ?? '');
+    }
+
+    return ['ok' => true, 'messages' => [[
+        'topic' => '/remoteapp/mobile/x/ui_service/data/authenticationcode',
+        'payload' => '{"result":100}',
+    ]]];
+});
+$stored = json_decode((string) file_get_contents($storePath), true);
+$stored['tvs']['hisense:192.168.1.50']['token'] = '';
+file_put_contents($storePath, json_encode($stored));
+$bad = $tv->submitPin('hisense:192.168.1.50', '9999');
+assert_true(($bad['ok'] ?? true) === false, 'a refused code is not accepted ' . json_encode($bad));
+assert_true(str_contains((string) ($bad['error'] ?? ''), 'not accepted'), 'says the code was refused ' . json_encode($bad));
 
 echo "ok\n";

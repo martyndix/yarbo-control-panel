@@ -5423,6 +5423,7 @@ function patchHomeTvCard(d) {
         rec.input_name = d.input_name || '';
         rec.inputs = Array.isArray(d.inputs) ? d.inputs : [];
         rec.needs_pin = Boolean(d.needs_pin);
+        rec.paired = d.paired === true;
     }
     document.querySelectorAll(`[data-home-id="${CSS.escape(d.id)}"]`).forEach((card) => {
         card.classList.toggle('is-on', d.on === true);
@@ -6382,11 +6383,6 @@ function homeTvActionsHtml(d) {
     const select = options
         ? `<select data-home-tv-input="${escapeHtml(d.id)}" aria-label="TV input">${options}</select>`
         : '';
-    const askCode = d.needs_pin || d.power_known !== true;
-    const pin = askCode
-        ? `<input class="home-tv-pin" data-home-tv-pin="${escapeHtml(d.id)}" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="Code" aria-label="Code on the TV">
-           <button type="button" class="btn btn-secondary btn-compact" data-home-tv-pin-send="${escapeHtml(d.id)}">Send</button>`
-        : '';
     const statusText = d.needs_pin ? 'Code on the TV' : (d.status || '');
     const status = statusText
         ? `<span class="home-device-meta" title="${escapeHtml(d.detail || statusText)}">${escapeHtml(statusText)}</span>`
@@ -6394,7 +6390,6 @@ function homeTvActionsHtml(d) {
     return `<div class="home-device-actions">
         <button type="button" class="btn btn-secondary btn-compact" data-home-tv-power="${escapeHtml(d.id)}" data-home-tv-on="${on ? '0' : '1'}">${on ? 'Off' : 'On'}</button>
         ${select}
-        ${pin}
         ${status}
     </div>`;
 }
@@ -7201,7 +7196,6 @@ async function sendHomeTvPower(id, button) {
         }, 20000);
         if (!data.ok) {
             await loadHomeDashboard({ force: true, replace: true, skipTv: true });
-            if (data.tv?.needs_pin || data.tv?.power_known !== true) homeTvShowPin(id);
             throw new Error(data.error || 'TV command failed');
         }
         showToast(turnOn ? 'TV on' : 'TV off', 'success');
@@ -18783,8 +18777,8 @@ function homeTvShowPin(id) {
 }
 
 function homeTvOfferCode(devices) {
-    const tv = (devices || []).find((d) => d && d.kind === 'tv' && (d.needs_pin || d.power_known !== true));
-    if (tv) homeTvShowPin(tv.id);
+    const tv = (devices || []).find((d) => d && d.kind === 'tv' && (d.needs_pin || d.paired !== true));
+    homeTvShowPin(tv ? tv.id : '');
 }
 
 function homeTvFoundHtml(found) {
@@ -18873,6 +18867,28 @@ document.getElementById('home-tv-found')?.addEventListener('click', async (event
         showToast(err.message || 'Could not add the TV', 'error');
     } finally {
         btn.disabled = false;
+    }
+});
+document.getElementById('home-tv-pin-show')?.addEventListener('click', async () => {
+    const box = document.getElementById('home-tv-pin');
+    const id = box?.dataset.tvId || (homeDash?.devices || []).find((d) => d.kind === 'tv')?.id || '';
+    const btn = document.getElementById('home-tv-pin-show');
+    if (!id) {
+        homeTvStatus('Add the TV first');
+        return;
+    }
+    if (btn) btn.disabled = true;
+    try {
+        const data = await homeApi({ action: 'tv_code', id }, 20000);
+        if (!data.ok) throw new Error(data.error || 'The TV did not show a code');
+        homeTvShowPin(id);
+        homeTvStatus(data.tv?.paired ? 'This TV is already logged in' : 'Type the code on the TV. Showing it again replaces that code.');
+        await loadHomeDashboard({ force: true, skipTv: true });
+    } catch (err) {
+        homeTvStatus(err.message || 'The TV did not show a code');
+        showToast(err.message || 'The TV did not show a code', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
     }
 });
 document.getElementById('home-tv-pin-send')?.addEventListener('click', async () => {
