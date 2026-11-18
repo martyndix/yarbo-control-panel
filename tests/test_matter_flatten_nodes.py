@@ -7,6 +7,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -940,6 +941,40 @@ def main() -> int:
         raise SystemExit(f"occupancy motion status {occ}")
     if agent.matter_occupancy_occupied(0) is not False or agent.matter_occupancy_occupied(1) is not True:
         raise SystemExit("occupancy bitmap parse")
+    if agent.matter_occupancy_occupied({"Occupied": 0}) is not False:
+        raise SystemExit("occupancy dict 0")
+    if agent.matter_occupancy_occupied({"Occupied": 1}) is not True:
+        raise SystemExit("occupancy dict 1")
+    stuck = {
+        "id": "84:1",
+        "node_id": 84,
+        "endpoint": 1,
+        "kind": "sensor",
+        "has_motion": True,
+        "motion": True,
+        "on": True,
+        "motion_at": int(time.time()) - 120,
+        "status": "Motion",
+    }
+    kept = agent.stabilize_motion(stuck, {**stuck, "motion_at": int(time.time())})
+    if kept.get("motion_at") != stuck["motion_at"] or kept.get("motion") is not False:
+        raise SystemExit(f"stale occupancy snapshot refreshed motion {kept}")
+    agent._live_devices = [dict(stuck)]
+    agent._occupancy_idle.clear()
+    agent.expire_stale_motion()
+    expired = agent.live_row("84:1") or {}
+    if expired.get("motion") is not False or "Motion" in str(expired.get("status") or ""):
+        raise SystemExit(f"occupancy did not expire {expired}")
+    agent._reading_poll = True
+    agent.apply_attribute_event({"node_id": 84, "attribute_path": "1/1030/0", "value": 1})
+    if (agent.live_row("84:1") or {}).get("motion") is not False:
+        raise SystemExit("cached occupied read turned motion back on")
+    agent._reading_poll = False
+    agent.apply_attribute_event({"node_id": 84, "attribute_path": "1/1030/0", "value": 1})
+    woke = agent.live_row("84:1") or {}
+    if woke.get("motion") is not True or int(woke.get("motion_at") or 0) <= stuck["motion_at"]:
+        raise SystemExit(f"fresh occupancy report did not count as motion {woke}")
+    agent._reading_poll = False
 
     print("ok: 70 Hue Bridge lights flatten from Bridged Node + OnOff")
     return 0

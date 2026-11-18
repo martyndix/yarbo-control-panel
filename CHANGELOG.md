@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.370] - 2026-11-18
+
+### Fixed
+
+- An IKEA MYGGSPRAY added from Apple Home no longer sits on **Motion** after the room is empty, and a motion automation can fire the next time someone walks in. The sensor reports occupied once and then sleeps, so the panel kept that first reading and never saw a new rising edge. Occupied now lasts about a minute without a fresh report, a saved node list cannot turn it back on, and the Home row follows that live state. Matter agent **v116**.
+
 ## [4.0.369] - 2026-11-18
 
 ### Fixed

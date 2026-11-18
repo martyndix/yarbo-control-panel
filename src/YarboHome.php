@@ -4423,6 +4423,23 @@ final class YarboHome
         if (!empty($live['selected_areas'])) {
             $device['selected_areas'] = self::normalizeVacuumAreaIds($live['selected_areas']);
         }
+        foreach (['has_motion', 'has_open'] as $flag) {
+            if (array_key_exists($flag, $live)) {
+                $device[$flag] = (bool) $live[$flag];
+            }
+        }
+        if (array_key_exists('motion', $live) && $live['motion'] !== null) {
+            $device['motion'] = (bool) $live['motion'];
+        }
+        if (array_key_exists('open', $live) && $live['open'] !== null) {
+            $device['open'] = (bool) $live['open'];
+        }
+        if (isset($live['motion_at']) && is_numeric($live['motion_at']) && (int) $live['motion_at'] > 0) {
+            $device['motion_at'] = (int) $live['motion_at'];
+        }
+        if (array_key_exists('status', $live) && is_string($live['status']) && $live['status'] !== '') {
+            $device['status'] = $live['status'];
+        }
 
         return $device;
     }
