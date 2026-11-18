@@ -939,6 +939,10 @@ final class YarboHomeAutomations
      */
     private function liveSnapshot(): array
     {
+        try {
+            (new YarboHisense($this->projectRoot))->refreshStale(15);
+        } catch (\Throwable) {
+        }
         $rows = (new YarboHome($this->projectRoot))->automationDevices();
         $pw = $this->powerwallLiveRow();
         if ($pw !== null) {
@@ -2489,7 +2493,7 @@ final class YarboHomeAutomations
                 continue;
             }
             $out[$id] = [
-                'on' => array_key_exists('on', $row) ? (bool) $row['on'] : null,
+                'on' => array_key_exists('on', $row) ? ($row['on'] === null ? null : (bool) $row['on']) : null,
                 'open' => array_key_exists('open', $row) ? ($row['open'] === null ? null : (bool) $row['open']) : null,
                 'motion' => array_key_exists('motion', $row) ? ($row['motion'] === null ? null : (bool) $row['motion']) : null,
                 'motion_at' => isset($row['motion_at']) && is_numeric($row['motion_at']) ? (int) $row['motion_at'] : 0,
