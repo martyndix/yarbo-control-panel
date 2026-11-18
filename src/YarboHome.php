@@ -25,7 +25,7 @@ final class YarboHome
     public const CONTACT_DOOR = 'door';
     public const CONTACT_WINDOW = 'window';
     public const PAPER_MAX = 12;
-    public const PAPER_ACCESS_MAX = 36;
+    public const PAPER_ACCESS_MAX = 96;
     public const PAPER_HEAT_MAX = 12;
     /** Compact JSON names: long enough to fill a 480px PaperMono HOUSE row. */
     public const PAPER_NAME_MAX = 40;
@@ -803,7 +803,7 @@ final class YarboHome
             'restored_home' => $this->restoredHomeFrom,
             'doors_tile' => $this->unifiDoorsTileConfigured(),
             'doors_tile_sensors' => $this->unifiDoorSensorsTileConfigured(),
-            'unifi_doors' => $this->unifiDoorsPayload($store),
+            'unifi_doors' => $this->unifiDoorsPayload($store, $devices),
         ];
     }
 
@@ -3862,65 +3862,111 @@ final class YarboHome
     }
 
     /**
-     * Compact Access door/hub rows for the Home strip under Vestaboard.
-     * Independent of Show on Home — every lockable door is listed.
+     * Compact door and window rows for the Home strip under Vestaboard.
+     * UniFi lockable doors are always listed when the tile is on. UniFi contact
+     * sensors follow the sensors tick. Matter door/window contacts that are on
+     * Home (IKEA MYGGBETT and the same) are listed with the doors.
      *
      * @param array<string, mixed> $store
+     * @param list<array<string, mixed>> $homeDevices
      * @return list<array<string, mixed>>
      */
-    private function unifiDoorsPayload(array $store): array
+    private function unifiDoorsPayload(array $store, array $homeDevices = []): array
     {
-        if (!(new YarboHub($this->projectRoot))->enabled(YarboHub::MODULE_UNIFI)) {
-            return [];
-        }
         if (!$this->unifiDoorsTileConfigured()) {
-            return [];
-        }
-        try {
-            $rows = (new YarboUnifi($this->projectRoot))->doorsTileRows();
-        } catch (\Throwable) {
             return [];
         }
         $names = is_array($store['names'] ?? null) ? $store['names'] : [];
         $out = [];
-        foreach ($rows as $device) {
+        $unifiOn = (new YarboHub($this->projectRoot))->enabled(YarboHub::MODULE_UNIFI);
+        if ($unifiOn) {
+            try {
+                $rows = (new YarboUnifi($this->projectRoot))->doorsTileRows();
+            } catch (\Throwable) {
+                $rows = [];
+            }
+            foreach ($rows as $device) {
+                if (!is_array($device)) {
+                    continue;
+                }
+                $id = (string) ($device['id'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+                $defaultName = (string) ($device['name'] ?? $id);
+                $row = [
+                    'id' => $id,
+                    'name' => is_string($names[$id] ?? null) && $names[$id] !== '' ? $names[$id] : $defaultName,
+                    'kind' => (string) ($device['kind'] ?? YarboUnifi::KIND_DOOR),
+                    'source' => YarboUnifi::SOURCE,
+                    'gate' => (bool) ($device['gate'] ?? false),
+                    'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
+                    'status' => (string) ($device['status'] ?? ''),
+                ];
+                foreach ([
+                    'native_id',
+                    'door_id',
+                    'dps',
+                    'dps_label',
+                    'has_dps',
+                    'has_open',
+                    'open',
+                    'product',
+                    'open_changed_at',
+                    'temperature',
+                    'humidity',
+                ] as $key) {
+                    if (array_key_exists($key, $device)) {
+                        $row[$key] = $device[$key];
+                    }
+                }
+                $row['contact_kind'] = $this->contactRoleFor($row + $device, $store);
+                $row['can_assign_contact'] = self::isOpenCloseSensor($row + $device);
+                $out[] = $row;
+            }
+        }
+        $seen = [];
+        foreach ($out as $row) {
+            $seen[(string) ($row['id'] ?? '')] = true;
+        }
+        foreach ($homeDevices as $device) {
             if (!is_array($device)) {
                 continue;
             }
-            $id = (string) ($device['id'] ?? '');
-            if ($id === '') {
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($seen[$id]) || !empty($device['hidden'])) {
+                continue;
+            }
+            if (YarboUnifi::isHomeId($id) || ((string) ($device['source'] ?? '')) === YarboUnifi::SOURCE) {
+                continue;
+            }
+            if (!self::isOpenCloseSensor($device)) {
                 continue;
             }
             $defaultName = (string) ($device['name'] ?? $id);
             $row = [
                 'id' => $id,
                 'name' => is_string($names[$id] ?? null) && $names[$id] !== '' ? $names[$id] : $defaultName,
-                'kind' => (string) ($device['kind'] ?? YarboUnifi::KIND_DOOR),
-                'source' => YarboUnifi::SOURCE,
-                'gate' => (bool) ($device['gate'] ?? false),
-                'locked' => array_key_exists('locked', $device) ? (bool) $device['locked'] : null,
+                'kind' => 'sensor',
+                'source' => (string) ($device['source'] ?? 'matter'),
                 'status' => (string) ($device['status'] ?? ''),
+                'has_open' => true,
+                'product' => (string) ($device['product'] ?? ''),
+                'contact_kind' => (string) ($device['contact_kind'] ?? '') !== ''
+                    ? (string) $device['contact_kind']
+                    : $this->contactRoleFor($device, $store),
+                'can_assign_contact' => true,
             ];
-            foreach ([
-                'native_id',
-                'door_id',
-                'dps',
-                'dps_label',
-                'has_dps',
-                'has_open',
-                'open',
-                'product',
-                'open_changed_at',
-                'temperature',
-                'humidity',
-            ] as $key) {
+            if (array_key_exists('open', $device) && $device['open'] !== null) {
+                $row['open'] = self::paperContactOpen($device);
+            }
+            foreach (['temperature', 'humidity', 'open_changed_at'] as $key) {
                 if (array_key_exists($key, $device)) {
                     $row[$key] = $device[$key];
                 }
             }
-            $row['contact_kind'] = $this->contactRoleFor($row + $device, $store);
-            $row['can_assign_contact'] = self::isOpenCloseSensor($row + $device);
             $out[] = $row;
+            $seen[$id] = true;
         }
 
         return $this->applyOpenChanged($out, $store);

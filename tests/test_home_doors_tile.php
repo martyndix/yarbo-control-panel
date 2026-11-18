@@ -26,7 +26,46 @@ file_put_contents($root . '/data/unifi-config.json', json_encode([
     'show_on_home' => ['unifi:sensor:s1'],
 ], JSON_UNESCAPED_SLASHES));
 file_put_contents($root . '/data/home.json', json_encode([
-    'names' => ['unifi:door:garage' => 'Garage door'],
+    'names' => ['unifi:door:garage' => 'Garage door', '27:1' => 'Workshop window'],
+    'rooms' => ['27:1' => 'workshop'],
+    'room_defs' => [['id' => 'workshop', 'name' => 'Workshop']],
+    'contact_kind' => ['27:1' => 'window'],
+    'hidden' => ['29:1'],
+    'last_devices' => [
+        [
+            'id' => '27:1',
+            'node_id' => 27,
+            'name' => 'Workshop Door',
+            'kind' => 'sensor',
+            'source' => 'matter',
+            'product' => 'MYGGBETT',
+            'has_open' => true,
+            'open' => false,
+            'status' => 'Closed',
+        ],
+        [
+            'id' => '28:1',
+            'node_id' => 28,
+            'name' => 'Cellar',
+            'kind' => 'sensor',
+            'source' => 'matter',
+            'product' => 'MYGGSPRAY',
+            'has_motion' => true,
+            'motion' => false,
+            'status' => 'OK',
+        ],
+        [
+            'id' => '29:1',
+            'node_id' => 29,
+            'name' => 'Hidden door',
+            'kind' => 'sensor',
+            'source' => 'matter',
+            'product' => 'MYGGBETT',
+            'has_open' => true,
+            'open' => true,
+            'status' => 'Open',
+        ],
+    ],
 ], JSON_UNESCAPED_SLASHES));
 file_put_contents($root . '/data/home-automations.json', json_encode([
     'timezone' => 'Europe/Zurich',
@@ -185,8 +224,23 @@ assert_true(in_array('unifi:hub:h-gate', $tileIds, true), 'Home tile lists a bou
 assert_true(!in_array('unifi:hub:h-garage', $tileIds, true), 'Home tile does not duplicate the garage hub');
 assert_true(!in_array('unifi:sensor:s1', $tileIds, true), 'Home tile is doors only, not the PIR on Show on Home');
 assert_true(!in_array('unifi:sensor:side-door', $tileIds, true), 'door sensors stay off the tile until ticked');
+assert_true(in_array('27:1', $tileIds, true), 'Matter contact is on the doors and windows strip');
+assert_true(!in_array('28:1', $tileIds, true), 'Matter motion stays off the doors strip');
+assert_true(!in_array('29:1', $tileIds, true), 'hidden Matter contact stays off the doors strip');
+$matterDoor = null;
+foreach ($dash['unifi_doors'] ?? [] as $row) {
+    if (($row['id'] ?? '') === '27:1') {
+        $matterDoor = $row;
+    }
+}
+assert_true(is_array($matterDoor), 'Matter contact row is present');
+assert_true(($matterDoor['name'] ?? '') === 'Workshop window', 'doors strip uses the Home name');
+assert_true(($matterDoor['open'] ?? true) === false, 'closed Matter contact stays closed on the strip');
+assert_true(($matterDoor['contact_kind'] ?? '') === 'window', 'window assignment is on the strip');
+assert_true(($matterDoor['kind'] ?? '') === 'sensor', 'Matter contact is a sensor card');
 assert_true(($dash['doors_tile_sensors'] ?? true) === false, 'Home dashboard reports door sensors off');
 $homeIds = array_column($dash['devices'] ?? [], 'id');
+assert_true(in_array('27:1', $homeIds, true), 'Matter contact still shows in its room');
 assert_true(!in_array('unifi:door:garage', $homeIds, true), 'unticked door stays off the room grid');
 assert_true(in_array('unifi:sensor:s1', $homeIds, true), 'ticked sensor still on the room grid');
 

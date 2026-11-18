@@ -266,6 +266,7 @@ bool robotAreaOn[PAPERMONO_ROBOT_MAX][PAPERMONO_VAC_AREA_MAX];
 uint32_t robotVacHoldUntil = 0;
 uint32_t homeHoldUntil = 0;
 int accessCount = 0;
+int accessPage = 0;
 bool accessHaveItems = false;
 String accessIds[PAPERMONO_ACCESS_MAX];
 String accessNames[PAPERMONO_ACCESS_MAX];
@@ -913,7 +914,7 @@ String screenKey()
         + "|" + String(tabletCharging ? 1 : 0)
         + "|" + String(usingRemote ? 1 : 0)
         + "|" + String(robotsUi) + "|" + String(robotSel) + "|" + String(robotCount)
-        + "|" + String(accessCount) + "|" + String(accessHaveItems ? 1 : 0)
+        + "|" + String(accessCount) + "|" + String(accessPage) + "|" + String(accessHaveItems ? 1 : 0)
         + "|" + String(heatCount) + "|" + String(heatHaveItems ? 1 : 0);
     for (int i = 0; i < robotCount; i++) {
         key += "|" + robotIds[i] + "|" + robotStatus[i] + "|" + robotClean[i] + "|" + robotRooms[i];
@@ -1701,6 +1702,10 @@ void layoutAccessGrid(int n, int &cols, int &rows, int &bw, int &bh, int &gap, i
     x0 = 12;
     y0 = 104;
     int y1 = H - 10;
+    /* Leave a row for PREV / NEXT when the list is more than one page. */
+    if (accessCount > PAPERMONO_ACCESS_VISIBLE) {
+        y1 -= 70;
+    }
     int availH = y1 - y0;
     int availW = W - x0 * 2;
     cols = 2;
@@ -2063,10 +2068,53 @@ void drawHousePage(bool forceFull)
     finishEpdFrame();
 }
 
+int accessPageCount()
+{
+    if (accessCount <= 0) {
+        return 1;
+    }
+    int pages = (accessCount + PAPERMONO_ACCESS_VISIBLE - 1) / PAPERMONO_ACCESS_VISIBLE;
+    return pages < 1 ? 1 : pages;
+}
+
+void accessClampPage()
+{
+    int pages = accessPageCount();
+    if (accessPage < 0) {
+        accessPage = 0;
+    }
+    if (accessPage >= pages) {
+        accessPage = pages - 1;
+    }
+}
+
+int accessPageStart()
+{
+    accessClampPage();
+    return accessPage * PAPERMONO_ACCESS_VISIBLE;
+}
+
 int accessItemCount()
 {
-    int shown = accessCount < PAPERMONO_ACCESS_VISIBLE ? accessCount : PAPERMONO_ACCESS_VISIBLE;
+    int start = accessPageStart();
+    int shown = accessCount - start;
+    if (shown > PAPERMONO_ACCESS_VISIBLE) {
+        shown = PAPERMONO_ACCESS_VISIBLE;
+    }
     return shown < 0 ? 0 : shown;
+}
+
+void accessNavGeom(int &navY, int &navH, int &nw, int &gap)
+{
+    int W = M5.Display.width();
+    int H = M5.Display.height();
+    gap = 10;
+    navH = 56;
+    navY = H - 10 - navH;
+    nw = (W - 32 - gap) / 2;
+    if (nw < 40) {
+        nw = 40;
+    }
 }
 
 void accessButtonRect(int idx, int &x, int &y, int &w, int &h)
@@ -2092,18 +2140,22 @@ void drawAccessPage(bool forceFull)
     drawHeader();
     M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
     M5.Display.setTextDatum(TL_DATUM);
+    accessClampPage();
+    int start = accessPageStart();
     int shown = accessItemCount();
+    int pages = accessPageCount();
     if (shown == 0) {
         M5.Display.setTextSize(2);
         M5.Display.drawString("No doors or windows.", 16, 180);
     }
     for (int i = 0; i < shown; i++) {
+        int idx = start + i;
         int x, y, w, h;
         accessButtonRect(i, x, y, w, h);
-        bool window = accessRoles[i] == "window";
-        bool unlock = accessUnlock[i];
-        uint16_t bg = accessOnState[i] ? TFT_BLACK : TFT_WHITE;
-        uint16_t fg = accessOnState[i] ? TFT_WHITE : TFT_BLACK;
+        bool window = accessRoles[idx] == "window";
+        bool unlock = accessUnlock[idx];
+        uint16_t bg = accessOnState[idx] ? TFT_BLACK : TFT_WHITE;
+        uint16_t fg = accessOnState[idx] ? TFT_WHITE : TFT_BLACK;
         int rad = h / 6;
         if (rad > 12) {
             rad = 12;
@@ -2140,14 +2192,14 @@ void drawAccessPage(bool forceFull)
             }
         }
         int padL = 8 + glyphW + (lockH > 0 ? lockH + 6 : 4);
-        bool haveChanged = accessChanged[i].length() > 0;
+        bool haveChanged = accessChanged[idx].length() > 0;
         int timeH = haveChanged ? 16 : 0;
         int labelH = h - 8 - timeH;
         if (labelH < 10) {
             labelH = 10;
         }
         int nameCy = haveChanged ? (y + 6 + labelH / 2) : (y + h / 2);
-        drawFittedLabel(x + padL + (w - padL) / 2, nameCy, w - padL - 8, labelH, accessNames[i], fg, bg);
+        drawFittedLabel(x + padL + (w - padL) / 2, nameCy, w - padL - 8, labelH, accessNames[idx], fg, bg);
         int gy = y + (h - glyphH - timeH) / 2;
         if (gy < y + 4) {
             gy = y + 4;
@@ -2164,10 +2216,17 @@ void drawAccessPage(bool forceFull)
             M5.Display.setTextColor(fg, bg);
             M5.Display.setTextDatum(BR_DATUM);
             M5.Display.setTextSize(1);
-            M5.Display.drawString(clipLabelToWidth(accessChanged[i], w - 16), x + w - 8, y + h - 4);
+            M5.Display.drawString(clipLabelToWidth(accessChanged[idx], w - 16), x + w - 8, y + h - 4);
         }
         M5.Display.setTextColor(TFT_BLACK, TFT_WHITE);
         M5.Display.setTextDatum(TL_DATUM);
+    }
+    if (pages > 1) {
+        int navY, navH, nw, gap;
+        accessNavGeom(navY, navH, nw, gap);
+        drawButton(16, navY, nw, navH, "PREV", false);
+        drawButton(16 + nw + gap, navY, nw, navH,
+            "NEXT " + String(accessPage + 1) + "/" + String(pages), false);
     }
     drawPager();
     finishEpdFrame();
@@ -5523,6 +5582,7 @@ bool httpGetStatus()
             }
         }
         accessHaveItems = accessCount > 0;
+        accessClampPage();
     }
     bool holdHeat = heatHoldUntil != 0 && (int32_t) (millis() - heatHoldUntil) < 0;
     if (!holdHeat && doc["heat_items"].is<JsonArray>()) {
@@ -6214,17 +6274,35 @@ void handleHouseTouch(int x, int y)
 
 void handleAccessTouch(int x, int y)
 {
+    accessClampPage();
+    int pages = accessPageCount();
+    if (pages > 1) {
+        int navY, navH, nw, gap;
+        accessNavGeom(navY, navH, nw, gap);
+        if (y >= navY && y <= navY + navH) {
+            if (x < 16 + nw + gap / 2) {
+                accessPage = accessPage > 0 ? accessPage - 1 : pages - 1;
+            } else {
+                accessPage = (accessPage + 1) % pages;
+            }
+            lastDrawnKey = "";
+            drawScreen(false);
+            return;
+        }
+    }
+    int start = accessPageStart();
     int shown = accessItemCount();
     for (int i = 0; i < shown; i++) {
+        int idx = start + i;
         int bx, by, bw, bh;
         accessButtonRect(i, bx, by, bw, bh);
         if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) {
-            if (!accessUnlock[i]) {
+            if (!accessUnlock[idx]) {
                 return;
             }
             lastDrawnKey = "";
             drawScreen(false);
-            httpCommand("home_toggle", nullptr, nullptr, accessIds[i].c_str());
+            httpCommand("home_toggle", nullptr, nullptr, accessIds[idx].c_str());
             return;
         }
     }
