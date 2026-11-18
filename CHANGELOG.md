@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.371] - 2026-11-18
+
+### Fixed
+
+- A new UniFi UP Sense (UFP-SENSE) shows in the windows and doors strip as soon as Protect sees it, and now also in Ungrouped so it can be set to Door or Window and put in a room. The same row is on the PaperMono Access page. Motion sensors and a door-position sensor that already belongs to a lockable door stay off that list.
+
 ## [4.0.370] - 2026-11-18
 
 ### Fixed
