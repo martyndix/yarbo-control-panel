@@ -5320,6 +5320,9 @@ async function loadHomeDashboard(opts = {}) {
             if (autoDraft) renderHomeAutoTray();
             else renderHomeAutomations();
         }
+        if (!opts.patch && !opts.skipTv) {
+            homeRefreshTvsIfNeeded();
+        }
         homeLoadAborts = 0;
         ensureHomeStatePoll();
         if (!opts.patch) {
@@ -5407,6 +5410,30 @@ function ensureHomeStatePoll() {
 function homeDeviceRecord(id) {
     return [...(homeDash.devices || []), ...(homeDash.hidden_devices || []), ...(homeDash.unifi_doors || [])]
         .find((d) => d.id === id);
+}
+
+function patchHomeTvCard(d) {
+    const rec = homeDeviceRecord(d.id);
+    if (rec) {
+        rec.on = d.on === true ? true : (d.on === false ? false : null);
+        rec.power_known = d.power_known === true;
+        rec.status = d.status || '';
+        rec.input = d.input || '';
+        rec.input_name = d.input_name || '';
+        rec.inputs = Array.isArray(d.inputs) ? d.inputs : [];
+        rec.needs_pin = Boolean(d.needs_pin);
+    }
+    document.querySelectorAll(`[data-home-id="${CSS.escape(d.id)}"]`).forEach((card) => {
+        card.classList.toggle('is-on', d.on === true);
+        const actions = card.querySelector('.home-device-actions');
+        if (!actions) return;
+        const focus = document.activeElement;
+        if (focus && actions.contains(focus) && focus.matches('select')) return;
+        const wrap = document.createElement('div');
+        wrap.innerHTML = homeTvActionsHtml(d);
+        const next = wrap.firstElementChild;
+        if (next) actions.replaceWith(next);
+    });
 }
 
 function patchHomeDeviceVisual(id, on, extras = {}) {
@@ -5587,6 +5614,10 @@ function patchHomeDashboard(data) {
     }
     const next = [...(data.devices || []), ...(data.hidden_devices || [])];
     next.forEach((d) => {
+        if (String(d.kind || '') === 'tv') {
+            patchHomeTvCard(d);
+            return;
+        }
         if (d.motor_pending_off) {
             d.on = true;
         } else {
@@ -6322,8 +6353,24 @@ function ensureAutoOffTick() {
     autoOffTickTimer = window.setInterval(tickAutoOffCountdowns, 1000);
 }
 
+let homeTvRefreshAt = 0;
+
+async function homeRefreshTvsIfNeeded() {
+    const tvs = (homeDash?.devices || []).filter((d) => d.kind === 'tv');
+    if (!tvs.length) return;
+    const stale = tvs.some((d) => d.power_known !== true || !(Array.isArray(d.inputs) && d.inputs.length));
+    if (!stale || Date.now() - homeTvRefreshAt < 20000) return;
+    homeTvRefreshAt = Date.now();
+    try {
+        const data = await homeApi({ action: 'tv_refresh' }, 20000);
+        if (data?.ok) await loadHomeDashboard({ force: true, replace: true, skipTv: true });
+    } catch (err) {
+        // The tile keeps the last saved picture. The next Home open tries again.
+    }
+}
+
 function homeTvActionsHtml(d) {
-    const on = Boolean(d.on);
+    const on = d.on === true;
     const inputs = Array.isArray(d.inputs) ? d.inputs : [];
     const current = String(d.input || '');
     const options = inputs.map((source) => {
@@ -7143,9 +7190,12 @@ async function sendHomeTvPower(id, button) {
             kind: 'tv',
             input: turnOn ? input : '',
         }, 20000);
-        if (!data.ok) throw new Error(data.error || 'TV command failed');
+        if (!data.ok) {
+            await loadHomeDashboard({ force: true, replace: true, skipTv: true });
+            throw new Error(data.error || 'TV command failed');
+        }
         showToast(turnOn ? 'TV on' : 'TV off', 'success');
-        await loadHomeDashboard({ patch: true });
+        await loadHomeDashboard({ force: true, replace: true, skipTv: true });
     } catch (err) {
         showToast(err.message || 'TV command failed', 'error');
     } finally {
@@ -7164,9 +7214,12 @@ async function sendHomeTvInput(id, input, select) {
             kind: 'tv',
             input,
         }, 20000);
-        if (!data.ok) throw new Error(data.error || 'Could not change input');
+        if (!data.ok) {
+            await loadHomeDashboard({ force: true, replace: true, skipTv: true });
+            throw new Error(data.error || 'Could not change input');
+        }
         showToast('TV input', 'success');
-        await loadHomeDashboard({ patch: true });
+        await loadHomeDashboard({ force: true, replace: true, skipTv: true });
     } catch (err) {
         showToast(err.message || 'Could not change input', 'error');
     } finally {

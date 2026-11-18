@@ -32,6 +32,31 @@ assert_true(count($sources) === 2 && $sources[0]['name'] === 'Home' && $sources[
 assert_true(YarboHisense::powerFromState(['power' => 'standby']) === false, 'standby');
 assert_true(YarboHisense::powerFromState(['powerstate' => 1]) === true, 'on');
 assert_true(YarboHisense::powerFromState([]) === null, 'unknown power');
+assert_true(YarboHisense::powerFromState(['statetype' => 'fake_sleep_0']) === false, 'standby statetype');
+assert_true(YarboHisense::powerFromState(['statetype' => 'fake_sleep_1']) === true, 'waking is on');
+assert_true(YarboHisense::powerFromState(['statetype' => 'remote_launcher']) === true, 'home screen is on');
+assert_true(YarboHisense::powerFromState(['statetype' => 'sourceswitch']) === true, 'input change is on');
+assert_true(YarboHisense::powerFromState(['statetype' => 'livetv']) === true, 'live tv is on');
+assert_true(YarboHisense::powerFromState(['statetype' => 'remote_setting']) === true, 'settings menu is on');
+$rawList = YarboHisense::parseSources([
+    ['sourceid' => '1', 'displayname' => 'Home'],
+    ['sourceid' => '4', 'displayname' => 'AppleTV'],
+]);
+assert_true(count($rawList) === 2 && $rawList[1]['name'] === 'AppleTV', 'raw source list');
+$wrapped = YarboHisense::parseSources([
+    'sourcelist' => [['sourceid' => '2', 'sourcename' => 'HDMI1']],
+]);
+assert_true(count($wrapped) === 1 && $wrapped[0]['name'] === 'HDMI1', 'wrapped source list');
+$launcher = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+    'payload' => '{"statetype":"remote_launcher"}',
+]]);
+assert_true(($launcher['on'] ?? null) === true, 'broadcast home means on');
+$switched = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+    'payload' => '{"statetype":"sourceswitch","sourceid":"4","displayname":"AppleTV","sourcename":"HDMI1"}',
+]]);
+assert_true(($switched['on'] ?? null) === true && ($switched['source_id'] ?? '') === '4', 'broadcast input');
 
 $root = sys_get_temp_dir() . '/yarbo-hisense-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
@@ -101,6 +126,72 @@ $topics = array_map(static fn (array $item): string => (string) ($item['topic'] 
 assert_true(in_array('changesource', $topics, true), 'changesource sent');
 assert_true(!in_array('KEY_POWER', array_map(static fn (array $item): string => (string) ($item['payload'] ?? ''), $publishes), true), 'input while on skips power');
 
+$publishes = [];
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$publishes): array {
+    foreach ($outgoing as $item) {
+        $publishes[] = $item;
+    }
+
+    return [
+        'ok' => true,
+        'messages' => [[
+            'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+            'payload' => '{"statetype":"fake_sleep_0"}',
+        ]],
+    ];
+});
+$wake = $tv->command('hisense:192.168.1.50', 'on', []);
+assert_true(($wake['ok'] ?? false) === true && ($wake['on'] ?? null) === true, 'wake ' . json_encode($wake));
+assert_true(in_array('KEY_POWER', array_map(static fn (array $item): string => (string) ($item['payload'] ?? ''), $publishes), true), 'standby sends power');
+
+$storePath = $root . '/data/hisense.json';
+$stored = json_decode((string) file_get_contents($storePath), true);
+assert_true(is_array($stored), 'store');
+$stored['tvs']['hisense:192.168.1.50']['token'] = 'ACCESS';
+$stored['tvs']['hisense:192.168.1.50']['on'] = true;
+file_put_contents($storePath, json_encode($stored));
+$seenProfile = [];
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$seenProfile): array {
+    $seenProfile[] = $profile;
+
+    return [
+        'ok' => true,
+        'messages' => [
+            [
+                'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+                'payload' => '{"statetype":"remote_launcher"}',
+            ],
+            [
+                'topic' => '/remoteapp/mobile/x/ui_service/data/sourcelist',
+                'payload' => json_encode([
+                    ['sourceid' => '1', 'displayname' => 'Home'],
+                    ['sourceid' => '4', 'displayname' => 'AppleTV'],
+                    ['sourceid' => '5', 'displayname' => 'HDMI'],
+                ]),
+            ],
+        ],
+    ];
+});
+$again = $tv->command('hisense:192.168.1.50', 'on', []);
+assert_true(($again['ok'] ?? false) === true && ($again['tv']['on'] ?? null) === true, 'launcher is on ' . json_encode($again));
+assert_true(($seenProfile[0]['mode'] ?? '') === 'token' && ($seenProfile[0]['password'] ?? '') === 'ACCESS', 'saved code is the login');
+assert_true(count($again['tv']['inputs'] ?? []) === 3, 'inputs from the set ' . json_encode($again['tv']['inputs'] ?? []));
+$rows = $tv->homeRows();
+assert_true(($rows[0]['on'] ?? null) === true && ($rows[0]['power_known'] ?? false) === true, 'tile knows it is on ' . json_encode($rows[0]));
+assert_true(!in_array((string) ($rows[0]['status'] ?? ''), ['Off', 'Power unknown'], true), 'tile does not say off ' . json_encode($rows[0]['status'] ?? ''));
+
+$stored = json_decode((string) file_get_contents($storePath), true);
+$stored['tvs']['hisense:192.168.1.50']['on'] = false;
+$stored['tvs']['hisense:192.168.1.50']['state_at'] = 0;
+$stored['tvs']['hisense:192.168.1.50']['source_id'] = '4';
+$stored['tvs']['hisense:192.168.1.50']['source_name'] = 'AppleTV';
+file_put_contents($storePath, json_encode($stored));
+$refreshed = $tv->refreshStale(0);
+assert_true(($refreshed['ok'] ?? false) === true, 'refresh');
+$rows = $tv->homeRows();
+assert_true(($rows[0]['on'] ?? null) === true, 'refresh sees the remote turned it on ' . json_encode($rows[0]['on'] ?? null));
+assert_true(($rows[0]['input'] ?? '') === '4' || ($rows[0]['status'] ?? '') !== 'Off', 'refresh kept the picture');
+
 $auto = new YarboHomeAutomations($root);
 assert_true((new YarboHub($root))->enabled(YarboHub::MODULE_HOME), 'home module');
 $saved = $auto->save([
@@ -163,5 +254,40 @@ $button['press_gesture'] = 'hold';
 $third = $auto->tick([$button], $now + 6);
 assert_true(($third['fired'] ?? []) === [], 'stop does not start again');
 assert_true(count($commands) === 1 && ($commands[0]['command'] ?? '') === 'off', 'hold runs off ' . json_encode($commands));
+
+$savedTv = $auto->save([
+    'name' => 'When the TV comes on',
+    'triggers' => [[
+        'type' => 'device',
+        'id' => 'hisense:192.168.1.50',
+        'event' => 'turns_on',
+    ]],
+    'actions' => [[
+        'kind' => 'device',
+        'id' => 'hisense:192.168.1.50',
+        'command' => 'off',
+        'device_kind' => 'tv',
+    ]],
+]);
+assert_true(($savedTv['ok'] ?? false) === true, 'tv when save');
+$tvRule = $savedTv['automations'][count($savedTv['automations']) - 1] ?? [];
+$picture = [
+    'id' => 'hisense:192.168.1.50',
+    'kind' => 'tv',
+    'name' => 'Hisense TV',
+    'on' => null,
+];
+$commands = [];
+$auto->tick([$button, $picture], $now + 30);
+$picture['on'] = true;
+$learned = $auto->tick([$button, $picture], $now + 31);
+assert_true(!in_array($tvRule['id'] ?? '', $learned['fired'] ?? [], true), 'learning an already-on TV does not fire ' . json_encode($learned));
+$picture['on'] = false;
+$auto->tick([$button, $picture], $now + 32);
+$commands = [];
+$picture['on'] = true;
+$rose = $auto->tick([$button, $picture], $now + 33);
+assert_true(in_array($tvRule['id'] ?? '', $rose['fired'] ?? [], true), 'remote on fires ' . json_encode($rose));
+assert_true(count($commands) === 1 && ($commands[0]['command'] ?? '') === 'off', 'then runs ' . json_encode($commands));
 
 echo "ok\n";

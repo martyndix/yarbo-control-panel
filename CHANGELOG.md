@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.384] - 2026-11-18
+
+### Fixed
+
+- A Hisense TV that had accepted its code still showed as off, On did nothing, and the input list was missing. The set reports power as `remote_launcher` when it is on (including when the remote or Apple Home turned it on) and `fake_sleep_0` when it is in standby. Home now reads that, shows On or Off, and lists the inputs. Automations follow the same picture: **turns on** / **turns off**, and Then can switch on to a chosen input.
+
 ## [4.0.383] - 2026-11-18
 
 ### Changed
