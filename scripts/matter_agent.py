@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 119
+AGENT_VERSION = 120
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -252,11 +252,16 @@ OCC_POLL_INTERVAL_S = 20.0
 OCC_POLL_TIMEOUT = 1.5
 # Metering plugs (INSPELNING / GRILLPLATS) do not keep pushing watts. Without a
 # read, voltage stays on the pairing sample and motor mode cannot see the load.
-PLUG_POWER_POLL_S = 4.0
+# On plugs are read every poll pass. Off plugs are sampled on a slower timer
+# so a stuck voltage still clears without a meter read on every idle plug.
+PLUG_POWER_ON_S = 3.0
+PLUG_POWER_OFF_S = 20.0
 ELECTRICAL_POLL_ATTRS = (
     ATTR_ACTIVE_POWER,
     ATTR_VOLTAGE,
     ATTR_ACTIVE_CURRENT,
+)
+ELECTRICAL_RMS_ATTRS = (
     ATTR_RMS_VOLTAGE,
     ATTR_RMS_CURRENT,
 )
@@ -264,6 +269,7 @@ ATTR_PIR_OCCUPIED_TO_UNOCCUPIED = 0x0010
 _occ_poll_at = 0.0
 _occ_cursor = 0
 _plug_power_at = 0.0
+_plug_power_off_at = 0.0
 _plug_power_cursor = 0
 _reading_poll = False
 _occupancy_idle: set[str] = set()
@@ -6389,7 +6395,7 @@ def start_state_poll() -> None:
     _state_poll_started = True
 
     def loop() -> None:
-        global _light_poll_at, _occ_poll_at, _plug_power_at
+        global _light_poll_at, _occ_poll_at, _plug_power_at, _plug_power_off_at
         while True:
             try:
                 # Listen dump can take tens of seconds on a Hue Bridge. Do not
@@ -6404,14 +6410,18 @@ def start_state_poll() -> None:
                 # Subscriptions already push On/Off. Reading the whole house
                 # on every pass is what made the panel abort and then stop loading.
                 now = time.time()
+                # Meter reads go first so a Hue Bridge colour poll cannot freeze watts.
+                if now >= _plug_power_at:
+                    poll_plug_power(True)
+                    _plug_power_at = time.time() + PLUG_POWER_ON_S
+                if now >= _plug_power_off_at:
+                    poll_plug_power(False)
+                    _plug_power_off_at = time.time() + PLUG_POWER_OFF_S
                 if now >= _light_poll_at:
                     poll_light_attributes()
                     gap = LIGHT_POLL_LISTEN_S if _listening else LIGHT_POLL_FALLBACK_S
                     _light_poll_at = time.time() + gap
                 poll_vacuum_attributes()
-                if now >= _plug_power_at:
-                    poll_plug_power()
-                    _plug_power_at = time.time() + PLUG_POWER_POLL_S
                 if now >= _occ_poll_at:
                     poll_occupancy_attributes()
                     _occ_poll_at = time.time() + OCC_POLL_INTERVAL_S
@@ -8111,10 +8121,10 @@ def electrical_meter_endpoint(attributes: dict[str, Any]) -> int | None:
     return found
 
 
-def plug_meter_targets() -> list[tuple[int, int]]:
-    """(node_id, meter endpoint) for plugs whose watts motor mode and the tile need live."""
+def plug_meter_targets() -> list[tuple[int, int, bool]]:
+    """(node_id, meter endpoint, on) for plugs whose watts the tile and motor mode need."""
     motor = set(motor_mode_map())
-    targets: list[tuple[int, int]] = []
+    targets: list[tuple[int, int, bool]] = []
     seen: set[tuple[int, int]] = set()
     for row in current_live_devices():
         if not isinstance(row, dict) or str(row.get("kind") or "") != "plug":
@@ -8141,38 +8151,54 @@ def plug_meter_targets() -> list[tuple[int, int]]:
         if key in seen:
             continue
         seen.add(key)
-        targets.append(key)
+        targets.append((node_id, endpoint, bool(row.get("on"))))
     return targets
 
 
-def poll_plug_power() -> None:
-    """One short meter read. A whole-house electrical read is what made taps wait."""
+def read_plug_meter(node_id: int, endpoint: int) -> None:
+    """Active power, voltage, and current. RMS is a second read so a missing RMS attr cannot hide watts."""
+    primary = [attr_key(endpoint, ELECTRICAL_POWER, attr) for attr in ELECTRICAL_POLL_ATTRS]
+    if poll_paused() or not primary:
+        return
+    rpc = _poll_read(node_id, primary)
+    if rpc.get("ok"):
+        _poll_note_result(node_id, rpc)
+    else:
+        for path in primary:
+            if poll_paused():
+                return
+            one = _poll_read(node_id, [path])
+            if one.get("ok"):
+                _poll_note_result(node_id, one)
+    if poll_paused():
+        return
+    rms = [attr_key(endpoint, ELECTRICAL_POWER, attr) for attr in ELECTRICAL_RMS_ATTRS]
+    rms_rpc = _poll_read(node_id, rms)
+    if rms_rpc.get("ok"):
+        _poll_note_result(node_id, rms_rpc)
+
+
+def poll_plug_power(live: bool) -> None:
+    """On plugs every pass. Off plugs one at a time, on the slower timer."""
     global _plug_power_cursor
     if poll_paused():
         return
-    targets = plug_meter_targets()
+    now = time.time()
+    targets = [
+        item for item in plug_meter_targets()
+        if bool(item[2]) is live and not _poll_node_cooling(item[0], now)
+    ]
     if not targets:
         return
-    now = time.time()
-    ready = [item for item in targets if not _poll_node_cooling(item[0], now)]
-    if not ready:
+    if live:
+        for node_id, endpoint, _on in targets:
+            if poll_paused():
+                return
+            read_plug_meter(node_id, endpoint)
         return
-    node_id, endpoint = ready[_plug_power_cursor % len(ready)]
+    node_id, endpoint, _on = targets[_plug_power_cursor % len(targets)]
     _plug_power_cursor += 1
-    paths = [attr_key(endpoint, ELECTRICAL_POWER, attr) for attr in ELECTRICAL_POLL_ATTRS]
-    if poll_paused() or not paths:
-        return
-    rpc = _poll_read(node_id, paths)
-    if rpc.get("ok"):
-        _poll_note_result(node_id, rpc)
-        return
-    # A missing RMS attribute must not hide ActivePower on the same read.
-    for path in paths:
-        if poll_paused():
-            return
-        one = _poll_read(node_id, [path])
-        if one.get("ok"):
-            _poll_note_result(node_id, one)
+    read_plug_meter(node_id, endpoint)
 
 
 def poll_occupancy_attributes() -> None:

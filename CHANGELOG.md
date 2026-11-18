@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.376] - 2026-11-18
+
+### Fixed
+
+- A queued motor-mode **Off** stays obvious. The row turns amber, the button says **Cancel off**, and an **Off queued** chip stays up until the load drops or you cancel. A Home refresh was putting the normal Off button back a few seconds later.
+- Plug **W · V · A** keep moving. While the plug is on, the meter is read about every 3 seconds and the tile is repainted. While it is off, the meter is read about every 20 seconds so a stuck voltage or a leftover watt reading clears. Matter agent **v120**.
+
 ## [4.0.375] - 2026-11-18
 
 ### Fixed

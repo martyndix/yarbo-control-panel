@@ -3483,6 +3483,39 @@ html[data-theme="dark"] .papermono-presence.is-online.is-remote {
     box-shadow: inset 3px 0 0 var(--accent);
 }
 
+.home-device.is-pending-off {
+    background: color-mix(in srgb, var(--warning-text) 22%, var(--surface));
+    border-color: var(--warning-text);
+    box-shadow: inset 3px 0 0 var(--warning-text);
+}
+
+.home-device.is-pending-off .home-device-dot {
+    background: var(--warning-text);
+    box-shadow: 0 0 0.35rem var(--warning-text);
+}
+
+.home-device.is-pending-off .home-device-name {
+    color: var(--warning-text);
+}
+
+.home-pending-off,
+.home-device-actions [data-home-toggle].is-pending-off {
+    background: var(--warning-bg);
+    color: var(--warning-text);
+    border: 1px solid var(--warning-text);
+    font-weight: 750;
+}
+
+.home-pending-off {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.12rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
 .home-device--unavailable {
     opacity: 0.72;
 }
