@@ -73,6 +73,9 @@
 /data/hisense.json
 /data/hisense-client.pem
 /data/hisense-client.key
+/data/hisense-pair.json
+/data/hisense-pair.log
+/data/hisense-pin.json
 /data/button-press.json
 /data/sensor-history/
 /data/sensor-history.log

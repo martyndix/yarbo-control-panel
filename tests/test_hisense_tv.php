@@ -419,4 +419,37 @@ $bad = $tv->submitPin('hisense:192.168.1.50', '9999');
 assert_true(($bad['ok'] ?? true) === false, 'a refused code is not accepted ' . json_encode($bad));
 assert_true(str_contains((string) ($bad['error'] ?? ''), 'not accepted'), 'says the code was refused ' . json_encode($bad));
 
+$batches = [];
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$batches): array {
+    $batches[] = $outgoing;
+    $topics = array_map(static fn (array $item): string => (string) ($item['topic'] ?? ''), $outgoing);
+    if (in_array('vidaa_app_connect', $topics, true) && in_array('authenticationcode', $topics, true)) {
+        return ['ok' => true, 'messages' => [[
+            'topic' => '/remoteapp/mobile/x/ui_service/data/authenticationcode',
+            'payload' => '{"result":1,"accesstoken":"ACCESS","refreshtoken":"REFRESH"}',
+        ]]];
+    }
+
+    return ['ok' => true, 'messages' => [[
+        'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+        'payload' => '{"statetype":"remote_launcher"}',
+    ]]];
+});
+$held = $tv->finishHeldPin('hisense:192.168.1.50', static fn (): string => '2319');
+assert_true(($held['ok'] ?? false) === true && ($held['tv']['paired'] ?? false) === true, 'same session stores the login ' . json_encode($held));
+assert_true(($held['tv']['on'] ?? null) === true, 'same session sees the set on ' . json_encode($held));
+$together = 0;
+$payloads = [];
+foreach ($batches as $batch) {
+    $topics = array_map(static fn (array $item): string => (string) ($item['topic'] ?? ''), $batch);
+    if (in_array('vidaa_app_connect', $topics, true) && in_array('authenticationcode', $topics, true)) {
+        $together++;
+    }
+    foreach ($batch as $item) {
+        $payloads[] = (string) ($item['payload'] ?? '');
+    }
+}
+assert_true($together === 1, 'code is sent on the session that asked for it ' . json_encode($batches));
+assert_true(in_array('{"authNum":2319}', $payloads, true), 'held code is a number ' . json_encode($payloads));
+
 echo "ok\n";
