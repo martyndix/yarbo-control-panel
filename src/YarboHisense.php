@@ -142,6 +142,26 @@ final class YarboHisense
             return ['ok' => false, 'error' => 'Enter the code shown on the TV'];
         }
         $host = (string) ($row['host'] ?? '');
+        if ($this->transport === null && $this->pairBusy($id)) {
+            $stamp = sprintf('%.6F', microtime(true));
+            $this->writePinFile($id, $pin, $stamp);
+            $status = $this->waitPairDone($id, $stamp, 22.0);
+            $fresh = $this->load();
+            $row = is_array($fresh['tvs'][$id] ?? null) ? $fresh['tvs'][$id] : $row;
+            if (($status['status'] ?? '') === 'ok' && trim((string) ($row['token'] ?? '')) !== '') {
+                $row['needs_pin'] = false;
+
+                return ['ok' => true, 'tv' => $this->publicRow($row)];
+            }
+            $row['needs_pin'] = true;
+            $row = $this->persist($id, $row);
+            $error = trim((string) ($status['error'] ?? ''));
+            if ($error === '') {
+                $error = 'The TV did not take that code. Tap Show code once and enter the new one.';
+            }
+
+            return ['ok' => false, 'error' => $error, 'tv' => $this->publicRow($row)];
+        }
         // Firmware 9 compares the code as a number. A quoted code connects and
         // then comes back as "not this code", which used to be reported as accepted.
         $result = $this->exchange($host, [
@@ -177,11 +197,17 @@ final class YarboHisense
         if (trim((string) ($row['token'] ?? '')) === '') {
             $row['needs_pin'] = true;
             $row['error'] = 'The TV did not take that code';
+            $row['heard'] = self::heardSummary(is_array($result['messages'] ?? null) ? $result['messages'] : []);
             $row = $this->persist($id, $row);
+            $heard = trim((string) $row['heard']);
+            $error = 'The TV did not take that code. Tap Show code once and enter the new one.';
+            if ($heard !== '') {
+                $error .= ' The TV sent: ' . $heard;
+            }
 
             return [
                 'ok' => false,
-                'error' => 'The TV did not take that code. Open the gear, tap Show code, and enter the new one.',
+                'error' => $error,
                 'tv' => $this->publicRow($row),
             ];
         }
@@ -218,6 +244,40 @@ final class YarboHisense
         if (trim((string) ($row['token'] ?? '')) !== '') {
             return ['ok' => true, 'tv' => $this->publicRow($row)];
         }
+        if ($this->transport === null) {
+            if (!$this->pairBusy($id)) {
+                @unlink($this->pinPath());
+                $this->spawnPair($id);
+            }
+            $status = [];
+            $deadline = microtime(true) + 10;
+            while (microtime(true) < $deadline) {
+                $status = $this->readPairStatus();
+                if ((string) ($status['id'] ?? '') !== $id) {
+                    usleep(200000);
+                    continue;
+                }
+                if (($status['status'] ?? '') === 'waiting' || ($status['status'] ?? '') === 'error') {
+                    break;
+                }
+                usleep(200000);
+            }
+            $row['needs_pin'] = true;
+            $row = $this->persist($id, $row);
+            if (($status['status'] ?? '') === 'error') {
+                return [
+                    'ok' => false,
+                    'error' => (string) ($status['error'] ?? 'The TV did not show a code'),
+                    'tv' => $this->publicRow($row),
+                ];
+            }
+
+            return [
+                'ok' => ($status['status'] ?? '') === 'waiting',
+                'error' => ($status['status'] ?? '') === 'waiting' ? '' : 'The TV did not show a code',
+                'tv' => $this->publicRow($row),
+            ];
+        }
         $locked = $this->lock(true);
         try {
             $row = $this->readRow($row, 3.5, true);
@@ -233,6 +293,91 @@ final class YarboHisense
                 $this->unlock();
             }
         }
+    }
+
+    /**
+     * Stay connected from the on-screen code through Send. A new connection
+     * is a different login, and this firmware ignores the code there.
+     *
+     * @param null|callable(): string $pollPin
+     * @return array<string, mixed>
+     */
+    public function finishHeldPin(string $id, ?callable $pollPin = null): array
+    {
+        $id = trim($id);
+        $this->writePairStatus($id, 'starting');
+        $store = $this->load();
+        $row = is_array($store['tvs'][$id] ?? null) ? $store['tvs'][$id] : null;
+        if ($row === null) {
+            $this->writePairStatus($id, 'error', 'Add the TV first');
+
+            return ['ok' => false, 'error' => 'Add the TV first'];
+        }
+        $host = (string) ($row['host'] ?? '');
+        $pinAt = '';
+        $announced = false;
+        $poll = $pollPin ?? function () use ($id, &$announced, &$pinAt): string {
+            if (!$announced) {
+                $this->writePairStatus($id, 'waiting');
+                $announced = true;
+            }
+            $found = $this->readPinFile($id);
+            if ($found['pin'] !== '') {
+                $pinAt = $found['at'];
+                @unlink($this->pinPath());
+            }
+
+            return $found['pin'];
+        };
+        $result = $this->holdPair($host, $poll);
+        $messages = is_array($result['messages'] ?? null) ? $result['messages'] : [];
+        $parsed = self::interpretMessages($messages);
+        $row = $this->mergeRead($row, $parsed, (string) ($result['mode'] ?? ''));
+        $heard = self::heardSummary($messages);
+        $row['heard'] = $heard;
+        if (!($result['ok'] ?? false)) {
+            $error = (string) ($result['error'] ?? 'The TV did not show a code');
+            $row['needs_pin'] = true;
+            $row = $this->persist($id, $row);
+            $this->writePairStatus($id, 'error', $error, $heard, $pinAt);
+
+            return ['ok' => false, 'error' => $error, 'tv' => $this->publicRow($row)];
+        }
+        $pinResult = $parsed['pin_result'];
+        if ($pinResult !== null && $pinResult !== 1) {
+            $error = 'That code was not accepted. Tap Show code and enter the code on the TV now.';
+            $row['needs_pin'] = true;
+            $row = $this->persist($id, $row);
+            $this->writePairStatus($id, 'error', $error, $heard, $pinAt);
+
+            return ['ok' => false, 'error' => $error, 'tv' => $this->publicRow($row)];
+        }
+        if (trim((string) ($row['token'] ?? '')) === '') {
+            $error = 'The TV did not take that code. Tap Show code once and enter the new one.';
+            if ($heard !== '') {
+                $error .= ' The TV sent: ' . $heard;
+            }
+            $row['needs_pin'] = true;
+            $row = $this->persist($id, $row);
+            $this->writePairStatus($id, 'error', $error, $heard, $pinAt);
+
+            return ['ok' => false, 'error' => $error, 'tv' => $this->publicRow($row)];
+        }
+        $row['needs_pin'] = false;
+        $row['error'] = '';
+        $row['connected'] = true;
+        $row = $this->persist($id, $row);
+        if ($this->lock(true)) {
+            try {
+                $row = $this->readRow($row, 3.0);
+                $row = $this->persist($id, $row);
+            } finally {
+                $this->unlock();
+            }
+        }
+        $this->writePairStatus($id, 'ok', '', $heard, $pinAt);
+
+        return ['ok' => true, 'tv' => $this->publicRow($row)];
     }
 
     public function remove(string $id): bool
@@ -259,6 +404,13 @@ final class YarboHisense
         $row = is_array($store['tvs'][$id] ?? null) ? $store['tvs'][$id] : null;
         if ($row === null) {
             return ['ok' => false, 'error' => 'That TV is not added'];
+        }
+        if ($this->pairBusy($id)) {
+            return [
+                'ok' => false,
+                'error' => 'Type the code on the TV and press Send code.',
+                'tv' => $this->publicRow($row),
+            ];
         }
         $host = (string) ($row['host'] ?? '');
         if (!in_array($action, ['on', 'off', 'toggle', 'input'], true)) {
@@ -408,6 +560,9 @@ final class YarboHisense
                 }
                 $at = (int) ($row['state_at'] ?? 0);
                 if ($maxAge > 0 && $at > 0 && ($now - $at) < $maxAge) {
+                    continue;
+                }
+                if ($this->pairBusy((string) $id)) {
                     continue;
                 }
                 $store['tvs'][$id] = $this->withoutReadKeys($this->readRow($row, 1.8));
@@ -950,6 +1105,9 @@ final class YarboHisense
         if ($host === '') {
             return ['ok' => false, 'error' => 'Enter the TV IP address'];
         }
+        if ($this->transport === null && $this->pairBusy(self::ID_PREFIX . $host)) {
+            return ['ok' => false, 'error' => 'Type the code on the TV and press Send code.'];
+        }
         $uuid = $this->clientUuid();
         $errors = [];
         $askedState = false;
@@ -1135,6 +1293,315 @@ final class YarboHisense
         } catch (\Throwable $e) {
             return ['ok' => false, 'error' => self::friendlyMqttError($e->getMessage())];
         }
+    }
+
+    /**
+     * @param callable(): string $pollPin
+     * @return array<string, mixed>
+     */
+    private function holdPair(string $host, callable $pollPin): array
+    {
+        $profile = null;
+        foreach ($this->profiles($this->clientUuid(), '') as $candidate) {
+            if (($candidate['mode'] ?? '') === 'vidaa') {
+                $profile = $candidate;
+                break;
+            }
+        }
+        if ($profile === null) {
+            return ['ok' => false, 'error' => 'The TV login is not available'];
+        }
+        if ($this->transport !== null) {
+            $pin = (string) $pollPin();
+            $result = ($this->transport)($host, $profile, [
+                ['topic' => 'vidaa_app_connect', 'payload' => self::appConnectPayload()],
+                ['topic' => 'authenticationcode', 'payload' => json_encode(['authNum' => (int) $pin]) ?: ''],
+            ], 1.0);
+            if (!is_array($result)) {
+                return ['ok' => false, 'error' => 'The TV did not answer'];
+            }
+            $result['mode'] = (string) ($profile['mode'] ?? 'vidaa');
+
+            return $result;
+        }
+
+        return $this->mqttHoldPin($host, $profile, $pollPin);
+    }
+
+    /**
+     * One MQTT session: show the code, wait, then send it before disconnecting.
+     *
+     * @param array<string, mixed> $profile
+     * @param callable(): string $pollPin
+     * @return array<string, mixed>
+     */
+    private function mqttHoldPin(string $host, array $profile, callable $pollPin): array
+    {
+        $clientId = (string) ($profile['client_id'] ?? 'yarbo');
+        $messages = [];
+        try {
+            $client = new MqttClient($host, self::PORT, $clientId, MqttClient::MQTT_3_1_1);
+            $settings = (new ConnectionSettings())
+                ->setUsername((string) ($profile['username'] ?? ''))
+                ->setPassword((string) ($profile['password'] ?? ''))
+                ->setConnectTimeout(4)
+                ->setSocketTimeout(8);
+            if (!empty($profile['tls'])) {
+                $settings = $settings
+                    ->setUseTls(true)
+                    ->setTlsVerifyPeer(false)
+                    ->setTlsVerifyPeerName(false)
+                    ->setTlsSelfSignedAllowed(true);
+                $cert = (string) ($profile['cert'] ?? '');
+                $key = (string) ($profile['key'] ?? '');
+                if ($cert !== '' && $key !== '') {
+                    $settings = $settings
+                        ->setTlsClientCertificateFile($cert)
+                        ->setTlsClientCertificateKeyFile($key);
+                }
+            }
+            $client->connect($settings, true);
+            $base = '/remoteapp/mobile/' . $clientId;
+            foreach ([
+                $base . '/ui_service/data/sourcelist',
+                $base . '/ui_service/data/state',
+                $base . '/ui_service/data/authentication',
+                $base . '/ui_service/data/authenticationcode',
+                $base . '/ui_service/data/authenticationcodeclose',
+                $base . '/ui_service/data/authenticationcodetoast',
+                $base . '/ui_service/data/tokenissuance',
+                $base . '/ui_service/data/vidaa_app_connect',
+                $base . '/platform_service/data/authentication',
+                $base . '/platform_service/data/authenticationcode',
+                $base . '/platform_service/data/tokenissuance',
+                $base . '/platform_service/data/gettoken',
+                $base . '/platform_service/data/state',
+                $base . '/platform_service/data/sourcelist',
+                '/remoteapp/mobile/broadcast/ui_service/state',
+                '/remoteapp/mobile/broadcast/ui_service/data/state',
+            ] as $topic) {
+                $client->subscribe($topic, static function (string $topic, string $payload) use (&$messages): void {
+                    $messages[] = ['topic' => $topic, 'payload' => $payload];
+                }, 0);
+            }
+            $started = microtime(true);
+            $client->loopOnce($started, true);
+            $client->publish(
+                '/remoteapp/tv/ui_service/' . $clientId . '/actions/vidaa_app_connect',
+                self::appConnectPayload(),
+                0
+            );
+            $pin = '';
+            $pinDeadline = microtime(true) + 75;
+            while ($pin === '' && microtime(true) < $pinDeadline) {
+                $client->loopOnce($started, true);
+                $pin = preg_replace('/\D+/', '', (string) $pollPin()) ?? '';
+                if (strlen($pin) < 4) {
+                    $pin = '';
+                }
+            }
+            if ($pin === '') {
+                try {
+                    $client->disconnect();
+                } catch (\Throwable) {
+                }
+
+                return ['ok' => false, 'error' => 'The code disappeared. Tap Show code again.', 'messages' => $messages, 'mode' => 'vidaa'];
+            }
+            $client->publish(
+                '/remoteapp/tv/ui_service/' . $clientId . '/actions/authenticationcode',
+                json_encode(['authNum' => (int) $pin]) ?: '',
+                0
+            );
+            $followed = false;
+            $deadline = microtime(true) + 15;
+            while (microtime(true) < $deadline) {
+                $client->loopOnce($started, true);
+                $parsed = self::interpretMessages($messages);
+                if (!$followed && $parsed['pin_result'] === 1) {
+                    $followed = true;
+                    $client->publish(
+                        '/remoteapp/tv/platform_service/' . $clientId . '/data/gettoken',
+                        '{"refreshtoken":""}',
+                        0
+                    );
+                    $client->publish(
+                        '/remoteapp/tv/ui_service/' . $clientId . '/actions/authenticationcodeclose',
+                        '',
+                        0
+                    );
+                }
+                if ($parsed['pin_result'] !== null && $parsed['pin_result'] !== 1) {
+                    break;
+                }
+                if ($parsed['token'] !== '') {
+                    break;
+                }
+            }
+            try {
+                $client->disconnect();
+            } catch (\Throwable) {
+            }
+
+            return ['ok' => true, 'messages' => $messages, 'mode' => 'vidaa'];
+        } catch (\Throwable $e) {
+            return ['ok' => false, 'error' => self::friendlyMqttError($e->getMessage()), 'messages' => $messages];
+        }
+    }
+
+    private static function appConnectPayload(): string
+    {
+        return json_encode([
+            'app_version' => 2,
+            'connect_result' => 0,
+            'device_type' => 'Mobile App',
+        ], JSON_UNESCAPED_SLASHES) ?: '';
+    }
+
+    private function pairBusy(string $id): bool
+    {
+        $status = $this->readPairStatus();
+        if ((string) ($status['id'] ?? '') !== $id) {
+            return false;
+        }
+        if (!in_array((string) ($status['status'] ?? ''), ['starting', 'waiting'], true)) {
+            return false;
+        }
+        $pid = (int) ($status['pid'] ?? 0);
+        if ($pid === getmypid()) {
+            return false;
+        }
+
+        return $this->pidAlive($pid);
+    }
+
+    private function pidAlive(int $pid): bool
+    {
+        if ($pid <= 0) {
+            return false;
+        }
+        if (function_exists('posix_kill')) {
+            return @posix_kill($pid, 0);
+        }
+
+        return is_dir('/proc/' . $pid);
+    }
+
+    private function spawnPair(string $id): void
+    {
+        $script = $this->projectRoot . '/scripts/hisense_pair.php';
+        if (!is_file($script)) {
+            return;
+        }
+        $log = $this->projectRoot . '/data/hisense-pair.log';
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $command = sprintf(
+            'cd %s && nohup %s %s %s >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($id),
+            escapeshellarg($log)
+        );
+        $process = @proc_open(
+            ['bash', '-c', $command],
+            [0 => ['pipe', 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']],
+            $pipes,
+            $this->projectRoot
+        );
+        if (!is_resource($process)) {
+            return;
+        }
+        if (isset($pipes[0]) && is_resource($pipes[0])) {
+            fclose($pipes[0]);
+        }
+        proc_close($process);
+    }
+
+    /**
+     * @return array{pin: string, at: string}
+     */
+    private function readPinFile(string $id): array
+    {
+        $json = json_decode((string) @file_get_contents($this->pinPath()), true);
+        if (!is_array($json) || (string) ($json['id'] ?? '') !== $id) {
+            return ['pin' => '', 'at' => ''];
+        }
+        $pin = preg_replace('/\D+/', '', (string) ($json['pin'] ?? '')) ?? '';
+        if (strlen($pin) < 4) {
+            return ['pin' => '', 'at' => ''];
+        }
+
+        return ['pin' => $pin, 'at' => (string) ($json['at'] ?? '')];
+    }
+
+    private function writePinFile(string $id, string $pin, string $stamp): void
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        file_put_contents($this->pinPath(), json_encode([
+            'id' => $id,
+            'pin' => $pin,
+            'at' => $stamp,
+        ], JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function waitPairDone(string $id, string $stamp, float $wait): array
+    {
+        $deadline = microtime(true) + $wait;
+        $status = [];
+        while (microtime(true) < $deadline) {
+            $status = $this->readPairStatus();
+            $done = in_array((string) ($status['status'] ?? ''), ['ok', 'error'], true);
+            if ((string) ($status['id'] ?? '') === $id && (string) ($status['pin_at'] ?? '') === $stamp && $done) {
+                return $status;
+            }
+            usleep(200000);
+        }
+
+        return $status;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function readPairStatus(): array
+    {
+        $json = json_decode((string) @file_get_contents($this->pairStatusPath()), true);
+
+        return is_array($json) ? $json : [];
+    }
+
+    private function writePairStatus(string $id, string $status, string $error = '', string $heard = '', string $pinAt = ''): void
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
+        }
+        file_put_contents($this->pairStatusPath(), json_encode([
+            'id' => $id,
+            'status' => $status,
+            'error' => $error,
+            'heard' => $heard,
+            'pid' => getmypid(),
+            'at' => microtime(true),
+            'pin_at' => $pinAt,
+        ], JSON_UNESCAPED_SLASHES));
+    }
+
+    private function pinPath(): string
+    {
+        return $this->projectRoot . '/data/hisense-pin.json';
+    }
+
+    private function pairStatusPath(): string
+    {
+        return $this->projectRoot . '/data/hisense-pair.json';
     }
 
     /**

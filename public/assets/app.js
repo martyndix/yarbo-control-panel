@@ -6360,6 +6360,7 @@ let homeTvRefreshAt = 0;
 async function homeRefreshTvsIfNeeded() {
     const tvs = (homeDash?.devices || []).filter((d) => d.kind === 'tv');
     if (!tvs.length) return;
+    if (tvs.some((d) => d.needs_pin || d.paired !== true)) return;
     const stale = tvs.some((d) => d.power_known !== true || !(Array.isArray(d.inputs) && d.inputs.length));
     if (!stale || Date.now() - homeTvRefreshAt < 20000) return;
     homeTvRefreshAt = Date.now();
@@ -18882,7 +18883,7 @@ document.getElementById('home-tv-pin-show')?.addEventListener('click', async () 
         const data = await homeApi({ action: 'tv_code', id }, 20000);
         if (!data.ok) throw new Error(data.error || 'The TV did not show a code');
         homeTvShowPin(id);
-        homeTvStatus(data.tv?.paired ? 'This TV is already logged in' : 'Type the code on the TV. Showing it again replaces that code.');
+        homeTvStatus(data.tv?.paired ? 'This TV is already logged in' : 'Type the code now on the TV, then press Send code.');
         await loadHomeDashboard({ force: true, skipTv: true });
     } catch (err) {
         homeTvStatus(err.message || 'The TV did not show a code');

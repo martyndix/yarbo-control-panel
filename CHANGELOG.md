@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.388] - 2026-11-18
+
+### Fixed
+
+- Sending the Hisense code opened a second login, so the set ignored it and said it was not taken. **Show code** keeps that login open until **Send code**. On and Off wait until that finishes, so they do not replace the code on the screen.
+
 ## [4.0.387] - 2026-11-18
 
 ### Fixed
