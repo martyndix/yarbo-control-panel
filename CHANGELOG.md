@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.385] - 2026-11-18
+
+### Fixed
+
+- The Hisense row could connect and still say **No state from the TV**. It now logs in the way the VIDAA app does, tries the saved code and then the usual login, and reads power from a nested or plain state message. If the set shows a code, type it in the box on the TV row.
+
 ## [4.0.384] - 2026-11-18
 
 ### Fixed

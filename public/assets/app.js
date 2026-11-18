@@ -5428,7 +5428,7 @@ function patchHomeTvCard(d) {
         const actions = card.querySelector('.home-device-actions');
         if (!actions) return;
         const focus = document.activeElement;
-        if (focus && actions.contains(focus) && focus.matches('select')) return;
+        if (focus && actions.contains(focus) && (focus.matches('select') || focus.matches('input'))) return;
         const wrap = document.createElement('div');
         wrap.innerHTML = homeTvActionsHtml(d);
         const next = wrap.firstElementChild;
@@ -6381,8 +6381,14 @@ function homeTvActionsHtml(d) {
     const select = options
         ? `<select data-home-tv-input="${escapeHtml(d.id)}" aria-label="TV input">${options}</select>`
         : '';
-    const pin = d.needs_pin ? '<span class="home-device-meta">Code on the TV</span>' : '';
-    const status = !pin && d.status ? `<span class="home-device-meta">${escapeHtml(d.status)}</span>` : pin;
+    const pin = d.needs_pin
+        ? `<input class="home-tv-pin" data-home-tv-pin="${escapeHtml(d.id)}" inputmode="numeric" maxlength="8" autocomplete="off" placeholder="Code" aria-label="Code on the TV">
+           <button type="button" class="btn btn-secondary btn-compact" data-home-tv-pin-send="${escapeHtml(d.id)}">Send</button>`
+        : '';
+    const statusText = d.needs_pin ? 'Code on the TV' : (d.status || '');
+    const status = statusText
+        ? `<span class="home-device-meta" title="${escapeHtml(d.detail || statusText)}">${escapeHtml(statusText)}</span>`
+        : '';
     return `<div class="home-device-actions">
         <button type="button" class="btn btn-secondary btn-compact" data-home-tv-power="${escapeHtml(d.id)}" data-home-tv-on="${on ? '0' : '1'}">${on ? 'Off' : 'On'}</button>
         ${select}
@@ -7203,6 +7209,27 @@ async function sendHomeTvPower(id, button) {
     }
 }
 
+async function sendHomeTvPin(id, button) {
+    if (!id) return;
+    const card = document.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
+    const pin = card?.querySelector('[data-home-tv-pin]')?.value.trim() || '';
+    if (!pin) {
+        showToast('Enter the code shown on the TV', 'error');
+        return;
+    }
+    if (button) button.disabled = true;
+    try {
+        const data = await homeApi({ action: 'tv_pin', id, pin }, 30000);
+        if (!data.ok) throw new Error(data.error || 'The TV did not accept the code');
+        showToast('TV code accepted', 'success');
+        await loadHomeDashboard({ force: true, replace: true, skipTv: true });
+    } catch (err) {
+        showToast(err.message || 'The TV did not accept the code', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 async function sendHomeTvInput(id, input, select) {
     if (!id || !input) return;
     if (select) select.disabled = true;
@@ -7802,6 +7829,11 @@ function bindHomeDashboard() {
         const tvPower = event.target.closest('[data-home-tv-power]');
         if (tvPower) {
             await sendHomeTvPower(tvPower.getAttribute('data-home-tv-power') || '', tvPower);
+            return;
+        }
+        const tvPin = event.target.closest('[data-home-tv-pin-send]');
+        if (tvPin) {
+            await sendHomeTvPin(tvPin.getAttribute('data-home-tv-pin-send') || '', tvPin);
             return;
         }
         const btn = event.target.closest('[data-home-toggle]');

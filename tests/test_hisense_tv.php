@@ -57,6 +57,22 @@ $switched = YarboHisense::interpretMessages([[
     'payload' => '{"statetype":"sourceswitch","sourceid":"4","displayname":"AppleTV","sourcename":"HDMI1"}',
 ]]);
 assert_true(($switched['on'] ?? null) === true && ($switched['source_id'] ?? '') === '4', 'broadcast input');
+$nested = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+    'payload' => '{"data":{"statetype":"fake_sleep_0"}}',
+]]);
+assert_true(($nested['on'] ?? null) === false, 'nested standby');
+$plain = YarboHisense::interpretMessages([[
+    'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+    'payload' => 'statetype=remote_launcher',
+]]);
+assert_true(($plain['on'] ?? null) === true, 'plain state text');
+assert_true(YarboHisense::heardSummary([]) === '', 'empty heard');
+$heard = YarboHisense::heardSummary([[
+    'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+    'payload' => '{"statetype":"remote_launcher","accesstoken":"secret"}',
+]]);
+assert_true(str_contains($heard, 'broadcast/ui_service/state') && !str_contains($heard, 'secret'), 'heard hides the token ' . $heard);
 
 $root = sys_get_temp_dir() . '/yarbo-hisense-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
@@ -289,5 +305,33 @@ $picture['on'] = true;
 $rose = $auto->tick([$button, $picture], $now + 33);
 assert_true(in_array($tvRule['id'] ?? '', $rose['fired'] ?? [], true), 'remote on fires ' . json_encode($rose));
 assert_true(count($commands) === 1 && ($commands[0]['command'] ?? '') === 'off', 'then runs ' . json_encode($commands));
+
+$tries = 0;
+$tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$tries): array {
+    $topics = array_map(static fn (array $item): string => (string) ($item['topic'] ?? ''), $outgoing);
+    if (in_array('sendkey', $topics, true) || in_array('gettoken', $topics, true)) {
+        return ['ok' => true, 'messages' => []];
+    }
+    $tries++;
+    if ($tries === 1) {
+        return ['ok' => true, 'messages' => []];
+    }
+
+    return [
+        'ok' => true,
+        'messages' => [[
+            'topic' => '/remoteapp/mobile/broadcast/ui_service/state',
+            'payload' => '{"statetype":"fake_sleep_0"}',
+        ]],
+    ];
+});
+$stored = json_decode((string) file_get_contents($storePath), true);
+$stored['tvs']['hisense:192.168.1.50']['on'] = true;
+$stored['tvs']['hisense:192.168.1.50']['token'] = '';
+$stored['tvs']['hisense:192.168.1.50']['refresh_token'] = '';
+file_put_contents($storePath, json_encode($stored));
+$silent = $tv->command('hisense:192.168.1.50', 'off', []);
+assert_true(($silent['ok'] ?? false) === true && ($silent['on'] ?? null) === false, 'second login hears standby ' . json_encode($silent));
+assert_true($tries >= 2, 'a silent login is not the last try ' . $tries);
 
 echo "ok\n";

@@ -225,7 +225,7 @@ final class YarboHisense
         }
         $locked = $this->lock(true);
         try {
-            $row = $this->readRow($row, 3.5);
+            $row = $this->readRow($row, 3.5, true);
             if (empty($row['_read_ok'])) {
                 $this->wake($row);
                 $row = $this->readRow($row, 4.0);
@@ -241,10 +241,19 @@ final class YarboHisense
 
                 return ['ok' => true, 'on' => $on, 'tv' => $this->publicRow($row)];
             }
-            if ($on === null && $action !== 'input') {
+            if (!empty($row['needs_pin'])) {
                 $row = $this->persist($id, $row);
 
-                return ['ok' => false, 'error' => 'The TV did not say whether it is on', 'tv' => $this->publicRow($row)];
+                return ['ok' => false, 'error' => 'Enter the code shown on the TV', 'tv' => $this->publicRow($row)];
+            }
+            if ($on === null && $action !== 'input') {
+                $row = $this->persist($id, $row);
+                $heard = trim((string) ($row['heard'] ?? ''));
+                $error = $heard !== ''
+                    ? ('The TV sent: ' . $heard)
+                    : 'The TV connected but sent no state. If a code is on the screen, enter it on this row.';
+
+                return ['ok' => false, 'error' => $error, 'tv' => $this->publicRow($row)];
             }
             $publishes = [];
             $sentPower = false;
@@ -359,11 +368,21 @@ final class YarboHisense
      * @param array<string, mixed> $row
      * @return array<string, mixed>
      */
-    private function readRow(array $row, float $wait): array
+    private function readRow(array $row, float $wait, bool $askPin = false): array
     {
         $host = (string) ($row['host'] ?? '');
         $prefer = trim((string) ($row['token'] ?? '')) !== '' ? 'token' : trim((string) ($row['mode'] ?? ''));
+        $uuid = $this->clientUuid();
+        $login = json_encode([
+            'type' => 'login',
+            'tvLogin' => false,
+            'tvDeviceId' => '',
+            'tvCountry' => '',
+            'mobileLogin' => true,
+            'mobileDeviceId' => $uuid,
+        ], JSON_UNESCAPED_SLASHES) ?: '';
         $state = $this->exchange($host, [
+            ['topic' => 'login_each_other_info', 'payload' => $login],
             ['topic' => 'gettvstate', 'payload' => ''],
             ['topic' => 'sourcelist', 'payload' => ''],
         ], $wait, $prefer !== '' && $prefer !== 'legacy' ? $prefer : '');
@@ -371,13 +390,73 @@ final class YarboHisense
         if (!($state['ok'] ?? false)) {
             $row['connected'] = false;
             $row['error'] = (string) ($state['error'] ?? 'The TV did not answer');
+            $row['heard'] = '';
             $row['_read_on'] = null;
             $row['_read_ok'] = false;
 
             return $row;
         }
-        $parsed = self::interpretMessages(is_array($state['messages'] ?? null) ? $state['messages'] : []);
+        $messages = is_array($state['messages'] ?? null) ? $state['messages'] : [];
+        $parsed = self::interpretMessages($messages);
         $row = $this->mergeRead($row, $parsed, (string) ($state['mode'] ?? ''));
+        if ($parsed['on'] === null && trim((string) ($row['refresh_token'] ?? '')) !== '') {
+            $tokenRead = $this->exchange($host, [[
+                'topic' => 'gettoken',
+                'payload' => json_encode(['refreshtoken' => (string) $row['refresh_token']], JSON_UNESCAPED_SLASHES) ?: '',
+            ]], min(3.0, $wait));
+            if (!empty($tokenRead['ok'])) {
+                $tokenMessages = is_array($tokenRead['messages'] ?? null) ? $tokenRead['messages'] : [];
+                $messages = array_merge($messages, $tokenMessages);
+                $tokenParsed = self::interpretMessages($tokenMessages);
+                $row = $this->mergeRead($row, $tokenParsed, (string) ($tokenRead['mode'] ?? ''));
+                if ($tokenParsed['on'] !== null) {
+                    $parsed = $tokenParsed;
+                } elseif (($tokenParsed['token'] ?? '') !== '') {
+                    $again = $this->exchange($host, [
+                        ['topic' => 'gettvstate', 'payload' => ''],
+                        ['topic' => 'sourcelist', 'payload' => ''],
+                    ], $wait, 'token');
+                    if (!empty($again['ok'])) {
+                        $againMessages = is_array($again['messages'] ?? null) ? $again['messages'] : [];
+                        $messages = array_merge($messages, $againMessages);
+                        $againParsed = self::interpretMessages($againMessages);
+                        $row = $this->mergeRead($row, $againParsed, (string) ($again['mode'] ?? ''));
+                        if ($againParsed['on'] !== null || $againParsed['sources'] !== []) {
+                            $parsed = $againParsed;
+                        }
+                    }
+                }
+            }
+        }
+        if (
+            $askPin
+            && $parsed['on'] === null
+            && $parsed['sources'] === []
+            && trim((string) ($row['token'] ?? '')) === ''
+            && $messages === []
+        ) {
+            $pin = $this->exchange($host, [[
+                'topic' => 'vidaa_app_connect',
+                'payload' => json_encode([
+                    'app_version' => 2,
+                    'connect_result' => 0,
+                    'device_type' => 'Mobile App',
+                ], JSON_UNESCAPED_SLASHES) ?: '',
+            ]], min(4.0, max($wait, 3.0)));
+            if (!empty($pin['ok'])) {
+                $pinMessages = is_array($pin['messages'] ?? null) ? $pin['messages'] : [];
+                $messages = array_merge($messages, $pinMessages);
+                $pinParsed = self::interpretMessages($pinMessages);
+                $row = $this->mergeRead($row, $pinParsed, (string) ($pin['mode'] ?? ''));
+                if (!empty($pinParsed['needs_pin']) && ($pinParsed['token'] ?? '') === '') {
+                    $row['needs_pin'] = true;
+                }
+                if ($pinParsed['on'] !== null) {
+                    $parsed = $pinParsed;
+                }
+            }
+        }
+        $row['heard'] = self::heardSummary($messages);
         $row['_read_on'] = $parsed['on'];
         $row['_read_ok'] = true;
 
@@ -414,7 +493,9 @@ final class YarboHisense
         $row['error'] = '';
         $row['seen_at'] = time();
         $row['state_at'] = time();
-        if (($parsed['sources'] ?? []) !== [] || ($parsed['on'] ?? null) !== null || ($parsed['token'] ?? '') !== '') {
+        if (!empty($parsed['needs_pin']) && trim((string) ($row['token'] ?? '')) === '' && ($parsed['token'] ?? '') === '') {
+            $row['needs_pin'] = true;
+        } elseif (($parsed['sources'] ?? []) !== [] || ($parsed['on'] ?? null) !== null || ($parsed['token'] ?? '') !== '') {
             $row['needs_pin'] = false;
         }
 
@@ -541,7 +622,11 @@ final class YarboHisense
                 continue;
             }
             $topic = strtolower((string) ($message['topic'] ?? ''));
+            $rawPayload = trim((string) ($message['payload'] ?? ''));
             $json = self::decodePayload($message['payload'] ?? '');
+            if (!is_array($json) && $rawPayload !== '' && preg_match('/statetype\W+([A-Za-z0-9_]+)/i', $rawPayload, $stateMatch) === 1) {
+                $json = ['statetype' => $stateMatch[1]];
+            }
             if (str_contains($topic, 'sourcelist') && is_array($json)) {
                 $parsed = self::parseSources($json);
                 if ($parsed !== []) {
@@ -561,15 +646,16 @@ final class YarboHisense
             if (str_contains($topic, 'authentication') && !str_contains($topic, 'authenticationcode')) {
                 $needsPin = true;
             }
-            $power = self::powerFromState(is_array($json) ? $json : ['statetype' => trim((string) ($message['payload'] ?? ''))]);
+            $state = is_array($json) ? (self::flattenState($json) ?? $json) : ['statetype' => $rawPayload];
+            $power = self::powerFromState($state);
             if ($power !== null) {
                 $on = $power;
             }
-            if (is_array($json)) {
-                $sid = trim((string) ($json['sourceid'] ?? ''));
+            if (is_array($state)) {
+                $sid = trim((string) ($state['sourceid'] ?? ''));
                 if ($sid !== '') {
                     $sourceId = $sid;
-                    $sourceName = trim((string) ($json['displayname'] ?? $json['sourcename'] ?? $json['channel_name'] ?? $sourceName));
+                    $sourceName = trim((string) ($state['displayname'] ?? $state['sourcename'] ?? $state['channel_name'] ?? $sourceName));
                 }
             }
         }
@@ -671,6 +757,59 @@ final class YarboHisense
     }
 
     /**
+     * @param array<string, mixed> $json
+     * @return array<string, mixed>|null
+     */
+    private static function flattenState(array $json): ?array
+    {
+        foreach (['statetype', 'power', 'powerstate', 'power_state', 'tvpower'] as $key) {
+            if (array_key_exists($key, $json)) {
+                return $json;
+            }
+        }
+        foreach ($json as $value) {
+            if (!is_array($value)) {
+                continue;
+            }
+            $found = self::flattenState($value);
+            if ($found !== null) {
+                return $found;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Short, secret-free note of what the TV actually published.
+     *
+     * @param list<array<string, mixed>> $messages
+     */
+    public static function heardSummary(array $messages): string
+    {
+        $parts = [];
+        foreach ($messages as $message) {
+            if (!is_array($message)) {
+                continue;
+            }
+            $topic = (string) ($message['topic'] ?? '');
+            $topic = preg_replace('#^/remoteapp/mobile/#', '', $topic) ?? $topic;
+            $payload = trim((string) ($message['payload'] ?? ''));
+            $payload = preg_replace('/"(?:access|refresh)?token"\s*:\s*"[^"]*"/i', '"token":"…"', $payload) ?? $payload;
+            $payload = preg_replace('/\s+/', ' ', $payload) ?? $payload;
+            if (strlen($payload) > 70) {
+                $payload = substr($payload, 0, 70) . '…';
+            }
+            $parts[] = $topic . ($payload !== '' ? ' ' . $payload : ' (empty)');
+            if (count($parts) >= 2) {
+                break;
+            }
+        }
+
+        return implode('; ', $parts);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function probe(string $host): array
@@ -739,6 +878,12 @@ final class YarboHisense
         }
         $uuid = $this->clientUuid();
         $errors = [];
+        $askedState = false;
+        foreach ($publishes as $publish) {
+            if (in_array((string) ($publish['topic'] ?? ''), ['gettvstate', 'sourcelist'], true)) {
+                $askedState = true;
+            }
+        }
         $profiles = $this->profiles($uuid, $this->tokenFor($host));
         if ($prefer !== '') {
             $picked = [];
@@ -760,6 +905,7 @@ final class YarboHisense
                 $profiles = $picked;
             }
         }
+        $silent = null;
         foreach ($profiles as $profile) {
             $result = $this->transport !== null
                 ? ($this->transport)($host, $profile, $publishes, $wait)
@@ -769,10 +915,17 @@ final class YarboHisense
             }
             if (!empty($result['ok'])) {
                 $result['mode'] = (string) ($profile['mode'] ?? '');
-
-                return $result;
+                $messages = is_array($result['messages'] ?? null) ? $result['messages'] : [];
+                if (!$askedState || $messages !== []) {
+                    return $result;
+                }
+                $silent = $result;
+                continue;
             }
             $errors[] = (string) ($result['error'] ?? 'connection failed');
+        }
+        if ($silent !== null) {
+            return $silent;
         }
 
         return [
@@ -823,8 +976,12 @@ final class YarboHisense
                 $base . '/platform_service/data/authentication',
                 $base . '/platform_service/data/authenticationcode',
                 $base . '/platform_service/data/tokenissuance',
+                $base . '/platform_service/data/state',
+                $base . '/platform_service/data/sourcelist',
+                $base . '/ui_service/data/login_each_other_info',
                 '/remoteapp/mobile/broadcast/ui_service/state',
                 '/remoteapp/mobile/broadcast/ui_service/data/state',
+                '/remoteapp/mobile/broadcast/platform_service/actions/tvsleep',
             ] as $topic) {
                 $client->subscribe($topic, static function (string $topic, string $payload) use (&$messages): void {
                     $messages[] = ['topic' => $topic, 'payload' => $payload];
@@ -846,9 +1003,14 @@ final class YarboHisense
             $client->loopOnce($started, true);
             foreach ($publishes as $publish) {
                 $action = (string) ($publish['topic'] ?? '');
-                $service = $action === 'sendkey' ? 'remote_service' : 'ui_service';
-                $path = '/remoteapp/tv/' . $service . '/' . $clientId . '/actions/' . $action;
-                $client->publish($path, (string) ($publish['payload'] ?? ''), 0);
+                $services = $action === 'sendkey' ? ['remote_service'] : ['ui_service'];
+                if (in_array($action, ['gettvstate', 'sourcelist', 'gettoken', 'login_each_other_info'], true)) {
+                    $services[] = 'platform_service';
+                }
+                foreach ($services as $service) {
+                    $path = '/remoteapp/tv/' . $service . '/' . $clientId . '/actions/' . $action;
+                    $client->publish($path, (string) ($publish['payload'] ?? ''), 0);
+                }
             }
             $deadline = microtime(true) + $wait;
             while (microtime(true) < $deadline) {
@@ -1159,7 +1321,7 @@ final class YarboHisense
         } elseif (empty($row['connected']) && !empty($row['error'])) {
             $status = (string) $row['error'];
         } elseif (!$knownOn) {
-            $status = 'Power unknown';
+            $status = 'No state from the TV';
         } elseif (empty($row['on'])) {
             $status = 'Off';
         } elseif ($currentName !== '') {
@@ -1184,6 +1346,7 @@ final class YarboHisense
             'input_name' => (string) ($row['source_name'] ?? ''),
             'needs_pin' => !empty($row['needs_pin']),
             'status' => $status,
+            'detail' => trim((string) ($row['heard'] ?? '')),
             'has_on_off' => true,
         ];
     }
