@@ -35,12 +35,25 @@ assert_true(YarboHisense::powerFromState([]) === null, 'unknown power');
 
 $root = sys_get_temp_dir() . '/yarbo-hisense-' . bin2hex(random_bytes(3));
 mkdir($root . '/data', 0775, true);
+mkdir($root . '/resources/hisense', 0775, true);
+$repoCert = dirname(__DIR__) . '/resources/hisense/vidaa_client.pem';
+$repoKey = dirname(__DIR__) . '/resources/hisense/vidaa_client.key';
+copy($repoCert, $root . '/resources/hisense/vidaa_client.pem');
+copy($repoKey, $root . '/resources/hisense/vidaa_client.key');
+$parsed = openssl_x509_parse((string) file_get_contents($repoCert));
+assert_true(is_array($parsed) && ($parsed['subject']['CN'] ?? '') === 'VidaaAppAndroidV01', 'VIDAA app certificate');
+assert_true(openssl_x509_check_private_key((string) file_get_contents($repoCert), (string) file_get_contents($repoKey)), 'certificate matches key');
 file_put_contents($root . '/data/hub-config.json', json_encode([
     'modules' => ['home' => true],
     'active_module' => 'home',
 ], JSON_UNESCAPED_SLASHES));
 
 $tv = new YarboHisense($root);
+$profiles = (new ReflectionClass($tv))->getMethod('profiles');
+$profiles->setAccessible(true);
+$first = $profiles->invoke($tv, '56:b8:88:4e:f7:19')[0] ?? [];
+assert_true(($first['mode'] ?? '') === 'vidaa' && !empty($first['tls']), 'firmware 9 login is tried first');
+assert_true(str_ends_with((string) ($first['cert'] ?? ''), 'vidaa_client.pem'), 'uses the VIDAA app certificate');
 $publishes = [];
 $tv->setTransport(static function (string $host, array $profile, array $outgoing) use (&$publishes): array {
     foreach ($outgoing as $item) {

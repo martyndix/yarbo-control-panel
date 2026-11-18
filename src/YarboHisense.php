@@ -542,7 +542,7 @@ final class YarboHisense
         $clientId = (string) ($profile['client_id'] ?? 'yarbo');
         $messages = [];
         try {
-            $client = new MqttClient($host, self::PORT, $clientId);
+            $client = new MqttClient($host, self::PORT, $clientId, MqttClient::MQTT_3_1_1);
             $settings = (new ConnectionSettings())
                 ->setUsername((string) ($profile['username'] ?? ''))
                 ->setPassword((string) ($profile['password'] ?? ''))
@@ -568,8 +568,12 @@ final class YarboHisense
                 $base . '/ui_service/data/sourcelist',
                 $base . '/ui_service/data/state',
                 $base . '/ui_service/data/authentication',
+                $base . '/ui_service/data/authenticationcode',
                 $base . '/ui_service/data/tokenissuance',
                 $base . '/ui_service/data/vidaa_app_connect',
+                $base . '/platform_service/data/authentication',
+                $base . '/platform_service/data/authenticationcode',
+                $base . '/platform_service/data/tokenissuance',
                 '/remoteapp/mobile/broadcast/ui_service/state',
             ] as $topic) {
                 $client->subscribe($topic, static function (string $topic, string $payload) use (&$messages): void {
@@ -611,34 +615,36 @@ final class YarboHisense
         $dynamic = self::dynamicCredentials($uuid, time());
         [$cert, $key] = $this->clientCert();
         $legacyId = $uuid . '$normal';
-
-        return [
-            [
-                'mode' => 'legacy',
-                'client_id' => $legacyId,
-                'username' => self::LEGACY_USER,
-                'password' => self::LEGACY_PASS,
-                'tls' => false,
-            ],
-            [
-                'mode' => 'legacy-tls',
-                'client_id' => $legacyId,
-                'username' => self::LEGACY_USER,
-                'password' => self::LEGACY_PASS,
-                'tls' => true,
-                'cert' => $cert,
-                'key' => $key,
-            ],
-            [
-                'mode' => 'vidaa',
-                'client_id' => $dynamic['client_id'],
-                'username' => $dynamic['username'],
-                'password' => $dynamic['password'],
-                'tls' => true,
-                'cert' => $cert,
-                'key' => $key,
-            ],
+        $vidaa = [
+            'mode' => 'vidaa',
+            'client_id' => $dynamic['client_id'],
+            'username' => $dynamic['username'],
+            'password' => $dynamic['password'],
+            'tls' => true,
+            'cert' => $cert,
+            'key' => $key,
         ];
+        $legacyTls = [
+            'mode' => 'legacy-tls',
+            'client_id' => $legacyId,
+            'username' => self::LEGACY_USER,
+            'password' => self::LEGACY_PASS,
+            'tls' => true,
+            'cert' => $cert,
+            'key' => $key,
+        ];
+        $legacy = [
+            'mode' => 'legacy',
+            'client_id' => $legacyId,
+            'username' => self::LEGACY_USER,
+            'password' => self::LEGACY_PASS,
+            'tls' => false,
+        ];
+
+        // Firmware 9 (the 50A5LE and other 2024–2026 sets) refuses a login that
+        // does not present the VIDAA app certificate. Try that first so a
+        // rejected legacy login does not pop the “app is too old” notice.
+        return [$vidaa, $legacyTls, $legacy];
     }
 
     /**
@@ -807,6 +813,11 @@ final class YarboHisense
      */
     private function clientCert(): array
     {
+        $bundledCert = $this->projectRoot . '/resources/hisense/vidaa_client.pem';
+        $bundledKey = $this->projectRoot . '/resources/hisense/vidaa_client.key';
+        if (is_file($bundledCert) && is_file($bundledKey)) {
+            return [$bundledCert, $bundledKey];
+        }
         $cert = $this->projectRoot . '/data/hisense-client.pem';
         $key = $this->projectRoot . '/data/hisense-client.key';
         if (is_file($cert) && is_file($key)) {
@@ -820,7 +831,7 @@ final class YarboHisense
             . ' -out '
             . escapeshellarg($cert)
             . ' -days 3650 -nodes -subj '
-            . escapeshellarg('/CN=YarboPanel')
+            . escapeshellarg('/C=CN/ST=shandong/O=hh/OU=multimedia/CN=VidaaAppAndroidV01')
             . ' 2>/dev/null';
         @exec($cmd);
         if (is_file($cert) && is_file($key)) {
