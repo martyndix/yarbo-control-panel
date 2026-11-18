@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [4.0.368] - 2026-11-18
+
+### Fixed
+
+- Home stays quick to tap and to refresh. v113 stopped the colour fan-out, but the poll was still reading every bulb in one pass, and the vacuum status read could sit for 8 seconds on the same Matter server. A light tap and the next screen update waited behind that. A large bridge is now one short read at a time, and the vacuum is checked every 20 seconds. Matter agent **v114**.
+
 ## [4.0.367] - 2026-11-18
 
 ### Fixed
