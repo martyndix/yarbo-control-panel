@@ -920,10 +920,23 @@ def main() -> int:
     if "°" not in str(clim.get("status") or "") or "RH" not in str(clim.get("status") or ""):
         raise SystemExit(f"climate status {clim}")
     cont = sensor_rows.get("81:1") or {}
-    if cont.get("kind") != "sensor" or cont.get("has_open") is not True or cont.get("open") is not True:
+    if cont.get("kind") != "sensor" or cont.get("has_open") is not True or cont.get("open") is not False:
         raise SystemExit(f"contact sensor flatten {cont}")
-    if cont.get("on") is not True or "Open" not in str(cont.get("status") or ""):
-        raise SystemExit(f"contact open status {cont}")
+    if cont.get("on") is not False or "Closed" not in str(cont.get("status") or ""):
+        raise SystemExit(f"contact closed status {cont}")
+    if agent.contact_state_is_open(True) is not False or agent.contact_state_is_open(False) is not True:
+        raise SystemExit("contact StateValue polarity")
+    if agent.contact_state_is_open(None) is not None:
+        raise SystemExit("missing contact state")
+    agent._live_devices = [dict(cont)]
+    agent.apply_attribute_event({"node_id": 81, "attribute_path": "1/69/0", "value": False})
+    opened = agent.live_row("81:1") or {}
+    if opened.get("open") is not True or "Open" not in str(opened.get("status") or ""):
+        raise SystemExit(f"contact opened report {opened}")
+    agent.apply_attribute_event({"node_id": 81, "attribute_path": "1/69/0", "value": True})
+    closed = agent.live_row("81:1") or {}
+    if closed.get("open") is not False or "Closed" not in str(closed.get("status") or ""):
+        raise SystemExit(f"contact closed report {closed}")
     plug_row = sensor_rows.get("82:1") or {}
     if plug_row.get("kind") != "plug" or plug_row.get("power_w") != 12.5:
         raise SystemExit(f"plug power flatten {plug_row}")

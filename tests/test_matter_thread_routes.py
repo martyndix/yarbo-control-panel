@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 116, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 117, agent.AGENT_VERSION
     agent.browse_mdns_sources = lambda label, seconds=1.0: []
     sample = """
 Soliciting ff02::2 on eth0...
