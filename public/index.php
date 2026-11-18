@@ -235,6 +235,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <button type="button" class="module-switcher-btn" data-vestaboard-live="powerwall">Powerwall</button>
                         <button type="button" class="module-switcher-btn" data-vestaboard-live="lymow">Lymow</button>
                         <button type="button" class="module-switcher-btn" data-vestaboard-live="batteries">ALL</button>
+                        <button type="button" class="module-switcher-btn" data-vestaboard-live="weather">Weather</button>
                         <button type="button" class="module-switcher-btn" id="vestaboard-rotate-open" aria-haspopup="dialog" aria-controls="vestaboard-rotate-modal">Rotate</button>
                     </nav>
                 </div>
@@ -1052,6 +1053,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <option value="powerwall">Powerwall</option>
                                     <option value="lymow">Lymow</option>
                                     <option value="batteries">ALL (enabled modules)</option>
+                                    <option value="weather">Weather</option>
                                 </select>
                             </label>
                         </section>
@@ -1280,7 +1282,22 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                     <input type="checkbox" id="settings-vestaboard-smart" name="vestaboard_smart_display" checked>
                                     <span>Vestaboard Smart Display</span>
                                 </label>
-                                <p class="hint" id="settings-vestaboard-smart-hint">When on, the Note follows the robots that are out working (mowing, heading out, or docking) or in error. Off modules are skipped automatically.</p>
+                                <p class="hint" id="settings-vestaboard-smart-hint">When on, the Note follows the robots that are out working (mowing, heading out, or docking) or in error. Off modules are skipped automatically. When they are idle again it returns to the page it left, including Weather.</p>
+                                <label class="settings-field">
+                                    <span class="label">Idle default</span>
+                                    <select id="settings-vestaboard-idle" name="vestaboard_idle_default">
+                                        <option value="powerwall">Powerwall</option>
+                                        <option value="weather">Weather</option>
+                                    </select>
+                                </label>
+                                <p class="hint">When nothing is running, and when Rotate’s 24 hours end, the Note shows this page. Powerwall is used only while that module is on.</p>
+                                <label class="settings-field">
+                                    <span class="label">Weather temperature</span>
+                                    <select id="settings-vestaboard-unit" name="vestaboard_weather_unit">
+                                        <option value="c">Celsius</option>
+                                        <option value="f">Fahrenheit</option>
+                                    </select>
+                                </label>
                                 <div class="map-mode vestaboard-transport" role="radiogroup" aria-label="Vestaboard API">
                                     <label>
                                         <input type="radio" name="vestaboard-transport" value="local" checked>
@@ -1649,7 +1666,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             <p class="hint">PaperMono frontlight. Needs firmware 0.1.28 (earlier builds ignored this because LoRa init reset the light PWM).</p>
                             <fieldset class="settings-theme-fieldset">
                                 <legend class="label">Alerts</legend>
-                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.97. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
+                                <p class="hint">Colour, flash, backlight, brightness, and screen need firmware 0.1.98. Night door/window lights only while Vestaboard Night hours is active. Backlight stays at the chosen % until the error clears or the message is read.</p>
                                 <div class="papermono-alert-row" data-alert-row="message">
                                     <label class="settings-checkbox"><input type="checkbox" id="papermono-alert-message" checked><span>Message received (buzzer)</span></label>
                                     <div class="papermono-alert-opts">
@@ -2042,7 +2059,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                         <rect x="398" y="449" width="36" height="6" fill="#f4f1e8"/>
                                         <rect x="414" y="431" width="6" height="42" fill="#f4f1e8"/>
                                     </svg>
-                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.97.</figcaption>
+                                    <figcaption>HEAT — room names when heaters are still called Heater. Tap the name to Heat or Off. Now is the heater thermometer; −/+ steps the set temperature by 1°. Firmware 0.1.98.</figcaption>
                                 </figure>
                                 <figure class="papermono-preview" data-preview-for="pages">
                                     <svg viewBox="0 0 480 800" role="img" aria-label="PaperMono MAIL inbox mock">
@@ -2209,7 +2226,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                             </div>
                             </details>
                             <h4 class="settings-subtitle">Paired devices</h4>
-                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.97 / 0.2.31-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
+                            <p class="hint">Battery percent and charging update when a tablet polls the panel (about every 15 seconds on PaperMono, 60 on Paper Colour). USB power shows as Charging even at 100%. Tablets need firmware 0.1.98 / 0.2.31-colour. Missing or stale firmware builds automatically in the background after a panel update — wait until the E-paper status says built, then press <strong>Update</strong>. Update stays off below 50% unless the tablet is charging. The tablet only tries an update once per boot; if Updating stops on the same firmware, reboot it. <strong>Online — remote</strong> means the tablet is on travel Wi-Fi (not the flashed home SSID) — even if home polls sometimes use Funnel or a public subdomain. Tap ⚙️ to rename or revoke — revoke asks twice, then for the tablet name.</p>
                             <div id="papermono-devices" class="papermono-device-list"><p class="hint">None yet.</p></div>
                         </section>
 
@@ -2384,7 +2401,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             <button type="button" class="modal-backdrop" data-vestaboard-rotate-close aria-label="Close rotate settings"></button>
             <div class="modal-panel card vestaboard-rotate-panel">
                 <h2 id="vestaboard-rotate-title">Rotate views</h2>
-                <p class="hint">Cycle the Note through the ticked views (needs two or more). Pauses while Yarbo or Lymow is out (mowing, heading out, docking) or in error, and stops after 24 hours (back to Powerwall).</p>
+                <p class="hint">Cycle the Note through the ticked views (needs two or more). Pauses while Yarbo or Lymow is out (mowing, heading out, docking) or in error, and stops after 24 hours (back to the idle default).</p>
                 <label class="vestaboard-rotate-option">
                     <input type="checkbox" id="vestaboard-rotate-enabled">
                     <span>Rotate views</span>
@@ -2407,6 +2424,10 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                         <label class="vestaboard-rotate-option" data-rotate-choice="batteries">
                             <input type="checkbox" data-rotate-view="batteries">
                             <span>ALL</span>
+                        </label>
+                        <label class="vestaboard-rotate-option" data-rotate-choice="weather">
+                            <input type="checkbox" data-rotate-view="weather">
+                            <span>Weather</span>
                         </label>
                     </div>
                 </fieldset>

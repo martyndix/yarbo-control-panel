@@ -12,6 +12,7 @@ final class YarboHub
     public const MODULE_HOME = 'home';
     public const MODULE_UNIFI = 'unifi';
     public const LIVE_BATTERIES = 'batteries';
+    public const LIVE_WEATHER = 'weather';
 
     /** Vestaboard pages. Home is not included until Matter has a Note layout. */
     public const VESTABOARD_LIVE_CHOICES = [
@@ -19,6 +20,7 @@ final class YarboHub
         self::MODULE_POWERWALL,
         self::MODULE_LYMOW,
         self::LIVE_BATTERIES,
+        self::LIVE_WEATHER,
     ];
 
     /** @var list<string> */
@@ -155,12 +157,17 @@ final class YarboHub
             ['id' => self::MODULE_POWERWALL, 'label' => 'Powerwall'],
             ['id' => self::MODULE_LYMOW, 'label' => 'Lymow'],
             ['id' => self::LIVE_BATTERIES, 'label' => 'ALL'],
+            ['id' => self::LIVE_WEATHER, 'label' => 'Weather'],
         ];
         if ($modules === null) {
             return $all;
         }
         $out = [];
         foreach ($all as $choice) {
+            if ($choice['id'] === self::LIVE_WEATHER) {
+                $out[] = $choice;
+                continue;
+            }
             if ($choice['id'] === self::LIVE_BATTERIES) {
                 if (self::allViewAvailable($modules)) {
                     $out[] = $choice;
@@ -509,6 +516,21 @@ final class YarboHub
     }
 
     /**
+     * Idle page: Weather when that is the saved choice, otherwise Powerwall
+     * when the module is on, then Yarbo, then Lymow.
+     *
+     * @param array<string, bool> $modules
+     */
+    public static function resolveIdleVestaboardLive(array $modules, string $prefer): string
+    {
+        if (strtolower(trim($prefer)) === self::LIVE_WEATHER) {
+            return self::LIVE_WEATHER;
+        }
+
+        return self::firstEnabledVestaboardLive($modules);
+    }
+
+    /**
      * Combined batteries is a Vestaboard page, not a dashboard module.
      *
      * @param array<string, bool> $modules
@@ -519,10 +541,13 @@ final class YarboHub
         if ($id === 'all') {
             $id = self::LIVE_BATTERIES;
         }
+        if ($id === self::LIVE_WEATHER) {
+            return self::LIVE_WEATHER;
+        }
         if ($id === self::LIVE_BATTERIES) {
             return self::allViewAvailable($modules)
                 ? self::LIVE_BATTERIES
-                : self::firstEnabledVestaboardLive($modules);
+                : $this->idleVestaboardLive($modules);
         }
         if (($id === self::MODULE_POWERWALL || $id === self::MODULE_LYMOW || $id === self::MODULE_YARBO)
             && !empty($modules[$id])
@@ -530,6 +555,27 @@ final class YarboHub
             return $id;
         }
 
-        return self::firstEnabledVestaboardLive($modules);
+        return $this->idleVestaboardLive($modules);
+    }
+
+    /**
+     * @param array<string, bool> $modules
+     */
+    private function idleVestaboardLive(array $modules): string
+    {
+        return self::resolveIdleVestaboardLive($modules, $this->savedIdleDefault());
+    }
+
+    private function savedIdleDefault(): string
+    {
+        $path = $this->projectRoot . '/data/vestaboard-config.json';
+        if (!is_file($path)) {
+            return 'powerwall';
+        }
+        $raw = file_get_contents($path);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        $prefer = is_array($decoded) ? strtolower(trim((string) ($decoded['idle_default'] ?? 'powerwall'))) : 'powerwall';
+
+        return $prefer === self::LIVE_WEATHER ? self::LIVE_WEATHER : 'powerwall';
     }
 }

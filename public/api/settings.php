@@ -163,6 +163,7 @@ if (!$cloudSettings->save($input)) {
     ], 500);
 }
 
+$prevIdleDefault = (string) ($vestaboard->load()['idle_default'] ?? 'powerwall');
 if (!$vestaboard->save($input)) {
     json_response([
         'ok' => false,
@@ -176,6 +177,7 @@ if (!$hub->save($input)) {
         'error' => 'Could not write module settings. Check permissions on the data/ directory.',
     ], 500);
 }
+$vestaboard->applyIdleDefaultChange($prevIdleDefault);
 
 if (!$powerwall->save($input)) {
     json_response([

@@ -136,6 +136,8 @@ const els = {
     settingsVestaboardNightEditHint: document.getElementById('settings-vestaboard-night-edit-hint'),
     settingsVestaboardSmart: document.getElementById('settings-vestaboard-smart'),
     settingsVestaboardSmartHint: document.getElementById('settings-vestaboard-smart-hint'),
+    settingsVestaboardIdle: document.getElementById('settings-vestaboard-idle'),
+    settingsVestaboardUnit: document.getElementById('settings-vestaboard-unit'),
     settingsRainSensitivity: document.getElementById('settings-rain-sensitivity'),
     settingsYarboDockLights: document.getElementById('settings-yarbo-dock-lights'),
     vestaboardCard: document.getElementById('vestaboard-card'),
@@ -13115,6 +13117,12 @@ async function loadSettings() {
         if (els.settingsVestaboardSmart) {
             els.settingsVestaboardSmart.checked = data.vestaboard?.smart_display !== false;
         }
+        if (els.settingsVestaboardIdle) {
+            els.settingsVestaboardIdle.value = data.vestaboard?.idle_default === 'weather' ? 'weather' : 'powerwall';
+        }
+        if (els.settingsVestaboardUnit) {
+            els.settingsVestaboardUnit.value = data.vestaboard?.weather_unit === 'f' ? 'f' : 'c';
+        }
         setQuietCodes(data.vestaboard?.quiet_codes);
         setNightCodes(data.vestaboard?.night_codes);
         updateQuietHoursClockHint(data.vestaboard);
@@ -15406,6 +15414,8 @@ async function saveSettings(event) {
             vestaboard_night_end: els.settingsVestaboardNightEnd?.value || '07:00',
             vestaboard_night_codes: nightCodesSnapshot(),
             vestaboard_smart_display: Boolean(els.settingsVestaboardSmart?.checked),
+            vestaboard_idle_default: els.settingsVestaboardIdle?.value === 'weather' ? 'weather' : 'powerwall',
+            vestaboard_weather_unit: els.settingsVestaboardUnit?.value === 'f' ? 'f' : 'c',
             module_yarbo: Boolean(els.settingsModuleYarbo?.checked),
             module_powerwall: Boolean(els.settingsModulePowerwall?.checked),
             module_lymow: Boolean(els.settingsModuleLymow?.checked),
