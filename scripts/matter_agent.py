@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 112
+AGENT_VERSION = 113
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -219,6 +219,15 @@ FIRST_SCAN_DELAY_S = 90.0
 SCAN_NODE_CAP = 2
 SCAN_POST_INTERVIEW_S = 6.0
 SCAN_RETRY_WAIT_S = 10.0
+# Background reads share the Matter server with light commands. Keep each one
+# short, and leave a node alone after it fails to answer so the next tap is
+# not queued behind another full-bridge colour read.
+POLL_READ_TIMEOUT = 4.0
+POLL_PATH_CHUNK = 24
+POLL_NODE_BACKOFF_S = 60.0
+POLL_COLOR_INTERVAL_S = 30.0
+_poll_node_backoff: dict[int, float] = {}
+_poll_color_at = 0.0
 _commission_job_lock = threading.Lock()
 _commission_job: dict[str, Any] | None = None
 _command_busy = 0
@@ -5837,6 +5846,10 @@ def light_poll_groups() -> dict[int, list[int]]:
         kind = str(row.get("kind") or "")
         if kind in ("switch", "vacuum", "plug", "heater", "sensor", "camera", "door", "hub"):
             continue
+        # A node the server has already marked unavailable will sit on the
+        # shared CHIP stack until the read times out. Skip it.
+        if row.get("available") is False:
+            continue
         try:
             node_id = int(row.get("node_id") or 0)
             endpoint = int(row.get("endpoint") or 0)
@@ -5858,7 +5871,13 @@ def light_poll_groups() -> dict[int, list[int]]:
 
 
 def refresh_live_from_nodes() -> bool:
-    rpc = matter_rpc("get_nodes", timeout=15.0, channel=POLL_CHANNEL, listen=False)
+    rpc = matter_rpc(
+        "get_nodes",
+        timeout=15.0,
+        channel=POLL_CHANNEL,
+        listen=False,
+        retries=1,
+    )
     if not rpc.get("ok"):
         return False
     devices = flatten_nodes(nodes_from_result(rpc.get("result")))
@@ -5868,56 +5887,86 @@ def refresh_live_from_nodes() -> bool:
     return True
 
 
+def poll_paused() -> bool:
+    """True when a light command or a pairing job should have the Matter server."""
+    return command_in_flight() or commission_job_is_running()
+
+
+def _poll_node_cooling(node_id: int, now: float) -> bool:
+    until = _poll_node_backoff.get(node_id, 0.0)
+    if until <= now:
+        _poll_node_backoff.pop(node_id, None)
+        return False
+    return True
+
+
+def _chunked(paths: list[str], size: int) -> list[list[str]]:
+    return [paths[i : i + size] for i in range(0, len(paths), size)] if paths else []
+
+
 def poll_light_attributes() -> None:
-    if command_in_flight():
+    global _poll_color_at
+    if poll_paused():
         return
     groups = light_poll_groups()
     if not groups:
-        if not refresh_live_from_nodes():
+        if poll_paused() or not refresh_live_from_nodes():
             return
         groups = light_poll_groups()
         if not groups:
             return
+    now = time.time()
+    read_color = now >= _poll_color_at
     any_ok = False
+    saw_timeout = False
+    color_started = False
     for node_id, endpoints in groups.items():
-        if command_in_flight():
+        if poll_paused():
             return
+        if _poll_node_cooling(node_id, now):
+            continue
         on_paths = [attr_key(endpoint, ON_OFF, ATTR_ON_OFF) for endpoint in endpoints]
         level_paths = [attr_key(endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) for endpoint in endpoints]
-        color_paths: list[str] = []
-        for endpoint in endpoints:
-            color_paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
-        for paths in (on_paths, level_paths, color_paths):
-            if not paths:
-                continue
-            rpc = matter_rpc(
-                "read_attribute",
-                {"node_id": node_id, "attribute_path": paths},
-                timeout=12.0,
-                channel=POLL_CHANNEL,
-                listen=False,
-            )
-            if not rpc.get("ok"):
-                err = str(rpc.get("error") or "").lower()
-                if "timed" in err or "timeout" in err:
-                    continue
-                if paths is color_paths:
-                    for endpoint in endpoints:
-                        one = [attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS]
-                        one_rpc = matter_rpc(
-                            "read_attribute",
-                            {"node_id": node_id, "attribute_path": one},
-                            timeout=6.0,
-                            channel=POLL_CHANNEL,
-                            listen=False,
-                        )
-                        if one_rpc.get("ok"):
-                            apply_read_attributes(node_id, one_rpc.get("result"))
-                            any_ok = True
-                continue
-            apply_read_attributes(node_id, rpc.get("result"))
-            any_ok = True
-    if any_ok:
+        batches: list[list[str]] = [on_paths, level_paths]
+        if read_color:
+            color_paths: list[str] = []
+            for endpoint in endpoints:
+                color_paths.extend(attr_key(endpoint, COLOR_CONTROL, attr) for attr in COLOR_POLL_ATTRS)
+            batches.append(color_paths)
+            color_started = True
+        node_timed_out = False
+        for paths in batches:
+            if node_timed_out or poll_paused():
+                break
+            for chunk in _chunked(paths, POLL_PATH_CHUNK):
+                if poll_paused():
+                    return
+                # One attempt. The default retry closes the socket and sends
+                # the read again while the server is still on the first one.
+                rpc = matter_rpc(
+                    "read_attribute",
+                    {"node_id": node_id, "attribute_path": chunk},
+                    timeout=POLL_READ_TIMEOUT,
+                    channel=POLL_CHANNEL,
+                    listen=False,
+                    retries=1,
+                )
+                if not rpc.get("ok"):
+                    err = str(rpc.get("error") or "").lower()
+                    if "timed" in err or "timeout" in err:
+                        _poll_node_backoff[node_id] = time.time() + POLL_NODE_BACKOFF_S
+                        node_timed_out = True
+                        saw_timeout = True
+                    # A failed colour batch used to fan out to one read per
+                    # bulb. That queue is what made taps slower over uptime.
+                    break
+                apply_read_attributes(node_id, rpc.get("result"))
+                any_ok = True
+        if not node_timed_out:
+            _poll_node_backoff.pop(node_id, None)
+    if color_started and not poll_paused():
+        _poll_color_at = time.time() + POLL_COLOR_INTERVAL_S
+    if any_ok or poll_paused() or saw_timeout:
         return
     refresh_live_from_nodes()
 
@@ -6217,7 +6266,7 @@ def maybe_scan_new_endpoints() -> None:
     if _scan_due_at <= 0:
         _scan_due_at = now + FIRST_SCAN_DELAY_S
         return
-    if now < _scan_due_at or command_in_flight():
+    if now < _scan_due_at or poll_paused():
         return
     _scan_due_at = now + SCAN_INTERVAL_S
     try:
@@ -6237,6 +6286,12 @@ def start_state_poll() -> None:
             try:
                 # Listen dump can take tens of seconds on a Hue Bridge. Do not
                 # wait for it here or Apple Home On/Off never gets polled.
+                # A pairing job or a light tap owns the Matter server until it
+                # finishes; another colour read piled on top is what made taps
+                # time out after the Pi had been up for a while.
+                if poll_paused():
+                    time.sleep(0.4)
+                    continue
                 kick_listening()
                 poll_light_attributes()
                 poll_vacuum_attributes()
@@ -9701,10 +9756,14 @@ def refresh_vacuum_capabilities(
 
 
 def poll_vacuum_attributes() -> None:
-    if command_in_flight():
+    if poll_paused():
         return
     for row in current_live_devices():
+        if poll_paused():
+            return
         if not isinstance(row, dict) or str(row.get("kind") or "") != "vacuum":
+            continue
+        if row.get("available") is False:
             continue
         nid, ep = row_node_endpoint(row)
         if nid <= 0 or ep <= 0:
