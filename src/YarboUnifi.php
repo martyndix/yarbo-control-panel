@@ -685,6 +685,23 @@ final class YarboUnifi
     }
 
     /**
+     * Access door-position rows duplicate the lockable door already on Home.
+     *
+     * @param array<string, mixed> $row
+     * @param array<string, true> $coveredDoors
+     */
+    private function contactCoveredByDoor(array $row, array $coveredDoors): bool
+    {
+        $doorId = trim((string) ($row['door_id'] ?? ''));
+        if ($doorId !== '' && isset($coveredDoors[$doorId])) {
+            return true;
+        }
+        $native = (string) ($row['native_id'] ?? '');
+
+        return str_starts_with($native, 'dps-') && isset($coveredDoors[substr($native, 4)]);
+    }
+
+    /**
      * Door-position and contact sensors for the Home doors strip.
      *
      * @return list<array<string, mixed>>
@@ -1161,8 +1178,19 @@ final class YarboUnifi
         $config = $this->load();
         $wanted = array_fill_keys($config['show_on_home'], true);
         $tickedRelays = $this->tickedRelayIds($config['show_on_home']);
+        $devices = $this->inventoryDeviceRows();
+        $coveredDoors = [];
+        foreach ($devices as $device) {
+            if (!is_array($device) || (string) ($device['kind'] ?? '') !== self::KIND_DOOR) {
+                continue;
+            }
+            $native = (string) ($device['native_id'] ?? '');
+            if ($native !== '') {
+                $coveredDoors[$native] = true;
+            }
+        }
         $rows = [];
-        foreach ($this->inventoryDeviceRows() as $device) {
+        foreach ($devices as $device) {
             if (!is_array($device)) {
                 continue;
             }
@@ -1173,12 +1201,16 @@ final class YarboUnifi
             $kind = (string) ($device['kind'] ?? '');
             $companionOf = (string) ($device['companion_of'] ?? '');
             $relayId = (string) ($device['relay_id'] ?? '');
-            // Relay outputs always belong on Home so they can go in a room
-            // without a separate Show on Home tick (cameras still need one).
+            // Relays and open/close sensors belong on Home without a Show on
+            // Home tick, so a new UP Sense can be given a room and Door/Window.
+            // A door-position sensor that already has its Access door listed
+            // stays off unless it was ticked. Cameras still need a tick.
+            $standaloneContact = self::isDoorSensor($device) && !$this->contactCoveredByDoor($device, $coveredDoors);
             if ($kind === self::KIND_RELAY
                 || isset($wanted[$id])
                 || ($companionOf !== '' && isset($wanted[$companionOf]))
                 || ($relayId !== '' && isset($tickedRelays[$relayId]))
+                || $standaloneContact
             ) {
                 $rows[] = $device;
             }

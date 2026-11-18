@@ -132,6 +132,16 @@ file_put_contents($root . '/data/unifi-inventory.json', json_encode([
         'has_motion' => true,
         'motion' => true,
     ], [
+        'id' => 'unifi:sensor:utility-window',
+        'native_id' => 'utility-sense',
+        'name' => 'Utility Window',
+        'kind' => 'sensor',
+        'source' => 'unifi',
+        'product' => 'UFP-SENSE',
+        'has_open' => true,
+        'open' => false,
+        'status' => 'Closed',
+    ], [
         'id' => 'unifi:sensor:spare-window',
         'native_id' => 'usp-spare',
         'name' => 'Spare window',
@@ -168,6 +178,9 @@ assert_true(isset($byId['unifi:sensor:kitchen-window']), 'window sensor on ACCES
 assert_true(isset($byId['unifi:sensor:side-door']), 'door sensor on ACCESS');
 assert_true(!isset($byId['unifi:sensor:dps-garage']), 'covered DPS is not duplicated: ' . json_encode($items));
 assert_true(!isset($byId['unifi:sensor:pir-drive']), 'PIR stays off ACCESS');
+assert_true(isset($byId['unifi:sensor:utility-window']), 'UP Sense not ticked Show on Home is still on ACCESS: ' . json_encode(array_keys($byId)));
+assert_true(($byId['unifi:sensor:utility-window']['role'] ?? '') === 'window', 'Utility Window infers window');
+assert_true(($byId['unifi:sensor:utility-window']['unlock'] ?? true) === false, 'UP Sense is not unlockable');
 assert_true(!isset($byId['unifi:hub:mini']), 'bound hub is not duplicated when the door is listed: ' . json_encode($items));
 assert_true(!isset($byId['unifi:hub:hidden']), 'hub hidden from Home (not Show on Home) stays off ACCESS');
 assert_true(!isset($byId['unifi:door:spare']), 'door hidden from Home stays off ACCESS');
