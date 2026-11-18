@@ -561,7 +561,10 @@ final class YarboMatterFabric
                     continue;
                 }
                 $hasOnOff = $onVal !== null || self::endpointHasCluster($attributes, $endpoint, self::ON_OFF);
-                if (!$hasOnOff && $kind !== 'heater' && $kind !== 'vacuum' && $kind !== 'sensor') {
+                if (!$hasOnOff && ($kind === 'button' || self::endpointHasCluster($attributes, $endpoint, 59))) {
+                    $kind = 'button';
+                }
+                if (!$hasOnOff && $kind !== 'heater' && $kind !== 'vacuum' && $kind !== 'sensor' && $kind !== 'button') {
                     continue;
                 }
                 $isLight = $kind === 'light';
@@ -784,7 +787,12 @@ final class YarboMatterFabric
             }
         }
         foreach ($ids as $id) {
-            if (in_array($id, [0x000F, 0x0103, 0x0104, 0x0105, 0x010F], true)) {
+            if ($id === 0x000F) {
+                return 'button';
+            }
+        }
+        foreach ($ids as $id) {
+            if (in_array($id, [0x0103, 0x0104, 0x0105, 0x010F], true)) {
                 return 'switch';
             }
         }
@@ -884,6 +892,25 @@ final class YarboMatterFabric
             (string) ($row['source'] ?? '')
         );
         $existing = strtolower(trim((string) ($row['kind'] ?? '')));
+        if ($existing === 'tv') {
+            $row['kind'] = 'tv';
+            $row['colorable'] = false;
+            $row['dimmable'] = false;
+
+            return $row;
+        }
+        if ($existing === 'button' || $kind === 'button') {
+            $row['kind'] = 'button';
+            $row['colorable'] = false;
+            $row['dimmable'] = false;
+            $row['color_hs'] = false;
+            $row['color_xy'] = false;
+            $row['color_ct'] = false;
+            $row['brightness'] = null;
+            $row['color_hex'] = '';
+
+            return $row;
+        }
         if ($existing === 'sensor'
             || !empty($row['has_open'])
             || !empty($row['has_motion'])

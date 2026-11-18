@@ -70,6 +70,10 @@
 /data/home-automations.log
 /data/home-automations.pid
 /data/home-automations.nudge
+/data/hisense.json
+/data/hisense-client.pem
+/data/hisense-client.key
+/data/button-press.json
 /data/sensor-history/
 /data/sensor-history.log
 /data/matter-server/

@@ -2,6 +2,8 @@
 
 Optional module: control **Matter** lights, plugs, switches, and heaters from this panel, and show Matter climate / contact sensors (temperature, humidity, open/closed) plus plug **watts** when the device reports Electrical Power Measurement. Pair with a code from the **Hue app**, **Apple Home**, or the device itself. This is **not** a clone of the Home app.
 
+A **Hisense TV** that is already in Apple Home does not share a Matter pairing code. On Home, open **⚙️**, then **Look for TV** or type the set’s IP and tap **Add TV**. If the set shows a code, enter it. The TV appears as its own row with On/Off and the input names the set reports (Home, Apple TV, and so on). Automations can turn it on to a chosen input and turn it off after a timer. An **IKEA Bilresa** button is paired with **Turn On Pairing Mode** in Apple Home (not the printed QR). It does not appear in a room. In Automations it is a When: pressed, double pressed, or held, and a different gesture on the same chip can stop the automation.
+
 Not affiliated with Apple, Signify/Philips Hue, or the Connectivity Standards Alliance.
 
 ## What it can do

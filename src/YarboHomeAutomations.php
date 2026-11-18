@@ -12,14 +12,17 @@ final class YarboHomeAutomations
 {
     private const DURATION_EVENTS = ['stays_on', 'stays_off', 'stays_open', 'stays_closed', 'no_motion'];
     private const DETECT_EVENTS = ['person', 'vehicle', 'animal', 'package', 'line_crossing'];
+    private const BUTTON_EVENTS = ['press', 'double', 'hold'];
     private const EDGE_EVENTS = [
         'turns_on', 'turns_off', 'opens', 'closes', 'motion',
         'person', 'vehicle', 'animal', 'package', 'line_crossing',
+        'press', 'double', 'hold',
     ];
     private const DEVICE_EVENTS = [
         'turns_on', 'turns_off', 'opens', 'closes', 'motion',
         'person', 'vehicle', 'animal', 'package', 'line_crossing',
         'stays_on', 'stays_off', 'stays_open', 'stays_closed', 'no_motion',
+        'press', 'double', 'hold',
     ];
     private const DEVICE_STATES = [
         'on', 'off', 'open', 'closed', 'motion', 'no_motion',
@@ -28,7 +31,7 @@ final class YarboHomeAutomations
     private const DEVICE_COMMANDS = [
         'on', 'off', 'toggle', 'unlock', 'lock', 'open', 'close', 'stop',
         'brightness', 'color', 'color_temp', 'setpoint', 'pulse',
-        'start', 'dock', 'pause', 'resume', 'mop', 'vacuum',
+        'start', 'dock', 'pause', 'resume', 'mop', 'vacuum', 'input',
     ];
     public const POWERWALL_ID = 'powerwall';
     public const POWERWALL_METRICS = ['battery', 'export', 'solar', 'load'];
@@ -618,6 +621,18 @@ final class YarboHomeAutomations
 
         foreach ($enabled as $rule) {
             $id = (string) $rule['id'];
+            if ($this->buttonStopFired($rule, $prev, $curr)) {
+                $offs = $this->offActions(is_array($rule['actions'] ?? null) ? $rule['actions'] : []);
+                if ($offs !== []) {
+                    $this->runActions($offs, [
+                        'via' => 'automation',
+                        'name' => (string) ($rule['name'] ?? ''),
+                    ]);
+                }
+                unset($state['delayed'][$id], $state['latched'][$id]);
+                $state['last_fire'][$id] = $now;
+                continue;
+            }
             $cooldown = (int) ($rule['cooldown_sec'] ?? 30);
             $lastFire = (int) (($state['last_fire'][$id] ?? 0));
             $inCooldown = $cooldown > 0 && $lastFire > 0 && ($now - $lastFire) < $cooldown;
@@ -1886,6 +1901,9 @@ final class YarboHomeAutomations
             'stays_open' => 'open',
             'stays_closed' => 'closed',
             'no_motion' => 'no motion',
+            'press' => 'pressed',
+            'double' => 'double pressed',
+            'hold' => 'held',
         ];
         $phrase = $labels[$event] ?? $event;
         if ($event === 'motion' && preg_match('/motion$/i', trim($name))) {
@@ -2204,6 +2222,10 @@ final class YarboHomeAutomations
             return null;
         }
         $out = ['type' => 'device', 'id' => $id, 'event' => $event];
+        $stop = strtolower(trim((string) ($trigger['stop_event'] ?? '')));
+        if (in_array($event, self::BUTTON_EVENTS, true) && in_array($stop, self::BUTTON_EVENTS, true) && $stop !== $event) {
+            $out['stop_event'] = $stop;
+        }
         if (in_array($event, self::DURATION_EVENTS, true)) {
             $sec = (int) ($trigger['for_sec'] ?? 300);
             $out['for_sec'] = max(1, min(86400, $sec));
@@ -2291,7 +2313,7 @@ final class YarboHomeAutomations
             return null;
         }
         $deviceKind = strtolower(trim((string) ($action['device_kind'] ?? '')));
-        if (!in_array($deviceKind, ['light', 'heater', 'plug', 'switch', 'vacuum', 'relay'], true)) {
+        if (!in_array($deviceKind, ['light', 'heater', 'plug', 'switch', 'vacuum', 'relay', 'tv'], true)) {
             $deviceKind = '';
         }
         $accept = $cmd === 'lock' ? 'unlock' : $cmd;
@@ -2312,6 +2334,16 @@ final class YarboHomeAutomations
             $out['pulse_count'] = YarboHome::normalizePulseCount($action['pulse_count'] ?? YarboHome::PULSE_COUNT_DEFAULT);
 
             return $out;
+        }
+        if ($deviceKind === 'tv' || str_starts_with($id, 'hisense:')) {
+            $inputId = trim((string) ($action['input'] ?? $action['source_id'] ?? ''));
+            if ($inputId !== '') {
+                $out['input'] = $inputId;
+            }
+            $inputName = trim((string) ($action['input_name'] ?? ''));
+            if ($inputName !== '') {
+                $out['input_name'] = $inputName;
+            }
         }
         if (in_array($cmd, ['on', 'brightness', 'color', 'color_temp', 'setpoint'], true)) {
             if (array_key_exists('brightness', $action) && $action['brightness'] !== null && $action['brightness'] !== '') {
@@ -2455,6 +2487,8 @@ final class YarboHomeAutomations
                 'open' => array_key_exists('open', $row) ? ($row['open'] === null ? null : (bool) $row['open']) : null,
                 'motion' => array_key_exists('motion', $row) ? ($row['motion'] === null ? null : (bool) $row['motion']) : null,
                 'motion_at' => isset($row['motion_at']) && is_numeric($row['motion_at']) ? (int) $row['motion_at'] : 0,
+                'press_at' => isset($row['press_at']) && is_numeric($row['press_at']) ? (int) $row['press_at'] : 0,
+                'press_gesture' => (string) ($row['press_gesture'] ?? ''),
                 'person' => !empty($row['person']),
                 'vehicle' => !empty($row['vehicle']),
                 'animal' => !empty($row['animal']),
@@ -2710,6 +2744,9 @@ final class YarboHomeAutomations
         }
 
         return match ($event) {
+            'press', 'double', 'hold' => (string) ($row['press_gesture'] ?? '') === $event
+                && (int) ($row['press_at'] ?? 0) > 0
+                && ($now - (int) ($row['press_at'] ?? 0)) <= 8,
             'turns_on' => $row['on'] === true,
             'turns_off' => $row['on'] === false,
             'opens' => $row['open'] === true,
@@ -2969,6 +3006,47 @@ final class YarboHomeAutomations
      * @param array<string, mixed> $prev
      * @param array<string, mixed> $curr
      */
+    /**
+     * @param array<string, mixed> $rule
+     * @param array<string, array<string, mixed>> $prev
+     * @param array<string, array<string, mixed>> $curr
+     */
+    private function buttonStopFired(array $rule, array $prev, array $curr): bool
+    {
+        foreach (self::triggersOf($rule) as $trigger) {
+            if (!is_array($trigger)) {
+                continue;
+            }
+            $stop = (string) ($trigger['stop_event'] ?? '');
+            $id = (string) ($trigger['id'] ?? '');
+            if ($stop === '' || $id === '' || !isset($prev[$id], $curr[$id])) {
+                continue;
+            }
+            if ($this->buttonEdge($stop, $prev[$id], $curr[$id])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed> $prev
+     * @param array<string, mixed> $curr
+     */
+    private function buttonEdge(string $event, array $prev, array $curr): bool
+    {
+        if (!in_array($event, self::BUTTON_EVENTS, true)) {
+            return false;
+        }
+        $at = (int) ($curr['press_at'] ?? 0);
+        if ($at <= 0 || $at <= (int) ($prev['press_at'] ?? 0)) {
+            return false;
+        }
+
+        return (string) ($curr['press_gesture'] ?? '') === $event;
+    }
+
     private function edgeFired(string $event, array $prev, array $curr): bool
     {
         return match ($event) {
@@ -2978,6 +3056,7 @@ final class YarboHomeAutomations
             'closes' => $prev['open'] === true && $curr['open'] === false,
             'motion' => ($prev['motion'] === false && $curr['motion'] === true)
                 || ((int) ($curr['motion_at'] ?? 0) > 0 && (int) ($curr['motion_at'] ?? 0) > (int) ($prev['motion_at'] ?? 0)),
+            'press', 'double', 'hold' => $this->buttonEdge($event, $prev, $curr),
             'person', 'vehicle', 'animal', 'package', 'line_crossing' => $this->detectEdgeFired($event, $prev, $curr),
             default => false,
         };
@@ -3804,6 +3883,19 @@ final class YarboHomeAutomations
         $cmd = (string) ($action['command'] ?? 'on');
         if ($cmd === 'lock') {
             $cmd = 'unlock';
+        }
+        $deviceKind = strtolower(trim((string) ($action['device_kind'] ?? '')));
+        if ($deviceKind === 'tv' || str_starts_with((string) ($action['id'] ?? ''), YarboHisense::ID_PREFIX)) {
+            $payload = [
+                'id' => (string) ($action['id'] ?? ''),
+                'command' => $cmd,
+                'kind' => 'tv',
+            ];
+            if (trim((string) ($action['input'] ?? '')) !== '') {
+                $payload['input'] = (string) $action['input'];
+            }
+
+            return $home->command($payload);
         }
         if (in_array($cmd, ['on', 'brightness', 'color', 'color_temp', 'setpoint'], true)) {
             return $this->runDeviceLook($home, $action);

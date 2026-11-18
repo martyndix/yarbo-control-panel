@@ -67,7 +67,7 @@ if ($action === 'sensor_history_sample') {
     json_response(['ok' => false, 'error' => 'Turn on the Home module in Settings.'], 403);
 }
 
-set_time_limit($action === 'commission' || $action === 'scan' ? 150 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' || $action === 'scene_off' ? 180 : ($action === 'command' ? 100 : 70))));
+set_time_limit($action === 'commission' || $action === 'scan' ? 150 : ($action === 'setup' ? 12 : ($action === 'room_command' || $action === 'group_command' || $action === 'scene_run' || $action === 'scene_off' ? 180 : ($action === 'command' ? 100 : (in_array($action, ['tv_discover', 'tv_add', 'tv_pin'], true) ? 120 : 70)))));
 ignore_user_abort($action === 'setup' || $action === 'commission_start' || $action === 'commission_status');
 
 try {
@@ -77,6 +77,12 @@ try {
         'commission_start' => $home->commissionStart((string) ($input['code'] ?? '')),
         'commission_status' => $home->commissionStatus((string) ($input['job_id'] ?? '')),
         'scan' => $home->scanDevices(),
+        'tv_discover' => (new \Yarbo\YarboHisense($projectRoot))->discover(),
+        'tv_add' => (new \Yarbo\YarboHisense($projectRoot))->add((string) ($input['host'] ?? $input['ip'] ?? '')),
+        'tv_pin' => (new \Yarbo\YarboHisense($projectRoot))->submitPin(
+            (string) ($input['id'] ?? ''),
+            (string) ($input['pin'] ?? $input['code'] ?? '')
+        ),
         'forget' => $home->forgetNode((int) ($input['node_id'] ?? 0)),
         'hide' => $home->hideDevice((string) ($input['id'] ?? ''), true),
         'unhide' => $home->hideDevice((string) ($input['id'] ?? ''), false),

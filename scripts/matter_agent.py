@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 121
+AGENT_VERSION = 122
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -7188,10 +7188,78 @@ def merge_live_nodes(nodes: list[dict[str, Any]]) -> None:
         index_climate_aliases(list(_live_devices))
 
 
+SWITCH_CLUSTER = 59
+_button_recent: dict[str, tuple[float, str]] = {}
+
+
+def button_gesture(event_id: int, data: Any) -> str | None:
+    """Map a Matter Switch cluster event to press, double, or hold."""
+    count = 1
+    if isinstance(data, dict):
+        for key in ("totalNumberOfPressesCounted", "TotalNumberOfPressesCounted", "1", 1):
+            if key in data and data[key] is not None:
+                try:
+                    count = int(data[key])
+                except (TypeError, ValueError):
+                    count = 1
+                break
+    if event_id == 2:
+        return "hold"
+    if event_id == 3:
+        return "press"
+    if event_id in (5, 6):
+        return "double" if count >= 2 else "press"
+    return None
+
+
+def note_button_press(device_id: str, gesture: str) -> None:
+    now = time.time()
+    recent = _button_recent.get(device_id)
+    if gesture == "press" and recent and now - recent[0] < 1.2 and recent[1] in ("double", "hold"):
+        return
+    _button_recent[device_id] = (now, gesture)
+    stamp = int(now)
+    patch_live_device(device_id, {"press_gesture": gesture, "press_at": stamp, "kind": "button"})
+    path = ROOT / "data" / "button-press.json"
+    try:
+        blob = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        blob = {}
+    if not isinstance(blob, dict):
+        blob = {}
+    blob[device_id] = {"gesture": gesture, "at": stamp}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(blob) + "\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def apply_node_event(data: Any) -> None:
+    if not isinstance(data, dict):
+        return
+    try:
+        cluster = int(data.get("cluster_id") or data.get("clusterId") or 0)
+        event_id = int(data.get("event_id") or data.get("eventId") or 0)
+        node_id = int(data.get("node_id") or data.get("nodeId") or 0)
+        endpoint = int(data.get("endpoint_id") or data.get("endpointId") or data.get("endpoint") or 0)
+    except (TypeError, ValueError):
+        return
+    if cluster != SWITCH_CLUSTER or node_id <= 0 or endpoint <= 0:
+        return
+    gesture = button_gesture(event_id, data.get("data"))
+    if gesture is None:
+        return
+    note_button_press(f"{node_id}:{endpoint}", gesture)
+
+
 def ingest_ws_message(msg: dict[str, Any]) -> None:
     event = str(msg.get("event") or "")
     if event == "attribute_updated":
         apply_attribute_event(msg.get("data"))
+        return
+    if event in ("node_event", "event"):
+        apply_node_event(msg.get("data"))
         return
     if event in ("node_updated", "node_added"):
         data = msg.get("data")
@@ -7341,9 +7409,10 @@ def device_kind(types: Any) -> str:
         return "sensor"
     if any(i in (0x010A, 0x010B) for i in ids):
         return "plug"
+    if any(i == DEVTYPE_GENERIC_SWITCH for i in ids):
+        return "button"
     if any(
         i in (
-            DEVTYPE_GENERIC_SWITCH,
             DEVTYPE_ONOFF_LIGHT_SWITCH,
             DEVTYPE_DIMMER_SWITCH,
             DEVTYPE_COLOR_DIMMER_SWITCH,
@@ -10962,7 +11031,11 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
             if kind == "heater" and node_has_thermo and not endpoint_looks_heater(attributes, endpoint):
                 continue
             has_on_off = on_val is not None or endpoint_has_cluster(attributes, endpoint, ON_OFF)
-            if not has_on_off and kind not in ("heater", "vacuum", "sensor"):
+            if not has_on_off and (
+                kind == "button" or endpoint_has_cluster(attributes, endpoint, 59)
+            ):
+                kind = "button"
+            if not has_on_off and kind not in ("heater", "vacuum", "sensor", "button"):
                 continue
             is_light = kind == "light"
             thermo = thermostat_payload(attributes, endpoint) if kind == "heater" else {
