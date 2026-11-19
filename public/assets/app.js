@@ -926,6 +926,8 @@ function updateControlTiles(data) {
 
 async function toggleController(button) {
     if (button.disabled) return;
+    await beginPanelCommand();
+    try {
     await stopDriveIfHeld();
     const nextOn = !holdController;
     const action = nextOn ? 'controller_on' : 'controller_off';
@@ -981,6 +983,9 @@ async function toggleController(button) {
         updateLightsTile();
         showToast(err.message || 'Network error', 'error');
     }
+    } finally {
+        endPanelCommand();
+    }
 }
 
 async function toggleLights(button) {
@@ -989,6 +994,8 @@ async function toggleLights(button) {
         showToast('Connect the controller first', 'error');
         return;
     }
+    await beginPanelCommand();
+    try {
     await stopDriveIfHeld();
     const nextOn = !lightsOn;
     const action = nextOn ? 'lights_on' : 'lights_off';
@@ -1044,6 +1051,9 @@ async function toggleLights(button) {
         }
         updateLightsTile();
         showToast(err.message || 'Network error', 'error');
+    }
+    } finally {
+        endPanelCommand();
     }
 }
 
@@ -16800,7 +16810,10 @@ function bindCameraReorder() {
         stage.querySelectorAll('.camera-drop').forEach((el) => el.classList.remove('camera-drop'));
     });
 }
-let cameraLiveSource = null;
+let cameraLiveToken = 0;
+let cameraFramesOpen = false;
+let cameraPictureAbort = null;
+let panelCommandDepth = 0;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
 let cameraLiveRunning = false;
@@ -16867,9 +16880,11 @@ function avcCDescription(sps, pps) {
 }
 
 function closeCameraFrames() {
-    if (cameraLiveSource) {
-        cameraLiveSource.close();
-        cameraLiveSource = null;
+    cameraFramesOpen = false;
+    cameraLiveToken += 1;
+    if (cameraPictureAbort) {
+        cameraPictureAbort.abort();
+        cameraPictureAbort = null;
     }
     Object.values(cameraLiveDecoders).forEach((decoder) => {
         try {
@@ -16974,16 +16989,69 @@ function handleCameraFrame(event) {
     }));
 }
 
-function openCameraFrames() {
-    closeCameraFrames();
-    cameraLiveSource = new EventSource('/api/camera_live.php?action=frames');
-    cameraLiveSource.onmessage = (message) => {
+function panelPause(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function beginPanelCommand() {
+    panelCommandDepth += 1;
+    const abort = cameraPictureAbort;
+    if (panelCommandDepth === 1 && abort) {
+        cameraPictureAbort = null;
+        abort.abort();
+        await panelPause(40);
+    }
+}
+
+function endPanelCommand() {
+    panelCommandDepth = Math.max(0, panelCommandDepth - 1);
+}
+
+function applyCameraBatch(text) {
+    String(text || '').split('\n\n').forEach((block) => {
+        const line = block.split('\n').map((row) => row.trim()).find((row) => row.startsWith('data:'));
+        if (!line) return;
         try {
-            handleCameraFrame(JSON.parse(message.data));
+            handleCameraFrame(JSON.parse(line.slice(5).trim()));
         } catch {
             /* ignore a bad picture packet */
         }
-    };
+    });
+}
+
+async function pullCameraFrames(token) {
+    while (token === cameraLiveToken) {
+        while (panelCommandDepth > 0 && token === cameraLiveToken) {
+            await panelPause(30);
+        }
+        if (token !== cameraLiveToken) return;
+        const abort = new AbortController();
+        cameraPictureAbort = abort;
+        try {
+            const res = await fetch('/api/camera_live.php?action=frames', {
+                cache: 'no-store',
+                signal: abort.signal,
+            });
+            if (token !== cameraLiveToken) return;
+            if (!res.ok) {
+                await panelPause(400);
+                continue;
+            }
+            applyCameraBatch(await res.text());
+        } catch (err) {
+            if (token !== cameraLiveToken) return;
+            if (err && err.name === 'AbortError') continue;
+            await panelPause(300);
+        } finally {
+            if (cameraPictureAbort === abort) cameraPictureAbort = null;
+        }
+    }
+}
+
+function openCameraFrames() {
+    closeCameraFrames();
+    cameraFramesOpen = true;
+    pullCameraFrames(cameraLiveToken);
 }
 
 function setCameraLiveButtons(running) {
@@ -17039,7 +17107,7 @@ async function pollCameraLive() {
     try {
         const res = await fetch('/api/camera_live.php?action=status', { cache: 'no-store' });
         const data = await res.json();
-        if (data.state === 'live' && cameraLiveRunning && !cameraLiveSource) {
+        if (data.state === 'live' && cameraLiveRunning && !cameraFramesOpen) {
             openCameraFrames();
         }
         applyCameraLiveStatus(data);
@@ -17272,6 +17340,7 @@ async function loadCameras() {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
+    await beginPanelCommand();
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
@@ -17299,6 +17368,8 @@ async function sendDrive(linear, angular, enterManual = false) {
         showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
+    } finally {
+        endPanelCommand();
     }
 }
 
@@ -17453,6 +17524,8 @@ function setupDrivePad() {
 }
 
 async function sendCommand(action, button) {
+    await beginPanelCommand();
+    try {
     await stopDriveIfHeld();
     try {
         const res = await fetch('/api/command.php', {
@@ -17492,6 +17565,9 @@ async function sendCommand(action, button) {
         showToast(err.message || 'Network error', 'error');
     } finally {
         updateControllerGatedControls();
+    }
+    } finally {
+        endPanelCommand();
     }
 }
 

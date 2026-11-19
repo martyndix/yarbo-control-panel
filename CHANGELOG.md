@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.34] - 2026-11-19
+
+### Fixed
+
+- Lights, dock, and drive did nothing while the cameras were showing. Safari kept the picture connection and never sent those presses. A press now goes out first, and the pictures continue afterwards. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.33] - 2026-11-19
 
 ### Fixed

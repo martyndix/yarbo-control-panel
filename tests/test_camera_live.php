@@ -104,6 +104,8 @@ assert_true(!str_contains($appJs, 'has not received a picture'), 'the page does 
 assert_true(str_contains($livePhp, "'already' => true"), 'Start leaves a working picture process running');
 assert_true(str_contains($camera, 'b": live\\n\\n"'), 'the picture stream starts the way it did when the cameras showed');
 assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');
+assert_true(!str_contains($appJs, 'new EventSource'), 'pictures are not left on the connection Safari uses for the buttons');
+assert_true(str_contains($appJs, 'function beginPanelCommand'), 'a button press takes the connection ahead of the next picture');
 assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
 assert_true(str_contains($appJs, 'firstPicture'), 'a live picture enables drive once, not on every frame');
 assert_true(str_contains($appJs, 'el.disabled !== disabled'), 'drive hold is not cancelled by rewriting disabled');
