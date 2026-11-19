@@ -49,6 +49,8 @@ assert_true(!str_contains($slice, 'get_controller'), 'vision does not take the c
 assert_true(!str_contains($slice, 'apply_command_session'), 'vision does not use the control session');
 
 $camera = (string) file_get_contents($root . '/scripts/yarbo_camera_agent.py');
+assert_true(str_contains($camera, 'or 8767'), 'live view does not bind the Matter agent port');
+assert_true(!str_contains($camera, 'or 8766'), 'live view default port is not 8766');
 assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Agora token');
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');
 assert_true(!str_contains($camera, 'set_working_state'), 'live view does not change the job');

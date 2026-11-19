@@ -73,10 +73,15 @@ final class YarboCameraLive
         $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
         $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
         $mqttPort = (int) (getenv('YARBO_MQTT_AGENT_PORT') ?: 8765);
+        $cameraPort = (int) (getenv('YARBO_CAMERA_PORT') ?: 8767);
+        if ($cameraPort === 8766) {
+            $cameraPort = 8767;
+        }
         $cmd = sprintf(
-            'cd %s && YARBO_MQTT_AGENT_PORT=%d %s%s%s %s --root %s >> %s 2>&1 < /dev/null & echo $!',
+            'cd %s && YARBO_MQTT_AGENT_PORT=%d YARBO_CAMERA_PORT=%d %s%s%s %s --root %s >> %s 2>&1 < /dev/null & echo $!',
             escapeshellarg($this->projectRoot),
             $mqttPort,
+            $cameraPort,
             $nohup,
             $setsid,
             escapeshellarg($python),
@@ -102,7 +107,10 @@ final class YarboCameraLive
     public function stop(): array
     {
         $snap = $this->readStatusFile();
-        $port = (int) ($snap['port'] ?? (getenv('YARBO_CAMERA_PORT') ?: 8766));
+        $port = (int) ($snap['port'] ?? (getenv('YARBO_CAMERA_PORT') ?: 8767));
+        if ($port === 8766) {
+            $port = 8767;
+        }
         if ($port > 0) {
             $ctx = stream_context_create(['http' => ['method' => 'POST', 'timeout' => 2, 'ignore_errors' => true]]);
             @file_get_contents('http://127.0.0.1:' . $port . '/stop', false, $ctx);

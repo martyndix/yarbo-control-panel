@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.13] - 2026-11-19
+
+### Fixed
+
+- Start live view failed with **[Errno 98] Address already in use** and the four cameras stayed offline. Live view was opening the same local port as the Matter agent (8766). It now uses 8767, so Matter keeps its port and the cameras can start. Update to latest, then press Start live view again. Leave it alone while the robot is on 4G.
+
 ## [5.0.12] - 2026-11-19
 
 ### Fixed

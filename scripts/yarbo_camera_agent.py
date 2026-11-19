@@ -909,7 +909,9 @@ def run(root: Path) -> int:
             raise RuntimeError("Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.")
         session.set_state("starting", "Asking the robot to publish")
         arm(session)
-        port = int(os.environ.get("YARBO_CAMERA_PORT") or 8766)
+        # 8766 is the Matter agent. Binding there raises Errno 98 and live view
+        # never starts, even though the robot itself is online.
+        port = int(os.environ.get("YARBO_CAMERA_PORT") or 8767)
         httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
         session.port = port
         session.set_state("live", "Live view is on")
@@ -927,6 +929,8 @@ def run(root: Path) -> int:
         text = str(exc) or "Live view failed"
         if "Errno 111" in text or "Connection refused" in text:
             text = "Live view could not reach Yarbo. Wait until the robot shows online, then press Start live view again."
+        if "Errno 98" in text or "Address already in use" in text:
+            text = "Live view could not open its picture port. Press Stop, then Start live view again."
         session.set_state("error", text)
         return 1
     finally:
