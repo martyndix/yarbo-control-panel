@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.18] - 2026-11-19
+
+### Fixed
+
+- Turning an automation **On** snapped the switch back off and toasted **The panel is busy — try again**. The Home refresh was still using the panel, so the save was cancelled and the next refresh drew the old Off state. The switch now stays where you set it, the refresh waits, and the save is tried again if the panel was busy. Update to latest and refresh the page.
+
 ## [5.0.17] - 2026-11-19
 
 ### Fixed

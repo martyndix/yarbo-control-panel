@@ -1914,6 +1914,8 @@ $index = (string) file_get_contents(__DIR__ . '/../public/index.php');
 assert_true(str_contains($index, 'home-automations-page'), 'Automations overlay');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
 assert_true(str_contains($js, 'openHomeAutomations'), 'Automations UI');
+assert_true(str_contains($js, 'HOME_WRITE_ACTIONS'), 'turning an automation on pauses the Home refresh');
+assert_true(str_contains($js, 'homeDashEpoch'), 'a Home refresh that started earlier cannot turn the switch back off');
 assert_true(str_contains($js, 'data-auto-copy'), 'Copy as template');
 assert_true(str_contains($js, 'Delete “${label}”? This cannot be undone.'), 'delete confirmation');
 assert_true(str_contains($js, 'homeAutoFollowName'), 'rename when chips change');

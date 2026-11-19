@@ -5135,7 +5135,9 @@ function homeColorInputsHtml(d, on, hex, kelvin, colorAttr, kelvinAttr) {
 }
 
 const HOME_CONTROL_ACTIONS = new Set(['command', 'room_command', 'group_command', 'scene_run', 'scene_off']);
+const HOME_WRITE_ACTIONS = new Set(['automation_enable', 'automation_save', 'automation_delete']);
 const HOME_ASSIGN_ACTIONS = new Set(['room', 'group']);
+let homeDashEpoch = 0;
 let homeAbort = null;
 let homeControlBusy = 0;
 const homeSticky = new Map();
@@ -5193,8 +5195,9 @@ function homeStickyOn(id) {
 
 async function homeApi(body, timeoutMs = 20000) {
     const isCommand = Boolean(body && HOME_CONTROL_ACTIONS.has(body.action));
+    const isWrite = Boolean(body && HOME_WRITE_ACTIONS.has(body.action));
     const isAssign = Boolean(body && HOME_ASSIGN_ACTIONS.has(body.action));
-    if (isCommand || isAssign) beginHomeControl();
+    if (isCommand || isAssign || isWrite) beginHomeControl();
     try {
         const extra = {};
         if (!body) {
@@ -5202,6 +5205,7 @@ async function homeApi(body, timeoutMs = 20000) {
             homeAbort = new AbortController();
             extra.signal = homeAbort.signal;
         }
+        const waitMs = isWrite ? Math.max(timeoutMs, 45000) : timeoutMs;
         const res = await fetchWithTimeout('/api/home.php', {
             method: body ? 'POST' : 'GET',
             headers: {
@@ -5210,7 +5214,7 @@ async function homeApi(body, timeoutMs = 20000) {
             },
             body: body ? JSON.stringify(body) : undefined,
             ...extra,
-        }, timeoutMs);
+        }, waitMs);
         return parseJsonResponse(res);
     } catch (err) {
         if (body && isAbortError(err)) {
@@ -5218,7 +5222,7 @@ async function homeApi(body, timeoutMs = 20000) {
         }
         throw err;
     } finally {
-        if (isCommand || isAssign) endHomeControl();
+        if (isCommand || isAssign || isWrite) endHomeControl();
     }
 }
 
@@ -5300,9 +5304,11 @@ async function loadHomeDashboard(opts = {}) {
         if (!card || card.classList.contains('module-pane-hidden')) return;
     }
     homeLoadBusy = true;
+    const epoch = homeDashEpoch;
     let aborted = false;
     try {
         const data = await homeApi(null, 12000);
+        if (epoch !== homeDashEpoch) return;
         const savingId = homePaperSavingId;
         const localAssigned = savingId
             ? [...(((homeDash.paper_devices || []).find((p) => p.id === savingId) || {}).assigned || [])]
@@ -11133,12 +11139,28 @@ function bindHomeAutomations() {
         const enable = event.target.closest('[data-auto-enable]');
         if (enable) {
             const id = enable.closest('[data-auto-id]')?.getAttribute('data-auto-id');
+            const want = enable.checked;
+            homeDashEpoch += 1;
+            const rule = (homeDash.automations || []).find((row) => row.id === id);
+            const previous = Boolean(rule?.enabled);
+            if (rule) rule.enabled = want;
+            const send = () => homeApi({ action: 'automation_enable', id, enabled: want });
             try {
-                const data = await homeApi({ action: 'automation_enable', id, enabled: enable.checked });
+                let data;
+                try {
+                    data = await send();
+                } catch (err) {
+                    if (!String(err?.message || '').includes('panel is busy')) throw err;
+                    data = await send();
+                }
                 if (!data.ok) throw new Error(data.error || 'Could not update');
                 homeDash.automations = data.automations || homeDash.automations;
+                const saved = (homeDash.automations || []).find((row) => row.id === id);
+                if (saved) saved.enabled = want;
+                renderHomeAutomations();
             } catch (err) {
-                enable.checked = !enable.checked;
+                if (rule) rule.enabled = previous;
+                renderHomeAutomations();
                 showToast(err.message || 'Could not update', 'error');
             }
             return;
