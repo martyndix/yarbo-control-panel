@@ -207,6 +207,20 @@ def pip_install_agora() -> str:
     return ""
 
 
+def ensure_yarbo_sdk(session: LiveSession) -> None:
+    try:
+        import yarbo_robot_sdk  # noqa: F401
+    except ImportError:
+        session.set_state("starting", "Installing the Yarbo sign-in library")
+        cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "yarbo-data-sdk"]
+        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            lines = [line.strip() for line in (result.stderr or result.stdout or "").splitlines() if line.strip()]
+            detail = lines[-1] if lines else "pip failed"
+            raise RuntimeError("The Yarbo sign-in library did not install. " + detail[:180])
+    import yarbo_robot_sdk  # noqa: F401
+
+
 def ensure_agora(session: LiveSession, root: Path) -> None:
     if sys.version_info < (3, 10):
         other = newer_python()
@@ -869,6 +883,7 @@ def run(root: Path) -> int:
 
     try:
         ensure_agora(session, root)
+        ensure_yarbo_sdk(session)
         serial = read_serial(root)
         email, password = read_cloud(root)
         session.set_state("starting", "Signing in to Yarbo")
@@ -900,8 +915,13 @@ def run(root: Path) -> int:
         session.set_state("live", "Live view is on")
         threading.Thread(target=watch_lease, args=(session, time.time()), daemon=True).start()
         httpd.serve_forever(poll_interval=0.5)
-    except ImportError:
-        session.set_state("error", "The live camera library is not installed yet. Use Settings → Panel updates → Update to latest, then try again.")
+    except ImportError as exc:
+        missing = str(exc)
+        if "yarbo" in missing:
+            text = "The Yarbo sign-in library is missing for live view. Use Settings → Panel updates → Update to latest, then try again."
+        else:
+            text = "The live camera library is not installed yet. Use Settings → Panel updates → Update to latest, then try again."
+        session.set_state("error", text)
         return 1
     except Exception as exc:  # noqa: BLE001
         text = str(exc) or "Live view failed"

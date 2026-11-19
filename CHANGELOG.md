@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.4] - 2026-11-19
+
+### Fixed
+
+- Yarbo stayed **Offline** with “waiting for Yarbo…” after the panel restarted. The phone app could still see the robot. A restart forgets the last snapshot, and the status check was discarding the robot’s live updates when a one-second fetch missed, which it does from France. The status card now uses those live updates again. Update to latest and leave the page open for a few seconds.
+
 ## [5.0.3] - 2026-11-19
 
 ### Fixed

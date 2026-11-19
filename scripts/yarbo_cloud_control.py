@@ -46,6 +46,7 @@ class YarboCloudControlClient:
         self._last_plan_feedback_at = 0.0
         self._plan_feedback_event = threading.Event()
         self._lock = asyncio.Lock()
+        self._call_lock = threading.Lock()
 
     @property
     def is_connected(self) -> bool:
@@ -102,6 +103,13 @@ class YarboCloudControlClient:
         self._sdk = client
         self._connected = True
         _LOGGER.info("Cloud MQTT ready for SN=%s type_id=%s", self.sn, self.type_id)
+
+    def cached_device_msg(self) -> dict[str, Any] | None:
+        raw = self._last_raw
+        return dict(raw) if isinstance(raw, dict) and raw else None
+
+    def device_msg_at(self) -> float:
+        return float(self._last_raw_at or 0.0)
 
     def _on_device_message(self, _topic: str, data: Any) -> None:
         if isinstance(data, dict) and data:
@@ -267,7 +275,8 @@ class YarboCloudControlClient:
 
     def _get_device_msg_sync(self, timeout: float) -> Any:
         sdk = self._require_sdk()
-        return sdk.get_device_msg(self.sn, self.type_id, timeout=timeout)
+        with self._call_lock:
+            return sdk.get_device_msg(self.sn, self.type_id, timeout=timeout)
 
     async def get_connected_wifi(self, timeout: float = 1.5) -> Any:
         try:

@@ -245,25 +245,33 @@ install_agora_camera_sdk() {
   if ! "$base" -m pip --version >/dev/null 2>&1; then
     "$base" -m ensurepip --upgrade >/dev/null 2>&1 || true
   fi
-  if "$base" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
-    mkdir -p "${root}/data"
-    printf '%s\n' "$base" > "${root}/data/camera-python.txt"
-    return 0
-  fi
   err_file="$(mktemp)"
-  if ! "$base" -m pip install --disable-pip-version-check agora_python_server_sdk >"$err_file" 2>&1; then
-    if ! "$base" -m pip install --disable-pip-version-check --break-system-packages agora_python_server_sdk >"$err_file" 2>&1; then
-      echo "    Live camera library install failed:" >&2
+  if ! "$base" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
+    if ! "$base" -m pip install --disable-pip-version-check agora_python_server_sdk >"$err_file" 2>&1; then
+      if ! "$base" -m pip install --disable-pip-version-check --break-system-packages agora_python_server_sdk >"$err_file" 2>&1; then
+        echo "    Live camera library install failed:" >&2
+        sed 's/^/    /' "$err_file" >&2
+        rm -f "$err_file"
+        return 1
+      fi
+    fi
+  fi
+  if ! "$base" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
+    echo "    The video library installed but this Python cannot load it" >&2
+    rm -f "$err_file"
+    return 1
+  fi
+  # Live view signs in with the same Yarbo library as the status connection,
+  # but in this separate environment so the install cannot disturb it.
+  if ! "$base" -c 'import yarbo_robot_sdk' >/dev/null 2>&1; then
+    if ! "$base" -m pip install --disable-pip-version-check yarbo-data-sdk >"$err_file" 2>&1; then
+      echo "    Yarbo sign-in library for live view failed:" >&2
       sed 's/^/    /' "$err_file" >&2
       rm -f "$err_file"
       return 1
     fi
   fi
   rm -f "$err_file"
-  if ! "$base" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
-    echo "    The video library installed but this Python cannot load it" >&2
-    return 1
-  fi
   mkdir -p "${root}/data"
   printf '%s\n' "$base" > "${root}/data/camera-python.txt"
 }
