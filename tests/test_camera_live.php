@@ -87,7 +87,8 @@ assert_true(str_contains($proxy, 'def relay_upstream'), 'picture bytes are forwa
 assert_true(str_contains($proxy, 'GET /frames'), 'pictures come from the camera agent, not a PHP worker');
 assert_true(str_contains($proxy, 'def _serve_camera_frames'), 'a missed camera listener does not fall through to PHP');
 assert_true(str_contains($proxy, 'def read_http_head'), 'picture bytes already in the buffer are not held back');
-assert_true(!str_contains($proxy, 'Transfer-Encoding'), 'the picture stream is not rewrapped before Safari');
+assert_true(str_contains($proxy, 'Transfer-Encoding'), 'Safari receives each picture as its own chunk');
+assert_true(str_contains($proxy, 'def http_chunk'), 'each picture chunk has a length');
 $livePhp = (string) file_get_contents($root . '/src/YarboCameraLive.php');
 assert_true(!str_contains($livePhp, 'set_time_limit(0)'), 'the picture stream does not stay inside a PHP worker');
 assert_true(str_contains($livePhp, 'Live pictures are not served by the panel page'), 'PHP refuses to proxy the picture stream');

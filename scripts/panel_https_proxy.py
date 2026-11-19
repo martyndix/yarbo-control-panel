@@ -44,6 +44,11 @@ def camera_agent_port() -> int:
     return port
 
 
+def http_chunk(data: bytes) -> bytes:
+    """One HTTP chunk. Safari holds an unchunked picture stream until it ends."""
+    return f"{len(data):X}\r\n".encode("ascii") + data + b"\r\n"
+
+
 def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
     """Copy an upstream body as it arrives. Do not wait for the stream to end."""
     while True:
@@ -230,22 +235,36 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
         content_type = headers.get("Content-Type") or headers.get("content-type") or "text/event-stream"
+        if ";" in content_type:
+            content_type = content_type.split(";", 1)[0].strip() or "text/event-stream"
         self.send_response(status)
         self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
+        # Safari does not hand EventSource an endless response until the
+        # connection closes, unless each piece is its own chunk. PHP used to
+        # do that, which is why the pictures showed before.
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
         self.end_headers()
+
+        def write_chunk(data: bytes) -> None:
+            if not data:
+                return
+            self.wfile.write(http_chunk(data))
+            self.wfile.flush()
+
         try:
-            if pending:
-                self.wfile.write(pending)
-                self.wfile.flush()
+            # A first chunk has to leave immediately. Safari waits for about 2KB.
+            write_chunk(b": " + (b" " * 2048) + b"\n\n")
+            write_chunk(pending)
             while True:
-                chunk = sock.recv(16384)
-                if not chunk:
+                piece = sock.recv(16384)
+                if not piece:
                     break
-                self.wfile.write(chunk)
-                self.wfile.flush()
+                write_chunk(piece)
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
         except Exception:
             pass
         finally:

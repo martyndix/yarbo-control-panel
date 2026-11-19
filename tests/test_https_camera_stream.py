@@ -56,6 +56,7 @@ def main() -> None:
     assert not proxy.is_camera_frames("/api/status.php")
     assert proxy.camera_agent_port() != 8766
     assert proxy.read_http_head(_FakeSock(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\ndata: hi\n\n"))[2] == b"data: hi\n\n"
+    assert proxy.http_chunk(b"hi") == b"2\r\nhi\r\n"
 
     sink = Sink()
     worker = threading.Thread(target=proxy.relay_upstream, args=(SlowBody(), sink), daemon=True)
@@ -127,9 +128,7 @@ def stream_reaches_client(proxy) -> bool:
             status.unlink(missing_ok=True)
         else:
             status.write_text(previous, encoding="utf-8")
-    if b"Transfer-Encoding" in buf:
-        return False
-    return b"middle" in buf and b"text/event-stream" in buf
+    return b"Transfer-Encoding: chunked" in buf and b"middle" in buf and b"text/event-stream" in buf
 
 
 if __name__ == "__main__":

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.29] - 2026-11-19
+
+### Fixed
+
+- Safari still left the four camera tiles on **waiting**. It holds this picture stream until the connection ends, so a live view that stays open never draws. Each picture is now sent as its own piece, which is how the pictures reached Safari before. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.28] - 2026-11-19
 
 ### Fixed
