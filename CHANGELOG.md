@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.31] - 2026-11-19
+
+### Fixed
+
+- Drive showed “The string did not match the expected pattern” once the cameras were on. Safari was handing that press the picture stream instead of a drive reply. The pictures stay on their own connection, and a direction gets its own reply while they are showing. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.30] - 2026-11-19
 
 ### Fixed

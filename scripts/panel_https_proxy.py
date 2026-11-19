@@ -102,13 +102,12 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length > 0 else None
 
         path = self.path or "/"
-        # This is the picture path from when the cameras last showed.
-        # Talk to the camera listener directly. If it is not up, pass the
-        # browser the same stream PHP was already flushing.
+        # Pictures stay on their own connection. Putting that stream through
+        # a page worker, or leaving it open on HTTP/1.1, made Safari hand the
+        # next drive press a body it could not read.
         if self.command == "GET" and is_camera_frames(path):
-            if self._proxy_camera_frames():
-                return
-            self._relay_php_camera()
+            if not self._proxy_camera_frames():
+                self._camera_unavailable()
             return
 
         headers = {}
@@ -130,6 +129,7 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
             resp = conn.getresponse()
             resp_body = resp.read()
         except Exception as exc:
+            self.close_connection = True
             self.send_error(502, f"Upstream error: {exc}")
             return
         finally:
@@ -139,6 +139,7 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
 
+        self.close_connection = True
         self.send_response(resp.status, resp.reason)
         for key, value in resp.getheaders():
             lk = key.lower()
@@ -174,6 +175,15 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
                     pass
             return False
 
+        # A 20s read limit was closing the pictures, and HTTP/1.1 let Safari
+        # reuse this endless response for the next drive press.
+        try:
+            if conn.sock is not None:
+                conn.sock.settimeout(None)
+        except Exception:
+            pass
+        self.close_connection = True
+        self.protocol_version = "HTTP/1.0"
         self.send_response(resp.status, resp.reason)
         for key, value in resp.getheaders():
             lk = key.lower()
@@ -195,37 +205,19 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
                 pass
         return True
 
-    def _relay_php_camera(self) -> None:
-        """Pass PHP's picture stream through unchanged, including its chunks."""
-        sock = None
+    def _camera_unavailable(self) -> None:
+        body = b'{"ok":false,"error":"Live view is not running. Press Start live view."}'
+        self.close_connection = True
         try:
-            sock = socket.create_connection((self.upstream_host, self.upstream_port), timeout=10)
-            host = self.headers.get("Host") or f"localhost:{self.upstream_port}"
-            sock.sendall(
-                (
-                    f"GET {self.path} HTTP/1.1\r\n"
-                    f"Host: {host}\r\n"
-                    f"Accept: text/event-stream\r\n"
-                    f"Connection: close\r\n"
-                    f"X-Forwarded-Proto: https\r\n\r\n"
-                ).encode("ascii", "replace")
-            )
-            sock.settimeout(None)
-            self.close_connection = True
-            while True:
-                data = sock.recv(16384)
-                if not data:
-                    break
-                self.wfile.write(data)
-                self.wfile.flush()
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
         except Exception:
             pass
-        finally:
-            if sock is not None:
-                try:
-                    sock.close()
-                except Exception:
-                    pass
 
     def _rewrite_location(self, location: str) -> str:
         """Keep redirects on the HTTPS listener when upstream points at itself."""

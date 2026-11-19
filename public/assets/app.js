@@ -17272,13 +17272,17 @@ async function loadCameras() {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
+    const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(8000)
+        : undefined;
     try {
         const res = await fetch('/api/drive.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ linear, angular, enter_manual: enterManual }),
+            signal,
         });
-        const data = await res.json();
+        const data = await parseJsonResponse(res);
         if (!data.ok) {
             showToast(data.error || 'Drive command failed', 'error');
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
@@ -17291,7 +17295,8 @@ async function sendDrive(linear, angular, enterManual = false) {
         if (enterManual) manualModeEntered = true;
         return true;
     } catch (err) {
-        showToast(err.message || 'Network error', 'error');
+        const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
+        showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
     }

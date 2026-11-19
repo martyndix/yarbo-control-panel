@@ -87,21 +87,43 @@ class _Agent(BaseHTTPRequestHandler):
         time.sleep(2)
 
 
+class _Upstream(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        body = b'{"ok":true,"note":"moved"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+
 def stream_reaches_client(proxy) -> bool:
     agent = ThreadingHTTPServer(("127.0.0.1", 0), _Agent)
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Upstream)
     port = agent.server_address[1]
     threading.Thread(target=agent.serve_forever, daemon=True).start()
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
     status = ROOT / "data" / "camera-live-status.json"
     status.parent.mkdir(exist_ok=True)
     previous = status.read_text(encoding="utf-8") if status.is_file() else None
     status.write_text(json.dumps({"port": port, "state": "live"}), encoding="utf-8")
+    previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = upstream.server_address[1]
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    buf = b""
+    other_buf = b""
+    client = None
     try:
         client = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=3)
         client.sendall(b"GET /api/camera_live.php?action=frames HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         client.settimeout(1.0)
-        buf = b""
         deadline = time.time() + 1.0
         while time.time() < deadline and b"middle" not in buf:
             try:
@@ -111,15 +133,33 @@ def stream_reaches_client(proxy) -> bool:
             if not part:
                 break
             buf += part
-        client.close()
+        # Pictures are still open. A drive press has to get its own reply.
+        other = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=3)
+        other.sendall(b"GET /api/drive.php HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        other.settimeout(1.0)
+        deadline = time.time() + 1.0
+        while time.time() < deadline and b"moved" not in other_buf:
+            try:
+                part = other.recv(4096)
+            except socket.timeout:
+                break
+            if not part:
+                break
+            other_buf += part
+        other.close()
     finally:
+        if client is not None:
+            client.close()
         httpd.shutdown()
         agent.shutdown()
+        upstream.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
         if previous is None:
             status.unlink(missing_ok=True)
         else:
             status.write_text(previous, encoding="utf-8")
-    return b"middle" in buf and b"text/event-stream" in buf and b"Transfer-Encoding:" not in buf
+    pictures = b"HTTP/1.0 200" in buf and b"middle" in buf and b"text/event-stream" in buf and b"Transfer-Encoding:" not in buf
+    return pictures and b'"ok":true' in other_buf and b"moved" in other_buf
 
 
 if __name__ == "__main__":
