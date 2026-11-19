@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.40] - 2026-11-20
+
+### Changed
+
+- The controller button looked switched off even though it could be pressed. While it is disconnected it now says Connect and uses the same weight as the other toolbar buttons. Refresh in Safari.
+
 ## [5.0.39] - 2026-11-20
 
 ### Fixed

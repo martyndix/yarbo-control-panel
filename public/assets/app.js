@@ -800,8 +800,8 @@ function updateControllerTile() {
         : pending
           ? 'Handshake sent; waiting for robot to leave idle'
           : 'Connect controller (required for lights/drive)';
-    const label = live ? 'Connected' : pending ? 'Pending' : 'Off';
-    const icon = live ? '📡' : '📴';
+    const label = live ? 'Connected' : pending ? 'Pending' : 'Connect';
+    const icon = '📡';
 
     document.querySelectorAll('[data-control="controller"]').forEach((btn) => {
         btn.classList.toggle('is-active', live);

@@ -998,9 +998,23 @@ body.modal-open {
     box-shadow: 0 0 0 2px var(--control-tile-active-glow);
 }
 
-.control-tile[data-control="lights"]:not(.is-active) .control-tile-icon,
-.control-tile[data-control="controller"]:not(.is-active) .control-tile-icon {
+.control-tile[data-control="lights"]:not(.is-active) .control-tile-icon {
     opacity: 0.55;
+}
+
+.control-tile[data-control="controller"]:not(.is-active):not(:disabled) {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+    color: var(--text);
+}
+
+.control-tile[data-control="controller"]:not(.is-active):not(:disabled) .control-tile-icon {
+    opacity: 1;
+}
+
+.control-tile[data-control="controller"]:not(.is-active):not(:disabled) .control-tile-label {
+    color: var(--text);
+    font-weight: 600;
 }
 
 .control-tile[data-control="lights"].is-active .control-tile-icon,

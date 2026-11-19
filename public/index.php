@@ -403,8 +403,8 @@ $config = require dirname(__DIR__) . '/config.php';
                 </div>
                 <div class="camera-controls" id="control-tiles">
                     <button type="button" class="control-tile" id="control-controller" data-control="controller" aria-pressed="false" title="Connect app controller">
-                        <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
-                        <span class="control-tile-label" data-controller-label>Off</span>
+                        <span class="control-tile-icon" data-controller-icon aria-hidden="true">📡</span>
+                        <span class="control-tile-label" data-controller-label>Connect</span>
                     </button>
                     <button type="button" class="control-tile" id="control-lights" data-control="lights" data-needs-controller aria-pressed="false" title="Turn lights on" disabled>
                         <span class="control-tile-icon" id="control-lights-icon" data-lights-icon aria-hidden="true">🔅</span>
