@@ -111,6 +111,7 @@ install_project() {
   # Browser mic / Announce needs LAN HTTPS :8443 reachable.
   if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
     ufw allow 8443/tcp comment 'Yarbo panel HTTPS' >/dev/null 2>&1 || true
+    ufw allow 8444/tcp comment 'Yarbo camera pictures' >/dev/null 2>&1 || true
   fi
 
   echo "==> Matter server (Home module)"

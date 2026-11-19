@@ -126,8 +126,13 @@ yarbo_panel_start_https_proxy() {
   local upstream_host="${YARBO_PANEL_HTTPS_UPSTREAM:-127.0.0.1}"
   mkdir -p "${root}/data"
   : >"${root}/data/panel-https.log"
+  local frames_port=$((https_port + 1))
+  if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi 'Status: active'; then
+    ufw allow "${frames_port}/tcp" comment 'Yarbo camera pictures' >/dev/null 2>&1 || true
+  fi
   echo "==> Starting HTTPS proxy on https://0.0.0.0:${https_port} (self-signed)"
   echo "    Open https://<panel-ip>:${https_port} for mic / Announce Record (accept the certificate warning once)."
+  echo "    Pictures use https://<panel-ip>:${frames_port}. If they stay blank, open that address once and allow the certificate."
   echo "    Paper tablets keep using http://<panel-ip>:${upstream_port}"
   # Upstream is already up (panel.sh starts PHP first).
   "$py" "${root}/scripts/panel_https_proxy.py" \

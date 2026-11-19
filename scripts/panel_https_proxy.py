@@ -86,6 +86,26 @@ def read_picture_batch(sock: socket.socket, pending: bytes) -> bytes:
     return body
 
 
+def relay_socket(sock: socket.socket, wfile, pending: bytes = b"") -> None:
+    """Copy a picture stream until the browser or the camera closes it."""
+    if pending:
+        wfile.write(pending)
+        wfile.flush()
+    try:
+        sock.settimeout(None)
+    except Exception:
+        pass
+    while True:
+        try:
+            chunk = sock.recv(16384)
+        except Exception:
+            break
+        if not chunk:
+            break
+        wfile.write(chunk)
+        wfile.flush()
+
+
 def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
     """Copy an upstream body as it arrives. Do not wait for the stream to end."""
     while True:
@@ -287,6 +307,72 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         return location
 
 
+class PictureProxyHandler(PanelHttpsProxyHandler):
+    """Pictures only, on their own port, so buttons keep the panel connection."""
+
+    def do_GET(self) -> None:  # noqa: N802
+        if is_camera_frames(self.path or "/"):
+            if not self._relay_pictures():
+                self._camera_unavailable()
+            return
+        self.close_connection = True
+        self.send_error(404)
+
+    def do_POST(self) -> None:  # noqa: N802
+        self.close_connection = True
+        self.send_error(404)
+
+    def _relay_pictures(self) -> bool:
+        port = camera_agent_port()
+        sock = None
+        try:
+            sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+            sock.sendall(
+                (
+                    f"GET /frames HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                    f"Accept: text/event-stream\r\nConnection: close\r\n\r\n"
+                ).encode("ascii")
+            )
+            head = b""
+            while b"\r\n\r\n" not in head:
+                part = sock.recv(4096)
+                if not part:
+                    break
+                head += part
+                if len(head) > 65536:
+                    break
+        except Exception:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            return False
+
+        _header, _, pending = head.partition(b"\r\n\r\n")
+        self.close_connection = True
+        self.protocol_version = "HTTP/1.0"
+        try:
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache, no-store")
+            self.send_header("Connection", "close")
+            # The page is on the panel port. Safari will not draw a cross-port
+            # picture stream without this.
+            origin = self.headers.get("Origin")
+            self.send_header("Access-Control-Allow-Origin", origin or "*")
+            self.end_headers()
+            relay_socket(sock, self.wfile, pending)
+        except Exception:
+            pass
+        finally:
+            try:
+                sock.close()
+            except Exception:
+                pass
+        return True
+
+
 class DualStackServer(ThreadingHTTPServer):
     address_family = socket.AF_INET
     daemon_threads = True
@@ -307,6 +393,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Yarbo panel HTTPS reverse proxy")
     parser.add_argument("--listen-host", default="0.0.0.0")
     parser.add_argument("--listen-port", type=int, default=8443)
+    parser.add_argument("--frames-port", type=int, default=0)
     parser.add_argument("--upstream-host", default="127.0.0.1")
     parser.add_argument("--upstream-port", type=int, default=8080)
     parser.add_argument("--cert", required=True)
@@ -355,17 +442,38 @@ def main() -> int:
         return 1
 
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
+    frames_port = args.frames_port or (args.listen_port + 1)
+    frames = None
+    try:
+        frames = DualStackServer((args.listen_host, frames_port), PictureProxyHandler)
+        frames.socket = context.wrap_socket(frames.socket, server_side=True)
+    except OSError as exc:
+        print(
+            f"panel_https_proxy: picture port bind failed on {args.listen_host}:{frames_port}: {exc}",
+            file=sys.stderr,
+            flush=True,
+        )
+        frames = None
     print(
         f"panel_https_proxy: https://{args.listen_host}:{args.listen_port} → "
         f"http://{args.upstream_host}:{args.upstream_port}",
         flush=True,
     )
+    if frames is not None:
+        print(
+            f"panel_https_proxy: pictures on https://{args.listen_host}:{frames_port}",
+            flush=True,
+        )
+        threading.Thread(target=frames.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True).start()
     try:
         httpd.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         pass
     finally:
         httpd.server_close()
+        if frames is not None:
+            frames.shutdown()
+            frames.server_close()
     return 0
 
 

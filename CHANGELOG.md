@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.35] - 2026-11-19
+
+### Fixed
+
+- The buttons worked and the cameras went black. Pictures now use their own port, and lights, dock, and drive stay on the panel port, so both can run together. Update to latest, refresh in Safari, press Stop view, then Start live view. If the tiles stay on waiting, open `https://<panel-ip>:8444` once, allow the certificate, and press Start live view again.
+
 ## [5.0.34] - 2026-11-19
 
 ### Fixed

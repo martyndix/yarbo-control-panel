@@ -64,6 +64,7 @@ def main() -> None:
         time.sleep(0.02)
     assert sink.buf.getvalue() == b"data: hi\n\n", "first picture packet must arrive before the stream ends"
     assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
+    assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     print("ok")
 
 
@@ -176,6 +177,78 @@ def stream_reaches_client(proxy) -> bool:
         and b"Transfer-Encoding:" not in buf
     )
     return pictures and b'"ok":true' in other_buf and b"moved" in other_buf
+
+
+def picture_port_stays_open(proxy) -> bool:
+    agent = ThreadingHTTPServer(("127.0.0.1", 0), _Agent)
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Upstream)
+    threading.Thread(target=agent.serve_forever, daemon=True).start()
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    status = ROOT / "data" / "camera-live-status.json"
+    status.parent.mkdir(exist_ok=True)
+    previous = status.read_text(encoding="utf-8") if status.is_file() else None
+    status.write_text(json.dumps({"port": agent.server_address[1], "state": "live"}), encoding="utf-8")
+    previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = upstream.server_address[1]
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
+    buttons = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=pictures.serve_forever, daemon=True).start()
+    threading.Thread(target=buttons.serve_forever, daemon=True).start()
+    seen = b""
+    other = b""
+    client = None
+    try:
+        client = socket.create_connection(("127.0.0.1", pictures.server_address[1]), timeout=3)
+        client.sendall(
+            b"GET /api/camera_live.php?action=frames HTTP/1.1\r\n"
+            b"Host: localhost\r\nOrigin: https://panel.local:8443\r\nConnection: close\r\n\r\n"
+        )
+        client.settimeout(1.0)
+        deadline = time.time() + 1.0
+        while time.time() < deadline and b"middle" not in seen:
+            part = client.recv(4096)
+            if not part:
+                break
+            seen += part
+        drive = socket.create_connection(("127.0.0.1", buttons.server_address[1]), timeout=3)
+        drive.sendall(b"GET /api/drive.php HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        drive.settimeout(1.0)
+        deadline = time.time() + 1.0
+        while time.time() < deadline and b"moved" not in other:
+            part = drive.recv(4096)
+            if not part:
+                break
+            other += part
+        drive.close()
+        # The picture connection is still the open stream, not a finished reply.
+        client.settimeout(0.2)
+        try:
+            extra = client.recv(4096)
+        except socket.timeout:
+            extra = b"open"
+        else:
+            if extra:
+                seen += extra
+                extra = b"open"
+    finally:
+        if client is not None:
+            client.close()
+        pictures.shutdown()
+        buttons.shutdown()
+        agent.shutdown()
+        upstream.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
+        if previous is None:
+            status.unlink(missing_ok=True)
+        else:
+            status.write_text(previous, encoding="utf-8")
+    return (
+        b"HTTP/1.0 200" in seen
+        and b"middle" in seen
+        and b"Access-Control-Allow-Origin: https://panel.local:8443" in seen
+        and extra == b"open"
+        and b"moved" in other
+    )
 
 
 if __name__ == "__main__":
