@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.36] - 2026-11-19
+
+### Fixed
+
+- Cameras came back and the buttons stopped again. Safari will not send lights, dock, or drive while a picture connection to the robot is open, even on the picture port. A press now closes the pictures, sends the command, then opens the pictures again. Update to latest and refresh in Safari. The picture pauses while you hold a direction, then returns when you let go.
+
 ## [5.0.35] - 2026-11-19
 
 ### Fixed

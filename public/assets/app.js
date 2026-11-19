@@ -926,6 +926,8 @@ function updateControlTiles(data) {
 
 async function toggleController(button) {
     if (button.disabled) return;
+    await suspendPictures();
+    try {
     await stopDriveIfHeld();
     const nextOn = !holdController;
     const action = nextOn ? 'controller_on' : 'controller_off';
@@ -981,6 +983,9 @@ async function toggleController(button) {
         updateLightsTile();
         showToast(err.message || 'Network error', 'error');
     }
+    } finally {
+        resumePictures();
+    }
 }
 
 async function toggleLights(button) {
@@ -989,6 +994,8 @@ async function toggleLights(button) {
         showToast('Connect the controller first', 'error');
         return;
     }
+    await suspendPictures();
+    try {
     await stopDriveIfHeld();
     const nextOn = !lightsOn;
     const action = nextOn ? 'lights_on' : 'lights_off';
@@ -1044,6 +1051,9 @@ async function toggleLights(button) {
         }
         updateLightsTile();
         showToast(err.message || 'Network error', 'error');
+    }
+    } finally {
+        resumePictures();
     }
 }
 
@@ -16802,6 +16812,7 @@ function bindCameraReorder() {
 }
 let cameraLiveSource = null;
 let cameraFramesOpen = false;
+let picturePauseDepth = 0;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
 let cameraLiveRunning = false;
@@ -16986,27 +16997,55 @@ function handleCameraFrame(event) {
     }));
 }
 
-function openCameraFrames() {
-    closeCameraFrames();
-    cameraFramesOpen = true;
+function attachCameraStream() {
+    if (!cameraFramesOpen || cameraLiveSource || picturePauseDepth > 0 || driveActive) return;
     const url = cameraPictureUrl();
-    cameraLiveSource = new EventSource(url);
-    cameraLiveSource.onmessage = (message) => {
+    const source = new EventSource(url);
+    cameraLiveSource = source;
+    source.onmessage = (message) => {
         try {
             handleCameraFrame(JSON.parse(message.data));
         } catch {
             /* ignore a bad picture packet */
         }
     };
-    cameraLiveSource.onerror = () => {
-        if (!cameraLiveSource || cameraLiveSource.readyState !== EventSource.CLOSED) return;
-        if (cameraLiveSeen.size > 0 || !url.startsWith('https://')) return;
+    source.onerror = () => {
+        if (cameraLiveSource !== source || source.readyState !== EventSource.CLOSED) return;
+        cameraLiveSource = null;
+        if (cameraLiveSeen.size > 0) {
+            attachCameraStream();
+            return;
+        }
+        if (!url.startsWith('https://')) return;
         cameraFramesOpen = false;
         if (!els.cameraAlert) return;
         const origin = url.slice(0, url.indexOf('/api'));
         els.cameraAlert.textContent = `Open ${origin} once, allow the certificate, then press Start live view again.`;
         els.cameraAlert.classList.remove('hidden');
     };
+}
+
+async function suspendPictures() {
+    picturePauseDepth += 1;
+    const source = cameraLiveSource;
+    if (picturePauseDepth !== 1 || !source) return;
+    cameraLiveSource = null;
+    source.close();
+    // Safari will not send a button while any picture connection to this
+    // robot is still open, including the picture port.
+    await new Promise((resolve) => setTimeout(resolve, 80));
+}
+
+function resumePictures() {
+    picturePauseDepth = Math.max(0, picturePauseDepth - 1);
+    if (picturePauseDepth > 0 || driveActive) return;
+    attachCameraStream();
+}
+
+function openCameraFrames() {
+    closeCameraFrames();
+    cameraFramesOpen = true;
+    attachCameraStream();
 }
 
 function setCameraLiveButtons(running) {
@@ -17294,6 +17333,7 @@ async function loadCameras() {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
+    await suspendPictures();
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
@@ -17321,6 +17361,8 @@ async function sendDrive(linear, angular, enterManual = false) {
         showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
+    } finally {
+        resumePictures();
     }
 }
 
@@ -17475,6 +17517,8 @@ function setupDrivePad() {
 }
 
 async function sendCommand(action, button) {
+    await suspendPictures();
+    try {
     await stopDriveIfHeld();
     try {
         const res = await fetch('/api/command.php', {
@@ -17514,6 +17558,9 @@ async function sendCommand(action, button) {
         showToast(err.message || 'Network error', 'error');
     } finally {
         updateControllerGatedControls();
+    }
+    } finally {
+        resumePictures();
     }
 }
 

@@ -106,6 +106,7 @@ assert_true(str_contains($camera, 'b": live\\n\\n"'), 'the picture stream starts
 assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');
 assert_true(str_contains($appJs, 'new EventSource(url)'), 'pictures use their own stream');
 assert_true(str_contains($appJs, 'function cameraPictureUrl'), 'pictures are not on the same connection as the buttons');
+assert_true(str_contains($appJs, 'function suspendPictures'), 'a button closes the picture connection before it sends');
 assert_true(str_contains($proxy, 'class PictureProxyHandler'), 'pictures listen on their own port');
 assert_true(str_contains($proxy, 'Access-Control-Allow-Origin'), 'Safari can draw pictures from the picture port');
 assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
