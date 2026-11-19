@@ -16985,8 +16985,22 @@ function openCameraFrames() {
         }
     };
     cameraLiveSource.onerror = () => {
-        if (cameraLiveSeen.size > 0 || !els.cameraAlert) return;
-        if (cameraLiveSource && cameraLiveSource.readyState !== EventSource.CLOSED) return;
+        const source = cameraLiveSource;
+        if (!source || source.readyState !== EventSource.CLOSED) return;
+        if (cameraLiveSeen.size > 0) return;
+        // Safari closes the stream for good on a refused response, and the
+        // page used to keep that dead stream. The cameras can be up a moment
+        // later and the tiles stay black. Drop it so the next check opens another.
+        cameraLiveSource = null;
+        try {
+            source.close();
+        } catch {
+            /* already closed */
+        }
+        setTimeout(() => {
+            if (cameraLiveRunning && !cameraLiveSource) openCameraFrames();
+        }, 400);
+        if (!els.cameraAlert) return;
         els.cameraAlert.textContent = 'The cameras are on, but this browser has not received a picture yet.';
         els.cameraAlert.classList.remove('hidden');
     };

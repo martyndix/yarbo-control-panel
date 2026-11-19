@@ -98,6 +98,8 @@ assert_true(str_contains($agent, '_control_waiters'), 'dock and lights go ahead 
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
 assert_true(str_contains($appJs, 'has not received a picture'), 'Safari is told when the picture stream is missing');
+assert_true(str_contains($appJs, 'Drop it so the next check opens another'), 'a refused picture stream is opened again');
+assert_true(str_contains($livePhp, "'state' => 'starting'"), 'Start does not leave the page pointed at a stopped picture process');
 assert_true(str_contains($camera, 'b" " * 2048'), 'the picture stream starts with enough bytes for Safari');
 assert_true(str_contains($livePhp, 'pkill -f '), 'Start replaces a picture process left over from the last update');
 assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');

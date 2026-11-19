@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.28] - 2026-11-19
+
+### Fixed
+
+- The camera tiles stayed on **waiting** after Start live view. The page asked for pictures once, Safari closed that request, and the page never asked again, so the four pictures never came back. It now asks again until a picture is on screen. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.27] - 2026-11-19
 
 ### Fixed

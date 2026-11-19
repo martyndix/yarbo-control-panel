@@ -65,7 +65,14 @@ final class YarboCameraLive
 
         $log = $data . '/camera-live.log';
         $pidFile = $data . '/camera-live.pid';
-        @unlink($data . '/camera-live-status.json');
+        // The old status file still said live after the picture process was
+        // stopped. The page opened the stream at a port nothing was listening
+        // on, Safari closed it, and the tiles stayed on waiting.
+        file_put_contents($data . '/camera-live-status.json', json_encode([
+            'state' => 'starting',
+            'message' => 'Starting live view',
+            'running' => true,
+        ]));
         $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
         $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
         $mqttPort = (int) (getenv('YARBO_MQTT_AGENT_PORT') ?: 8765);
@@ -110,6 +117,12 @@ final class YarboCameraLive
     private function stopAgent(): void
     {
         $snap = $this->readStatusFile();
+        $statusPath = $this->projectRoot . '/data/camera-live-status.json';
+        @file_put_contents($statusPath, json_encode([
+            'state' => 'stopped',
+            'message' => 'Stopping live view',
+            'running' => false,
+        ]));
         $port = (int) ($snap['port'] ?? (getenv('YARBO_CAMERA_PORT') ?: 8767));
         if ($port === 8766) {
             $port = 8767;
