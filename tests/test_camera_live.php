@@ -73,6 +73,12 @@ assert_true(str_contains($index, 'camera-toolbar'), 'start and the controller si
 $toolbarAt = strpos($index, 'camera-toolbar');
 $stageAt = strpos($index, 'camera-stage');
 assert_true($toolbarAt !== false && $stageAt !== false && $toolbarAt < $stageAt, 'the camera toolbar is above the pictures');
+$toolbar = substr($index, (int) $toolbarAt, (int) $stageAt - (int) $toolbarAt);
+assert_true(str_contains($toolbar, 'data-control="lights"'), 'lights sit with the camera controls');
+assert_true(str_contains($toolbar, 'data-action="buzzer"'), 'buzzer sits with the camera controls');
+assert_true(str_contains($toolbar, 'data-action="return_to_dock"'), 'dock sits with the camera controls');
+assert_true(str_contains($toolbar, 'data-action="stop"'), 'robot stop sits with the camera controls');
+assert_true(!str_contains($index, 'data-panel-id="controls"'), 'the separate controls section is gone');
 assert_true(!str_contains($index, 'camera-prepare'), 'prepare cameras button is gone');
 assert_true(!str_contains($index, 'camera-recheck'), 'recheck streams button is gone');
 $proxy = (string) file_get_contents($root . '/scripts/panel_https_proxy.py');

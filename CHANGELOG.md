@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.21] - 2026-11-19
+
+### Changed
+
+- Controller, lights, buzzer, pause, dock, and stop are small buttons above the cameras. The separate Controls section is gone. Lights, buzzer, pause, and dock still need the controller. The direction buttons still need a live picture. Update to latest and refresh.
+
 ## [5.0.20] - 2026-11-19
 
 ### Changed

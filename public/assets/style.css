@@ -1918,17 +1918,33 @@ body.map-is-fullscreen {
     font-size: 0.85rem;
 }
 
-.camera-toolbar .camera-controller {
-    flex: 0 0 auto;
-    flex-direction: row;
-    min-height: 2.15rem;
-    width: auto;
-    padding: 0.15rem 0.55rem;
+.camera-controls {
+    display: flex;
+    flex-wrap: wrap;
     gap: 0.3rem;
 }
 
-.camera-toolbar .camera-controller .control-tile-icon {
-    font-size: 1rem;
+.camera-controls .control-tile {
+    flex: 0 0 auto;
+    flex-direction: row;
+    width: auto;
+    min-height: 1.7rem;
+    padding: 0.1rem 0.4rem;
+    gap: 0.2rem;
+    border-radius: 8px;
+}
+
+.camera-controls .control-tile-icon {
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.camera-controls .control-tile-label {
+    font-size: 0.72rem;
+}
+
+.camera-controls .control-tile-danger {
+    grid-column: auto;
 }
 
 .camera-toolbar .drive-status,

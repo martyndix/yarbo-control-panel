@@ -399,12 +399,34 @@ $config = require dirname(__DIR__) . '/config.php';
             <div class="camera-toolbar" id="camera-toolbar">
                 <div class="camera-actions">
                     <button type="button" class="btn" id="camera-live-start">Start live view</button>
-                    <button type="button" class="btn btn-secondary" id="camera-live-stop" disabled>Stop</button>
+                    <button type="button" class="btn btn-secondary" id="camera-live-stop" disabled>Stop view</button>
                 </div>
-                <button type="button" class="control-tile camera-controller" id="control-controller-drive" data-control="controller" aria-pressed="false" title="Connect app controller">
-                    <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
-                    <span class="control-tile-label" data-controller-label>Off</span>
-                </button>
+                <div class="camera-controls" id="control-tiles">
+                    <button type="button" class="control-tile" id="control-controller" data-control="controller" aria-pressed="false" title="Connect app controller">
+                        <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
+                        <span class="control-tile-label" data-controller-label>Off</span>
+                    </button>
+                    <button type="button" class="control-tile" id="control-lights" data-control="lights" data-needs-controller aria-pressed="false" title="Turn lights on" disabled>
+                        <span class="control-tile-icon" id="control-lights-icon" data-lights-icon aria-hidden="true">🔅</span>
+                        <span class="control-tile-label" id="control-lights-label" data-lights-label>Off</span>
+                    </button>
+                    <button type="button" class="control-tile" data-action="buzzer" data-needs-controller title="Sound buzzer" disabled>
+                        <span class="control-tile-icon" aria-hidden="true">🔊</span>
+                        <span class="control-tile-label">Buzzer</span>
+                    </button>
+                    <button type="button" class="control-tile" id="control-pause-resume" data-control="pause_resume" data-needs-controller title="Pause or resume" disabled>
+                        <span class="control-tile-icon" id="control-pause-resume-icon" aria-hidden="true">⏸</span>
+                        <span class="control-tile-label" id="control-pause-resume-label">Pause</span>
+                    </button>
+                    <button type="button" class="control-tile" data-action="return_to_dock" data-needs-controller title="Return to dock" disabled>
+                        <span class="control-tile-icon" aria-hidden="true">🏠</span>
+                        <span class="control-tile-label">Dock</span>
+                    </button>
+                    <button type="button" class="control-tile control-tile-danger" data-action="stop" title="Stop immediately — no confirmation">
+                        <span class="control-tile-icon" aria-hidden="true">⛔</span>
+                        <span class="control-tile-label">Stop</span>
+                    </button>
+                </div>
                 <p class="drive-status" id="drive-status">Ready</p>
                 <p class="drive-controller-note" id="drive-controller-note">Drive stays off until a live picture is showing.</p>
                 <p class="drive-block-banner hidden" id="drive-block-banner" role="status"></p>
@@ -429,7 +451,7 @@ $config = require dirname(__DIR__) . '/config.php';
                 <h2>Manual Drive</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">The direction pad sits between the cameras. Start, Stop, and the controller are above them. Drive stays off until a picture is showing and the controller is connected. Release or press Stop to halt.</p>
+            <p class="hint">The direction pad sits between the cameras. Start view, the controller, lights, buzzer, pause, dock, and stop are above the pictures. Drive stays off until a picture is showing and the controller is connected. Release or press Stop to halt.</p>
         </section>
 
         <section class="card panel-section plans-card" data-panel-id="plans" data-module="yarbo">
@@ -519,40 +541,6 @@ $config = require dirname(__DIR__) . '/config.php';
                     <span id="snow-chute-angle-label">90°</span>
                 </label>
                 <button type="button" class="btn btn-secondary" id="snow-chute-angle-send">Set chute angle</button>
-            </div>
-        </section>
-
-        <section class="card panel-section controls-card" data-panel-id="controls" data-module="yarbo">
-            <div class="section-header section-header--simple">
-                <h2>Controls</h2>
-                <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
-            </div>
-            <p class="hint">Watching live status does not take control. Lights, drive, and buzzer need Controller On (that will take over from the phone app). Starting a plan or waypoint holds control quietly so the app cannot cancel the job.</p>
-            <div class="control-tiles" id="control-tiles">
-                <button type="button" class="control-tile" id="control-controller" data-control="controller" aria-pressed="false" title="Connect app controller">
-                    <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
-                    <span class="control-tile-label" data-controller-label>Off</span>
-                </button>
-                <button type="button" class="control-tile" id="control-lights" data-control="lights" data-needs-controller aria-pressed="false" title="Turn lights on" disabled>
-                    <span class="control-tile-icon" id="control-lights-icon" aria-hidden="true">🔅</span>
-                    <span class="control-tile-label" id="control-lights-label">Off</span>
-                </button>
-                <button type="button" class="control-tile" data-action="buzzer" data-needs-controller title="Sound buzzer" disabled>
-                    <span class="control-tile-icon" aria-hidden="true">🔊</span>
-                    <span class="control-tile-label">Buzzer</span>
-                </button>
-                <button type="button" class="control-tile" id="control-pause-resume" data-control="pause_resume" data-needs-controller title="Pause or resume" disabled>
-                    <span class="control-tile-icon" id="control-pause-resume-icon" aria-hidden="true">⏸</span>
-                    <span class="control-tile-label" id="control-pause-resume-label">Pause</span>
-                </button>
-                <button type="button" class="control-tile" data-action="return_to_dock" data-needs-controller title="Return to dock" disabled>
-                    <span class="control-tile-icon" aria-hidden="true">🏠</span>
-                    <span class="control-tile-label">Dock</span>
-                </button>
-                <button type="button" class="control-tile control-tile-danger" data-action="stop" title="Stop immediately — no confirmation">
-                    <span class="control-tile-icon" aria-hidden="true">⛔</span>
-                    <span class="control-tile-label">Stop</span>
-                </button>
             </div>
         </section>
 
@@ -2280,7 +2268,6 @@ $config = require dirname(__DIR__) . '/config.php';
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="plans" checked><span>Work plans</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="waypoints" checked><span>Waypoints</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="head" checked><span>Head controls</span></label>
-                                    <label class="settings-checkbox"><input type="checkbox" data-panel-visible="controls" checked><span>Controls</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="powerwall" checked><span>Powerwall</span></label>
                                     <label class="settings-checkbox"><input type="checkbox" data-panel-visible="lymow" checked><span>Lymow</span></label>
                                 </div>

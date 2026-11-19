@@ -406,7 +406,7 @@ let lymowZonesSelected = new Set();
 let lymowZonesBusy = false;
 const LIGHTS_ON_KEY = 'yarbo_lights_on';
 const CONTROLLER_HOLD_KEY = 'yarbo_hold_controller';
-const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'controls', 'powerwall', 'lymow'];
+const DEFAULT_PANEL_ORDER = ['status', 'vestaboard', 'diagnostics', 'map', 'cameras', 'drive', 'plans', 'waypoints', 'head', 'powerwall', 'lymow'];
 const PANEL_LABELS = {
     status: 'Status',
     vestaboard: 'Vestaboard Note',
@@ -417,7 +417,6 @@ const PANEL_LABELS = {
     plans: 'Work plans',
     waypoints: 'Waypoints',
     head: 'Head controls',
-    controls: 'Controls',
     powerwall: 'Powerwall',
     lymow: 'Lymow',
 };
@@ -494,6 +493,7 @@ let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
 let mapBackupCompatible = false;
 let lightsOn = false;
+let lightsBusy = false;
 let holdController = false;
 let controlAwake = false;
 let onChargePad = false;
@@ -853,7 +853,8 @@ function updateControllerGatedControls() {
     const live = isControllerLive();
     const driveOk = canDrive() && cameraStreamLive();
     document.querySelectorAll('[data-needs-controller]').forEach((el) => {
-        el.disabled = !live;
+        const held = el.dataset.control === 'lights' && lightsBusy;
+        el.disabled = held || !live;
         if (!live && !el.title?.includes('Connect controller')) {
             el.dataset.titleUnlocked = el.title || '';
             el.title = 'Connect controller first';
@@ -883,16 +884,18 @@ function updateControllerGatedControls() {
 }
 
 function updateLightsTile() {
-    if (!els.controlLights) return;
-    els.controlLights.classList.toggle('is-active', lightsOn);
-    els.controlLights.setAttribute('aria-pressed', lightsOn ? 'true' : 'false');
-    els.controlLights.title = lightsOn ? 'Turn lights off' : 'Turn lights on';
-    if (els.controlLightsIcon) {
-        els.controlLightsIcon.textContent = lightsOn ? '💡' : '🔅';
-    }
-    if (els.controlLightsLabel) {
-        els.controlLightsLabel.textContent = lightsOn ? 'On' : 'Off';
-    }
+    const title = lightsOn ? 'Turn lights off' : 'Turn lights on';
+    const icon = lightsOn ? '💡' : '🔅';
+    const label = lightsOn ? 'On' : 'Off';
+    document.querySelectorAll('[data-control="lights"]').forEach((btn) => {
+        btn.classList.toggle('is-active', lightsOn);
+        btn.setAttribute('aria-pressed', lightsOn ? 'true' : 'false');
+        if (isControllerLive()) btn.title = title;
+        const iconEl = btn.querySelector('[data-lights-icon]');
+        const labelEl = btn.querySelector('[data-lights-label]');
+        if (iconEl) iconEl.textContent = icon;
+        if (labelEl) labelEl.textContent = label;
+    });
 }
 
 function updateControlTiles(data) {
@@ -968,7 +971,7 @@ async function toggleController(button) {
 }
 
 async function toggleLights(button) {
-    if (button.disabled) return;
+    if (button.disabled || lightsBusy) return;
     if (!isControllerLive()) {
         showToast('Connect the controller first', 'error');
         return;
@@ -990,7 +993,8 @@ async function toggleLights(button) {
     }
     updateLightsTile();
     updateControllerTile();
-    button.disabled = true;
+    lightsBusy = true;
+    updateControllerGatedControls();
     try {
         const res = await fetch('/api/command.php', {
             method: 'POST',
@@ -1029,7 +1033,8 @@ async function toggleLights(button) {
         updateLightsTile();
         showToast(err.message || 'Network error', 'error');
     } finally {
-        button.disabled = false;
+        lightsBusy = false;
+        updateControllerGatedControls();
     }
 }
 
@@ -1060,8 +1065,10 @@ function initAppearance() {
         });
     });
 
-    els.controlLights?.addEventListener('click', (event) => {
-        toggleLights(event.currentTarget);
+    document.querySelectorAll('[data-control="lights"]').forEach((btn) => {
+        btn.addEventListener('click', (event) => {
+            toggleLights(event.currentTarget);
+        });
     });
 
     els.controlPauseResume?.addEventListener('click', (event) => {
@@ -17346,7 +17353,7 @@ async function startDrive(direction, button) {
         return;
     }
     if (!isControllerLive()) {
-        showToast('Connect the controller first (between the cameras, or in Controls)', 'error');
+        showToast('Connect the controller above the cameras first', 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Controller required';
         return;
     }
