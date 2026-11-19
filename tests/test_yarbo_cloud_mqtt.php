@@ -73,7 +73,8 @@ assert_true(!str_contains($diag, 'probeTcp'), 'diagnostics no longer TCP-probe 1
 
 $status = (string) file_get_contents($root . '/public/api/status.php');
 assert_true(str_contains($status, 'yarbo-cloud'), 'status prefers yarbo-cloud agent');
-assert_true(!str_contains($status, 'ensurePreferredEngine'), 'status poll must not kill and respawn the agent');
+assert_true(str_contains($status, 'ensurePreferredEngine'), 'status starts the cloud agent when it is down');
+assert_true(str_contains($status, 'status_agent_log_tail'), 'status shows why the agent is not answering');
 $panel = (string) file_get_contents($root . '/scripts/panel.sh');
 assert_true(str_contains($panel, 'yarbo_status_python'), 'panel starts the agent with the cloud SDK interpreter');
 assert_true(str_contains($panel, '.venv/bin/python3'), 'panel prefers the same python3 the cloud test uses');

@@ -192,6 +192,25 @@ function attach_robot_name(array $parsed): array
     return $names->apply($parsed, $serial);
 }
 
+function status_agent_log_tail(string $root): string
+{
+    $path = $root . '/data/mqtt-agent.log';
+    if (!is_file($path)) {
+        return '';
+    }
+    $raw = @file_get_contents($path);
+    if (!is_string($raw) || trim($raw) === '') {
+        return '';
+    }
+    $lines = preg_split("/\r\n|\n|\r/", trim($raw)) ?: [];
+    $text = trim(implode(' ', array_slice($lines, -3)));
+    if (strlen($text) > 240) {
+        $text = substr($text, -240);
+    }
+
+    return $text;
+}
+
 function status_raw_usable(mixed $raw): bool
 {
     return is_array($raw) && $raw !== [] && (
@@ -265,9 +284,23 @@ $statusTiming['ping_ms'] = status_ms_since($pingStarted);
 $engine = (string) ($ping['engine'] ?? '');
 $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
 
+// The account test on Settings does not start this process. If nothing is
+// listening, start the cloud agent once. Do not touch an agent that already
+// answers as yarbo-cloud.
 if (!($ping['ok'] ?? false) || !$isCloudAgent) {
+    $agent->ensurePreferredEngine();
+    $ping = $agent->ping(1.5);
+    $statusTiming['ping_ms'] = status_ms_since($pingStarted);
+    $engine = (string) ($ping['engine'] ?? '');
+    $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
+}
+
+if (!($ping['ok'] ?? false) || !$isCloudAgent) {
+    $logTail = status_agent_log_tail(dirname(__DIR__, 2));
     status_failure(
-        'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, then Save.',
+        $logTail !== ''
+            ? 'The status agent is not answering. ' . $logTail
+            : 'The status agent is not answering. Account login is already saved.',
         'agent',
         503,
         [

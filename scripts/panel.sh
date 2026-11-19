@@ -111,7 +111,11 @@ start_mqtt_agent() {
   fi
   echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
   echo "    ${AGENT_CMD[*]}"
-  YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" &
+  mkdir -p "${ROOT}/data"
+  {
+    echo "---- $(date -u +%H:%M:%SZ) starting ${AGENT_CMD[*]}"
+  } >> "${ROOT}/data/mqtt-agent.log"
+  YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" >> "${ROOT}/data/mqtt-agent.log" 2>&1 &
   AGENT_PID=$!
 }
 

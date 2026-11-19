@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.12] - 2026-11-19
+
+### Fixed
+
+- The status card went back to “cloud agent is not running” and told you to enter the account again. The account was already saved. Opening the Yarbo page now starts that status process if it is down, and if it still does not answer, the card shows the agent’s own log line. The cloud connection itself stays the version 4 code. Update to latest and refresh the Yarbo page.
+
 ## [5.0.11] - 2026-11-19
 
 ### Fixed
