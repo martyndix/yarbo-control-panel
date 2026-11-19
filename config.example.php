@@ -7,6 +7,7 @@ return [
 
     // Camera streams — NOT currently working for most users. Yarbo has not opened
     // local RTSP access; the official app uses cloud video. Keep this false.
+    // RTSP stays off. Live view does not use this flag or the broker IP.
     'cameras_enabled' => false,
     'camera_auto_detect' => true,
     // Use broker IP by default, or 127.0.0.1 if you SSH-tunnel camera ports locally.

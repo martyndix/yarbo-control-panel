@@ -6,6 +6,11 @@
 /data/update-status.json
 /data/update.log
 /data/mqtt-agent.log
+/data/camera-live.log
+/data/camera-live-status.json
+/data/camera-live.pid
+/data/agora.log
+/data/panel-rollback.json
 /data/php-server.log
 /data/.update-running
 /data/paper-remote.json

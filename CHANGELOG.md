@@ -6,6 +6,17 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-19
+
+Panel version is 5.0.0. The previous release is 4.0.388.
+
+### Added
+
+- Live view for the four Yarbo cameras. On the Yarbo page, press **Start live view**. The pictures go through Yarbo's video service and come back to this panel on your home network. Settings → Panel updates installs the video library with the rest of the update. Open the panel at `https://<your-pi>:8443` (Chrome or Edge) so the browser can draw the pictures.
+- Live view stays off, and stops if it was already on, while the robot reports 4G. Wi-Fi and HaLow are allowed. An unknown link does not block the start; the panel checks again while you watch.
+- Stopping live view also stops Smart Vision in the Yarbo phone app, so the robot stops sending pictures. It does not pause a job that is already running.
+- Settings → Panel updates → **Restore previous version** returns to the version from before the last update, or to 4.0.388 if this is the first 5.0 install. Logins, Home rooms, and settings stay. **Update to latest** brings 5.0 back.
+
 ## [4.0.388] - 2026-11-18
 
 ### Fixed

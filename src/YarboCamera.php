@@ -66,6 +66,26 @@ final class YarboCamera
   }
 
   /**
+   * The four camera names, without opening a network connection.
+   *
+   * @param array<string, mixed> $config
+   * @return array<string, array{id: string, name: string, view: string}>
+   */
+  public static function tiles(array $config): array
+  {
+    $tiles = [];
+    foreach (self::definitions($config) as $id => $def) {
+      $tiles[$id] = [
+        'id' => $id,
+        'name' => (string) ($def['name'] ?? $id),
+        'view' => YarboCameraLive::viewFor((string) $id),
+      ];
+    }
+
+    return $tiles;
+  }
+
+  /**
    * @param array<string, mixed> $config
    * @return array<string, array{id: string, name: string, rtsp: string, port: int|null, online: bool|null}>
    */

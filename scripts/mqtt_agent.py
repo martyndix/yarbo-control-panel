@@ -227,6 +227,8 @@ def keepalive_min_gap(state: dict[str, Any]) -> float:
 
 def session_mode(req: dict[str, Any]) -> str:
     mode = str(req.get("session") or "control").strip().lower()
+    if mode == "vision":
+        return "vision"
     return "work" if mode == "work" else "control"
 
 
@@ -1088,6 +1090,17 @@ async def handle_request(
                 return {"ok": False, "error": "cmd required"}
             payload = req.get("payload") if isinstance(req.get("payload"), dict) else {}
             payload = fix_buzzer_payload(cmd, payload)
+            # Live view must not call get_controller. That announces
+            # "app controller connected" and can pause a running job.
+            if session_mode(req) == "vision":
+                await client.publish_command(cmd, payload)
+                return {
+                    "ok": True,
+                    "op": "publish",
+                    "cmd": cmd,
+                    "session": "vision",
+                    **state_flags(state, client),
+                }
             await apply_command_session(client, state, session_mode(req), [cmd])
             await client.publish_command(cmd, payload)
             if cmd in WORK_STARTUP_CMDS:

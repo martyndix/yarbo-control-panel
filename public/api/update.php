@@ -60,6 +60,14 @@ if ($action === 'update') {
     json_response($update->runUpdateAsync());
 }
 
+if ($action === 'rollback') {
+    if (!($input['confirm'] ?? false)) {
+        json_response(['ok' => false, 'error' => 'confirm=true is required'], 400);
+    }
+
+    json_response($update->rollbackAsync());
+}
+
 if ($action === 'restart') {
     if (!($input['confirm'] ?? false)) {
         json_response(['ok' => false, 'error' => 'confirm=true is required'], 400);
@@ -73,4 +81,4 @@ if ($action === 'https_ensure' || $action === 'https-ensure') {
     json_response($https->ensure());
 }
 
-json_response(['ok' => false, 'error' => 'Unknown action. Valid: check, update, restart, https_ensure'], 400);
+json_response(['ok' => false, 'error' => 'Unknown action. Valid: check, update, rollback, restart, https_ensure'], 400);

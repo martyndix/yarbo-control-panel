@@ -412,6 +412,26 @@ final class YarboTelemetry
         return false;
     }
 
+    /**
+     * True only when the robot's uplink is the cellular modem.
+     * HaLow and Wi-Fi are not cellular. An unreadable snapshot is not cellular.
+     *
+     * @param array<string, mixed> $raw
+     */
+    public static function linkIsCellular(array $raw): bool
+    {
+        try {
+            $netMsg = is_array($raw['NetMSG'] ?? null) ? $raw['NetMSG'] : [];
+            $netTypeRaw = $raw['net_type'] ?? ($netMsg['net_type'] ?? null);
+            $halowStatusRaw = $raw['halow_status'] ?? ($netMsg['halow_status'] ?? null);
+            $routePriority = $raw['route_priority'] ?? ($netMsg['route_priority'] ?? null);
+
+            return self::connectionTypeName($netTypeRaw, $halowStatusRaw, $routePriority) === '4G';
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     private static function connectionTypeName(mixed $netTypeRaw, mixed $halowStatusRaw, mixed $routePriority = null): string
     {
         if ((int) ($halowStatusRaw ?? 0) > 0) {

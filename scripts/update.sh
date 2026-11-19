@@ -4,6 +4,7 @@
 # Usage:
 #   ./scripts/update.sh              Update to latest origin/main
 #   ./scripts/update.sh --check-only Report if updates are available (no changes)
+#   ./scripts/update.sh --rollback   Restore the previous panel version (logins stay)
 #
 set -euo pipefail
 
@@ -19,6 +20,7 @@ cd "$ROOT"
 SERVICE_NAME="yarbo-panel"
 BRANCH="${YARBO_PANEL_BRANCH:-main}"
 CHECK_ONLY=false
+ROLLBACK=false
 STEPS=()
 STATUS_FILE="${ROOT}/data/update-status.json"
 LOCK_FILE="${ROOT}/data/.update-running"
@@ -27,8 +29,9 @@ UPDATE_LOCK_ACTIVE=false
 for arg in "$@"; do
   case "$arg" in
     --check-only) CHECK_ONLY=true ;;
+    --rollback) ROLLBACK=true ;;
     -h|--help)
-      echo "Usage: ./scripts/update.sh [--check-only]"
+      echo "Usage: ./scripts/update.sh [--check-only|--rollback]"
       exit 0
       ;;
   esac
@@ -173,6 +176,121 @@ if $CHECK_ONLY; then
   exit 0
 fi
 
+preserve_local_settings() {
+  local name
+  CREDENTIAL_FILES=(
+    powerwall-config.json
+    tesla-fleet-private.pem
+    lymow-config.json
+    lymow-cloud.json
+    unifi-config.json
+    vestaboard-config.json
+    hub-config.json
+    cloud-config.json
+    home.json
+    home.json.bak
+    home.json.bak.1
+    home-automations.json
+    home-automations-state.json
+    papermono-devices.json
+    paper-remote.json
+    robot-name.json
+    rain-config.json
+  )
+  PRESERVE_DIR="${ROOT}/data/.update-preserve"
+  rm -rf "${PRESERVE_DIR}"
+  mkdir -p "${PRESERVE_DIR}"
+  PRESERVED=0
+  for name in "${CREDENTIAL_FILES[@]}"; do
+    if [[ -f "${ROOT}/data/${name}" ]]; then
+      cp -a "${ROOT}/data/${name}" "${PRESERVE_DIR}/${name}"
+      PRESERVED=$((PRESERVED + 1))
+    fi
+  done
+  if [[ -d "${ROOT}/data/home-backups" ]]; then
+    cp -a "${ROOT}/data/home-backups" "${PRESERVE_DIR}/home-backups"
+    PRESERVED=$((PRESERVED + 1))
+  fi
+  TESLA_PUB="${ROOT}/public/.well-known/appspecific/com.tesla.3p.public-key.pem"
+  if [[ -f "$TESLA_PUB" ]]; then
+    mkdir -p "${PRESERVE_DIR}/tesla-well-known"
+    cp -a "$TESLA_PUB" "${PRESERVE_DIR}/tesla-well-known/"
+    PRESERVED=$((PRESERVED + 1))
+  fi
+  step "Preserved ${PRESERVED} local setting files"
+}
+
+restore_local_settings() {
+  mkdir -p "${ROOT}/data"
+  if [[ -d "${PRESERVE_DIR}" ]]; then
+    local f
+    for f in "${PRESERVE_DIR}"/*; do
+      [[ -f "$f" ]] || continue
+      cp -a "$f" "${ROOT}/data/$(basename "$f")"
+    done
+    if [[ -f "${PRESERVE_DIR}/tesla-well-known/com.tesla.3p.public-key.pem" ]]; then
+      mkdir -p "${ROOT}/public/.well-known/appspecific"
+      cp -a "${PRESERVE_DIR}/tesla-well-known/com.tesla.3p.public-key.pem" \
+        "${ROOT}/public/.well-known/appspecific/"
+    fi
+    if [[ -d "${PRESERVE_DIR}/home-backups" ]]; then
+      rm -rf "${ROOT}/data/home-backups"
+      cp -a "${PRESERVE_DIR}/home-backups" "${ROOT}/data/home-backups"
+    fi
+    rm -rf "${PRESERVE_DIR}"
+  fi
+  step "Restored local setting files"
+}
+
+# Restore runs from its own copy, then stops. It must not continue into the
+# installer for the version it just checked out.
+if $ROLLBACK; then
+  if [[ "${YARBO_UPDATE_FROM_COPY:-}" != "1" ]]; then
+    mkdir -p "${ROOT}/data"
+    UPDATE_COPY="${ROOT}/data/.update-script-copy"
+    cp "$0" "$UPDATE_COPY"
+    chmod +x "$UPDATE_COPY"
+    export YARBO_UPDATE_FROM_COPY=1
+    export YARBO_PANEL_ROOT="$ROOT"
+    exec bash "$UPDATE_COPY" "$@"
+  fi
+  acquire_update_lock
+  trap cleanup_update_lock EXIT
+  preserve_local_settings
+  TARGET=""
+  ROLLBACK_FILE="${ROOT}/data/panel-rollback.json"
+  if [[ -f "$ROLLBACK_FILE" ]]; then
+    SAVED="$(php -r '$j=json_decode((string) file_get_contents($argv[1]), true); echo is_array($j) ? (string) ($j["commit"] ?? "") : "";' "$ROLLBACK_FILE" 2>/dev/null || true)"
+    if [[ -n "$SAVED" ]] && git cat-file -e "${SAVED}^{commit}" >/dev/null 2>&1; then
+      TARGET="$SAVED"
+      step "Restoring the version saved before the last update"
+    fi
+  fi
+  if [[ -z "$TARGET" ]]; then
+    git fetch --quiet origin tag v4.0.388 || true
+    if git rev-parse --verify v4.0.388 >/dev/null 2>&1; then
+      TARGET="v4.0.388"
+      step "Restoring panel 4.0.388"
+    fi
+  fi
+  if [[ -z "$TARGET" ]]; then
+    fail "No previous version is available to restore"
+  fi
+  write_status "pulling" "Restoring the previous version"
+  if ! run_owner "git reset --hard '${TARGET}'"; then
+    fail "Could not restore the previous version"
+  fi
+  restore_local_settings
+  write_status "done" "Restored the previous version. Logins and Home rooms were kept."
+  if $SYSTEMD_UNIT; then
+    release_update_lock
+    rm -f "${ROOT}/data/.update-script-copy"
+    trap - EXIT
+    sudo -n systemctl restart "${SERVICE_NAME}" >/dev/null 2>&1 || true
+  fi
+  exit 0
+fi
+
 if ! $BEHIND; then
   STARTED=false
   if $SYSTEMD_UNIT && ! $SYSTEMD_ACTIVE; then
@@ -265,6 +383,14 @@ step "Preserved ${PRESERVED} local setting files"
 
 step "Updating to origin/${BRANCH}"
 write_status "pulling" "Pulling latest code from GitHub"
+mkdir -p "${ROOT}/data"
+php -r 'file_put_contents($argv[1], json_encode([
+  "commit" => $argv[2],
+  "version" => $argv[3] !== "" ? $argv[3] : null,
+  "saved_at" => gmdate("c"),
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) . "\n");' \
+  "${ROOT}/data/panel-rollback.json" "$CURRENT" "${CHANGELOG_VERSION:-}" || true
+step "Saved this version so Settings can restore it"
 if ! run_owner "git merge --ff-only '${REMOTE_REF}'"; then
   step "Fast-forward failed; resetting to origin/${BRANCH}"
   if ! run_owner "git reset --hard '${REMOTE_REF}'"; then
@@ -367,6 +493,13 @@ if [[ -n "$PYTHON" ]]; then
     step "yarbo-data-sdk installed"
   else
     step "yarbo-data-sdk install failed (run ./scripts/install.sh to retry)"
+  fi
+  step "Live camera library"
+  write_status "composer" "Installing the live camera library"
+  if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_agora_camera_sdk '${ROOT}'"; then
+    step "Live camera library ready"
+  else
+    step "Live camera library install failed — Start live view stays off until the next update"
   fi
 fi
 

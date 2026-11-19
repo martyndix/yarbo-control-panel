@@ -167,6 +167,12 @@ install_project() {
       echo "    On macOS: brew install python && python3 -m ensurepip --upgrade && ./scripts/install.sh"
       echo "    On Debian/Pi: sudo apt install python3-venv python3-pip && ./scripts/install.sh"
     fi
+    echo "==> Live camera library"
+    if run_as_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_agora_camera_sdk '${ROOT}'"; then
+      echo "    live camera library ready"
+    else
+      echo "    WARNING: live camera library did not install — Start live view stays off until the next update"
+    fi
   else
     echo "==> Python not found — cloud map/plan reads unavailable until Python 3 is installed"
   fi

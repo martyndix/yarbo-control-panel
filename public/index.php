@@ -117,7 +117,6 @@ HTML;
 <body>
 <?php
 $config = require dirname(__DIR__) . '/config.php';
-$camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
 ?>
     <main class="container">
         <header class="app-header">
@@ -377,7 +376,6 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
             </div>
         </section>
 
-        <?php if ($camerasEnabled): ?>
         <section class="card panel-section cameras-card" data-panel-id="cameras" data-module="yarbo">
             <div class="section-header">
                 <h2>Cameras</h2>
@@ -395,17 +393,18 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">The Yarbo app uses cloud video. This panel needs a local RTSP tunnel — see steps below.</p>
+            <p class="hint">Start live view opens the four cameras. The pictures go out through Yarbo's video service and come back to this page on your home network. It stays off, and stops, while the robot is on 4G. Open the panel with HTTPS so the browser can show the pictures. Stopping here also stops Smart Vision in the Yarbo phone app.</p>
             <div id="camera-alert" class="banner warning hidden" role="status"></div>
             <ol id="camera-setup" class="camera-setup hidden"></ol>
             <div class="camera-actions">
+                <button type="button" class="btn" id="camera-live-start">Start live view</button>
+                <button type="button" class="btn btn-secondary" id="camera-live-stop" disabled>Stop</button>
                 <button type="button" class="btn btn-secondary" id="camera-prepare">Prepare cameras (MQTT)</button>
                 <button type="button" class="btn btn-secondary" id="camera-recheck">Recheck streams</button>
             </div>
             <div id="camera-grid" class="camera-grid"></div>
             <p id="camera-note" class="camera-note hidden"></p>
         </section>
-        <?php endif; ?>
 
         <section class="card panel-section drive-card" data-panel-id="drive" data-module="yarbo">
             <div class="section-header section-header--simple">
@@ -2337,6 +2336,7 @@ $camerasEnabled = (bool) ($config['cameras_enabled'] ?? true);
                                 <button type="button" class="btn btn-secondary" id="settings-update-check">Check for updates</button>
                                 <button type="button" class="btn btn-secondary" id="settings-update-view-notes">View release notes</button>
                                 <button type="button" class="btn" id="settings-update-run" disabled>Update to latest</button>
+                                <button type="button" class="btn btn-secondary" id="settings-update-rollback">Restore previous version</button>
                                 <button type="button" class="btn btn-secondary" id="settings-panel-restart">Restart panel</button>
                                 <button type="button" class="btn" id="settings-https-ensure">Start HTTPS</button>
                             </div>

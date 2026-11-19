@@ -262,6 +262,7 @@ const els = {
     settingsUpdateCheck: document.getElementById('settings-update-check'),
     settingsUpdateViewNotes: document.getElementById('settings-update-view-notes'),
     settingsUpdateRun: document.getElementById('settings-update-run'),
+    settingsUpdateRollback: document.getElementById('settings-update-rollback'),
     settingsPanelRestart: document.getElementById('settings-panel-restart'),
     panelHealthTotal: document.getElementById('panel-health-total'),
     panelHealthRtt: document.getElementById('panel-health-rtt'),
@@ -16340,6 +16341,39 @@ async function waitForPanelRestart(maxWaitMs = 120000, targetCommitShort = null)
     throw new Error('Panel did not come back in time. Check: sudo systemctl status yarbo-panel and ~/yarbo/data/update.log');
 }
 
+async function runPanelRollback(button) {
+    const confirmed = window.confirm('Restore the previous panel version? Logins, Home rooms, and settings stay. You can use Update to latest again afterwards.');
+    if (!confirmed) return;
+    if (button) button.disabled = true;
+    setUpdateResult('Restoring the previous version…');
+    try {
+        const res = await fetch('/api/update.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'rollback', confirm: true }),
+        });
+        const data = await parseJsonResponse(res);
+        if (!data.ok) throw new Error(data.error || 'Could not restore the previous version');
+        setUpdateResult('Restore started. Waiting for the panel to restart…', 'success');
+        showToast('Restoring the previous version', 'success');
+        await waitForPanelRestart(120000, null);
+    } catch (err) {
+        if (isUpdateNetworkError(err)) {
+            try {
+                await waitForPanelRestart(120000, null);
+                return;
+            } catch (waitErr) {
+                setUpdateResult(waitErr.message || 'Restore status unknown', 'error');
+                return;
+            }
+        }
+        setUpdateResult(err.message || 'Could not restore the previous version', 'error');
+        showToast(err.message || 'Could not restore the previous version', 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 async function runPanelUpdate(button) {
     const statusData = lastUpdateStatus || await refreshUpdateBadge();
     const confirmed = await showUpdateConfirmModal(statusData || {});
@@ -16622,9 +16656,290 @@ function cameraModeUrl(cameraId) {
     return `/api/camera_stream.php?camera=${encodeURIComponent(cameraId)}`;
 }
 
+const CAMERA_VIEWS = { front: 'middle', left: 'left', right: 'right', rear: 'back' };
+let cameraLiveSource = null;
+let cameraLiveDecoders = {};
+let cameraLiveCodec = {};
+let cameraLiveRunning = false;
+let cameraLivePoll = null;
+let cameraLiveClock = 0;
+
+function cameraAgoraView(camera) {
+    return camera.view || CAMERA_VIEWS[camera.id] || camera.id;
+}
+
+function annexBNals(data) {
+    const starts = [];
+    for (let i = 0; i + 3 < data.length; i += 1) {
+        if (data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 1) {
+            starts.push({ at: i + 3, mark: i });
+            i += 2;
+        } else if (i + 4 < data.length && data[i] === 0 && data[i + 1] === 0 && data[i + 2] === 0 && data[i + 3] === 1) {
+            starts.push({ at: i + 4, mark: i });
+            i += 3;
+        }
+    }
+    return starts.map((start, index) => {
+        const end = index + 1 < starts.length ? starts[index + 1].mark : data.length;
+        return data.subarray(start.at, end);
+    }).filter((nal) => nal.length > 0);
+}
+
+function nalsToAvcc(nals) {
+    let size = 0;
+    nals.forEach((nal) => {
+        size += 4 + nal.length;
+    });
+    const out = new Uint8Array(size);
+    let offset = 0;
+    nals.forEach((nal) => {
+        out[offset] = (nal.length >>> 24) & 255;
+        out[offset + 1] = (nal.length >>> 16) & 255;
+        out[offset + 2] = (nal.length >>> 8) & 255;
+        out[offset + 3] = nal.length & 255;
+        out.set(nal, offset + 4);
+        offset += 4 + nal.length;
+    });
+    return out;
+}
+
+function avcCDescription(sps, pps) {
+    const description = new Uint8Array(11 + sps.length + pps.length);
+    description[0] = 1;
+    description[1] = sps[1];
+    description[2] = sps[2];
+    description[3] = sps[3];
+    description[4] = 0xff;
+    description[5] = 0xe1;
+    description[6] = (sps.length >> 8) & 255;
+    description[7] = sps.length & 255;
+    description.set(sps, 8);
+    let offset = 8 + sps.length;
+    description[offset] = 1;
+    description[offset + 1] = (pps.length >> 8) & 255;
+    description[offset + 2] = pps.length & 255;
+    description.set(pps, offset + 3);
+    return description;
+}
+
+function closeCameraFrames() {
+    if (cameraLiveSource) {
+        cameraLiveSource.close();
+        cameraLiveSource = null;
+    }
+    Object.values(cameraLiveDecoders).forEach((decoder) => {
+        try {
+            decoder.close();
+        } catch {
+            /* already closed */
+        }
+    });
+    cameraLiveDecoders = {};
+    cameraLiveCodec = {};
+}
+
+function stopCameraLivePoll() {
+    if (cameraLivePoll) {
+        clearInterval(cameraLivePoll);
+        cameraLivePoll = null;
+    }
+}
+
+function paintCameraFrame(view, frame) {
+    const canvas = document.querySelector(`canvas[data-camera-view="${view}"]`);
+    if (!canvas) {
+        frame.close();
+        return;
+    }
+    const ctx = canvas.getContext('2d');
+    if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+        canvas.width = frame.displayWidth;
+        canvas.height = frame.displayHeight;
+    }
+    ctx.drawImage(frame, 0, 0);
+    frame.close();
+}
+
+function ensureCameraDecoder(view, sps, pps) {
+    if (cameraLiveDecoders[view]) return cameraLiveDecoders[view];
+    const codec = `avc1.${[sps[1], sps[2], sps[3]].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+    const decoder = new VideoDecoder({
+        output: (frame) => paintCameraFrame(view, frame),
+        error: () => {
+            delete cameraLiveDecoders[view];
+        },
+    });
+    decoder.configure({
+        codec,
+        description: avcCDescription(sps, pps),
+        optimizeForLatency: true,
+    });
+    cameraLiveDecoders[view] = decoder;
+    return decoder;
+}
+
+function handleCameraFrame(event) {
+    if (!event || !event.view || !event.d) return;
+    const binary = Uint8Array.from(atob(event.d), (char) => char.charCodeAt(0));
+    const nals = annexBNals(binary);
+    const sps = nals.find((nal) => (nal[0] & 0x1f) === 7);
+    const pps = nals.find((nal) => (nal[0] & 0x1f) === 8);
+    if (sps && pps) {
+        cameraLiveCodec[event.view] = { sps, pps };
+    }
+    const known = cameraLiveCodec[event.view];
+    if (!known) return;
+    if (!cameraLiveDecoders[event.view] && !event.k) return;
+    const picture = nals.filter((nal) => ![7, 8, 9].includes(nal[0] & 0x1f));
+    if (!picture.length) return;
+    const decoder = ensureCameraDecoder(event.view, known.sps, known.pps);
+    if (!decoder || decoder.state === 'closed') return;
+    cameraLiveClock += 33333;
+    decoder.decode(new EncodedVideoChunk({
+        type: event.k ? 'key' : 'delta',
+        timestamp: cameraLiveClock,
+        data: nalsToAvcc(picture),
+    }));
+}
+
+function openCameraFrames() {
+    closeCameraFrames();
+    cameraLiveSource = new EventSource('/api/camera_live.php?action=frames');
+    cameraLiveSource.onmessage = (message) => {
+        try {
+            handleCameraFrame(JSON.parse(message.data));
+        } catch {
+            /* ignore a bad picture packet */
+        }
+    };
+}
+
+function setCameraLiveButtons(running) {
+    const start = document.getElementById('camera-live-start');
+    const stop = document.getElementById('camera-live-stop');
+    if (start) start.disabled = running;
+    if (stop) stop.disabled = !running;
+}
+
+function applyCameraLiveStatus(data) {
+    const message = data?.message || '';
+    if (els.cameraAlert && message && data?.state && data.state !== 'stopped') {
+        els.cameraAlert.textContent = message;
+        els.cameraAlert.classList.remove('hidden');
+    }
+    const views = data?.views || {};
+    document.querySelectorAll('.camera-tile').forEach((tile) => {
+        const view = tile.dataset.cameraView;
+        const slot = views[view];
+        if (!slot) return;
+        const badge = tile.querySelector('.camera-status');
+        if (!badge) return;
+        const live = Number(slot.frames || 0) > 0;
+        badge.textContent = live ? `${slot.fps || 0} fps` : (data.state === 'live' ? 'waiting' : 'off');
+        badge.className = `camera-status ${live ? 'online' : ''}`;
+    });
+    if (data?.state === 'stopped' || data?.state === 'error') {
+        cameraLiveRunning = false;
+        closeCameraFrames();
+        stopCameraLivePoll();
+        setCameraLiveButtons(false);
+        if (message) showToast(message, data.state === 'error' ? 'error' : 'success');
+    }
+}
+
+async function pollCameraLive() {
+    try {
+        const res = await fetch('/api/camera_live.php?action=status');
+        const data = await res.json();
+        if (data.state === 'live' && cameraLiveRunning && !cameraLiveSource) {
+            openCameraFrames();
+        }
+        applyCameraLiveStatus(data);
+    } catch {
+        /* the next poll retries */
+    }
+}
+
+async function startCameraLive(button) {
+    if (!window.isSecureContext) {
+        showToast(`Open https://${location.hostname}:8443 to watch live video`, 'error');
+        return;
+    }
+    if (typeof VideoDecoder === 'undefined') {
+        showToast('This browser cannot show the cameras. Use Chrome or Edge.', 'error');
+        return;
+    }
+    if (button) button.disabled = true;
+    try {
+        const res = await fetch('/api/camera_live.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'start' }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'Could not start live view');
+        cameraLiveRunning = true;
+        setCameraLiveButtons(true);
+        if (cameraMode !== 'stream') {
+            const liveRadio = document.querySelector('input[name="camera-mode"][value="stream"]');
+            if (liveRadio) liveRadio.checked = true;
+            cameraMode = 'stream';
+        }
+        renderCameras();
+        stopCameraLivePoll();
+        await pollCameraLive();
+        cameraLivePoll = setInterval(pollCameraLive, 2000);
+        showToast(data.message || 'Starting live view', 'success');
+    } catch (err) {
+        setCameraLiveButtons(false);
+        showToast(err.message || 'Could not start live view', 'error');
+    }
+}
+
+async function stopCameraLive(button) {
+    if (button) button.disabled = true;
+    cameraLiveRunning = false;
+    closeCameraFrames();
+    stopCameraLivePoll();
+    try {
+        await fetch('/api/camera_live.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'stop' }),
+        });
+        showToast('Stopping live view. This also stops Smart Vision in the phone app.', 'success');
+    } catch (err) {
+        showToast(err.message || 'Could not stop live view', 'error');
+    } finally {
+        setCameraLiveButtons(false);
+    }
+}
+
 function renderCameras() {
+    if (!els.cameraGrid) return;
     if (!cameras.length) {
         els.cameraGrid.innerHTML = '<p class="camera-placeholder">No cameras configured.</p>';
+        return;
+    }
+
+    if (cameraMode === 'stream') {
+        if (cameraLiveRunning && els.cameraGrid.querySelector('canvas')) {
+            return;
+        }
+        els.cameraGrid.innerHTML = cameras.map((camera) => {
+            const view = cameraAgoraView(camera);
+            return `
+                <article class="camera-tile" data-camera="${camera.id}" data-camera-view="${view}">
+                    <div class="camera-head">
+                        <span>${camera.name}</span>
+                        <span class="camera-status">off</span>
+                    </div>
+                    <div class="camera-viewport">
+                        <canvas data-camera="${camera.id}" data-camera-view="${view}"></canvas>
+                    </div>
+                </article>
+            `;
+        }).join('');
         return;
     }
 
@@ -16704,7 +17019,13 @@ function refreshSnapshotImages() {
 
 function setCameraMode(mode) {
     cameraMode = mode;
+    if (mode !== 'stream') {
+        closeCameraFrames();
+    }
     renderCameras();
+    if (mode === 'stream' && cameraLiveRunning) {
+        openCameraFrames();
+    }
     clearInterval(snapshotTimer);
     if (mode === 'snapshot') {
         snapshotTimer = setInterval(refreshSnapshotImages, SNAPSHOT_INTERVAL_MS);
@@ -16978,6 +17299,14 @@ document.querySelectorAll('input[name="map-layer"]').forEach((input) => {
     input.addEventListener('change', () => {
         if (input.checked) setMapLayer(input.value);
     });
+});
+
+document.getElementById('camera-live-start')?.addEventListener('click', (e) => {
+    startCameraLive(e.currentTarget);
+});
+
+document.getElementById('camera-live-stop')?.addEventListener('click', (e) => {
+    stopCameraLive(e.currentTarget);
 });
 
 document.getElementById('camera-prepare')?.addEventListener('click', (e) => {
@@ -18551,6 +18880,7 @@ document.querySelectorAll('input[name="papermono-kind"]').forEach((input) => {
 els.settingsUpdateCheck?.addEventListener('click', (e) => checkPanelUpdates(e.currentTarget));
 els.settingsUpdateViewNotes?.addEventListener('click', (e) => viewReleaseNotes(e.currentTarget));
 els.settingsUpdateRun?.addEventListener('click', (e) => runPanelUpdate(e.currentTarget));
+els.settingsUpdateRollback?.addEventListener('click', (e) => runPanelRollback(e.currentTarget));
 els.settingsPanelRestart?.addEventListener('click', (e) => runPanelRestart(e.currentTarget));
 els.settingsHttpsEnsure?.addEventListener('click', (e) => runHttpsEnsure(e.currentTarget));
 els.settingsPaperOtaAll?.addEventListener('click', (e) => queuePaperOta('*', e.currentTarget));

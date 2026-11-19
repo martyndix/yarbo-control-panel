@@ -199,3 +199,25 @@ install_yarbo_data_sdk() {
   rm -f "$err_file"
   return 1
 }
+
+# Agora's Python server SDK carries the live camera pictures. It is not
+# committed; Panel updates installs it into the same venv as the Yarbo SDK.
+install_agora_camera_sdk() {
+  local root="${1:?}"
+  local py major minor
+  py="$(yarbo_resolve_python "$root" || true)"
+  if [[ -z "$py" ]]; then
+    echo "    Python not found — live cameras stay off" >&2
+    return 1
+  fi
+  major="$("$py" -c 'import sys; print(sys.version_info[0])')"
+  minor="$("$py" -c 'import sys; print(sys.version_info[1])')"
+  if [[ "$major" -lt 3 || ( "$major" -eq 3 && "$minor" -lt 10 ) ]]; then
+    echo "    Python ${major}.${minor} is older than 3.10 — live cameras need 3.10 or newer" >&2
+    return 1
+  fi
+  if "$py" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
+    return 0
+  fi
+  "$py" -m pip install --disable-pip-version-check agora_python_server_sdk
+}

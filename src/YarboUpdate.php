@@ -279,6 +279,64 @@ BASH;
     }
 
     /**
+     * Check out the version saved before the last update, or the 4.0.388 tag.
+     *
+     * @return array<string, mixed>
+     */
+    public function rollbackAsync(): array
+    {
+        if (!$this->isGitInstall()) {
+            return [
+                'ok' => false,
+                'error' => 'Not a git clone — cannot restore a previous version',
+            ];
+        }
+
+        if ($this->isUpdateRunning()) {
+            return [
+                'ok' => false,
+                'error' => 'An update is already running',
+                'progress' => $this->readProgress(),
+            ];
+        }
+
+        if (!$this->ensureDataDir()) {
+            return ['ok' => false, 'error' => 'Could not create data directory'];
+        }
+
+        $this->writeProgress([
+            'state' => 'running',
+            'message' => 'Restoring the previous version',
+            'started_at' => gmdate('c'),
+        ]);
+
+        $script = $this->projectRoot . '/scripts/update.sh';
+        $logFile = $this->projectRoot . '/data/update.log';
+        $cmd = sprintf(
+            'nohup bash %s --rollback >> %s 2>&1 &',
+            escapeshellarg($script),
+            escapeshellarg($logFile)
+        );
+
+        if (!$this->spawnBackgroundCommand($cmd)) {
+            $this->writeProgress([
+                'state' => 'failed',
+                'message' => 'Could not start the restore',
+                'error' => 'Could not start the restore',
+                'updated_at' => gmdate('c'),
+            ]);
+
+            return ['ok' => false, 'error' => 'Could not start the restore'];
+        }
+
+        return [
+            'ok' => true,
+            'started' => true,
+            'message' => 'Restoring the previous version. Logins and Home rooms stay.',
+        ];
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function readProgress(): array

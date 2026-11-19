@@ -411,7 +411,7 @@ The installer creates `config.php` from `config.example.php`. **`config.php` is 
 | `serial` | Robot serial number — set via **Settings → Yarbo** |
 | `broker_host` | Legacy leftover (unused for control after cloud MQTT) |
 | `broker_port` | Legacy leftover (unused for control) |
-| `cameras_enabled` | `false` — **keep disabled**; local camera streams do not work yet (see below) |
+| `cameras_enabled` | `false` — leave this off. It only covers the old RTSP ports. Live view does not use it. |
 | `camera_host` | Override RTSP host; `null` falls back to `broker_host` (experimental only) |
 | `ffmpeg_path` | Path to ffmpeg binary (only needed if experimenting with cameras) |
 
@@ -596,18 +596,17 @@ Controls and manual drive talk through a **persistent MQTT agent** (`scripts/mqt
 
 ---
 
-## Camera support (not currently working)
+## Cameras
 
-**Local camera streams do not work in practice on current Yarbo hardware/firmware.** This is not a bug in this project — Yarbo has not opened up local camera access to third-party tools.
+Live view uses the same cloud video path as the Yarbo phone app. The robot's Wi-Fi address in Settings is not the video source. The pictures leave the robot through Yarbo's video service, and the panel on your home network receives them and draws them in the browser.
 
-What we know from testing and community documentation:
+Press **Start live view** on the Yarbo page. The panel installs the video library when you use Settings → Panel updates → Update to latest. Watch over HTTPS (`https://<your-pi>:8443`) in Chrome or Edge.
 
-- The official Yarbo app uses **cloud-based video** (Smart Vision), not LAN RTSP streams exposed to your network.
-- The robot has internal RTSP cameras, but they sit on a private internal network and are **not reachable** from a normal home LAN connection to the robot's Wi‑Fi IP.
-- MQTT commands such as `camera_toggle` and `smart_vision_control` can be sent, but they do **not** make local RTSP streams available to this panel.
-- Ports 19201–19204 are documented in community reverse-engineering, but in real-world use they are not open on the broker IP for most owners.
+Live view refuses to start, and stops if it is already running, while the robot reports **4G**. Wi-Fi and HaLow are allowed. Stopping live view also stops Smart Vision in the phone app, so the robot stops uploading. It does not send the command that pauses a running job.
 
-For these reasons, **leave `cameras_enabled` set to `false`** in `config.php`. The camera-related code remains in the repository for future use if Yarbo ever enables local stream access, but it should be treated as **experimental and non-functional** today.
+**Restore previous version** in Settings returns to 4.0.388 (or the commit saved before a later update). Logins and Home rooms stay.
+
+The old RTSP code is still in the tree and still does nothing useful on current firmware. Leave `cameras_enabled` false. These ports are the unused local path, not the live view:
 
 | Camera | Documented port | Documented URL |
 |--------|-----------------|----------------|
