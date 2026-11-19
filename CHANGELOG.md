@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.38] - 2026-11-20
+
+### Fixed
+
+- Dock did nothing while the cameras were on. Live view leaves the robot in camera-check mode, and that mode ignores a return-to-dock. Dock now turns camera check off, sends the robot home, and keeps the cameras from turning that mode straight back on. Refresh in Safari and press Dock again.
+
 ## [5.0.37] - 2026-11-20
 
 ### Fixed

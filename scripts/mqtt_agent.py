@@ -210,7 +210,35 @@ def job_is_latched(raw: Any) -> bool:
     return False
 
 
+def note_dock_progress(state: dict[str, Any], raw: Any) -> None:
+    """Keep camera-check off until the robot has actually started docking."""
+    if not state.get("docking"):
+        return
+    started = float(state.get("work_started_at") or 0)
+    if started and time.time() - started > 180:
+        state["docking"] = False
+        state["dock_seen_recharge"] = False
+        return
+    if not isinstance(raw, dict):
+        return
+    state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
+    try:
+        recharging = int(state_msg.get("on_going_recharging") or 0)
+    except (TypeError, ValueError):
+        recharging = 0
+    try:
+        charging = int(state_msg.get("charging_status") or 0)
+    except (TypeError, ValueError):
+        charging = 0
+    if recharging:
+        state["dock_seen_recharge"] = True
+    if charging > 0 or (state.get("dock_seen_recharge") and recharging == 0 and started and time.time() - started > 20):
+        state["docking"] = False
+        state["dock_seen_recharge"] = False
+
+
 def mark_job_from_raw(state: dict[str, Any], raw: Any) -> None:
+    note_dock_progress(state, raw)
     if not state.get("work_hold") or state.get("work_latched"):
         return
     if job_is_latched(raw):
@@ -991,6 +1019,7 @@ async def handle_request(
             if not getattr(client, "controller_acquired", False):
                 await ensure_controller_role(client)
             state["manual_drive"] = False
+            state["docking"] = False
             state["work_hold"] = False
             state["work_latched"] = False
             state["keepalive_soon"] = False
@@ -1024,6 +1053,7 @@ async def handle_request(
             # Never get_controller here — that re-triggers "app controller connected".
             warning = None
             if moving:
+                state["docking"] = False
                 raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
                 # A prior Stop/plan used work_hold; drive needs the control keepalive.
                 state["work_hold"] = False
@@ -1219,14 +1249,27 @@ async def handle_request(
             }
 
         if op == "return_to_dock":
+            # Manual camera check (live view) makes the robot ignore dock.
+            # Hold that mode off until recharging actually starts, or the
+            # camera heartbeat turns it back on and the dock never leaves.
+            state["docking"] = True
+            state["dock_seen_recharge"] = False
             await apply_command_session(client, state, "work", ["cmd_recharge"])
-            await client.publish_command("wireless_charging_cmd", {"cmd": 0})
-            await asyncio.sleep(0.2)
-            await client.publish_command("cmd_recharge", {"cmd": 2})
-            await asyncio.sleep(0.35)
-            await wake_for_control(client)
+            await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
+            await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
+            await publish_quick(client, "smart_vision_control", {"state": 0})
+            await publish_quick(client, "set_working_state", {"state": 1, "source": "smart_home"})
+            await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
+            sent = await publish_quick(client, "cmd_recharge", {"cmd": 2})
             state["last_keepalive"] = time.time()
-            log("return_to_dock official wireless_charging_cmd 0 + cmd_recharge cmd=2")
+            if not sent:
+                state["docking"] = False
+                return {
+                    "ok": False,
+                    "error": "Dock did not reach the robot. Press Dock again.",
+                    "op": "return_to_dock",
+                }
+            log("return_to_dock: camera check off, then wireless_charging_cmd 0 + cmd_recharge cmd=2")
             return {
                 "ok": True,
                 "op": "return_to_dock",
@@ -1377,13 +1420,13 @@ async def handle_client(
                     await asyncio.sleep(0.02)
                     waited += 0.02
             try:
-                if vision and _drive_waiters > 0:
+                if vision and (_drive_waiters > 0 or state.get("docking")):
                     resp = {
                         "ok": True,
                         "op": "publish",
                         "cmd": str(req.get("cmd") or ""),
                         "session": "vision",
-                        "skipped": "drive",
+                        "skipped": "dock" if state.get("docking") else "drive",
                     }
                 else:
                     async with lock:
