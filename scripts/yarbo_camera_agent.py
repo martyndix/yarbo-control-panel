@@ -39,24 +39,7 @@ LEASE_SECONDS = 30 * 60
 IDLE_AFTER_VIEWER_S = 20
 IDLE_BEFORE_VIEWER_S = 45
 HEARTBEAT_S = 10
-# About five pictures a second per camera. Full rate kept the panel busy
-# copying and decoding four streams, so dock and the other buttons waited.
-FRAME_GAP_S = 0.2
 LINK_CHECK_S = 30
-
-
-def frame_due(last_sent: float, now: float, key: bool, gap: float = FRAME_GAP_S) -> bool:
-    """True when this picture should be forwarded.
-
-    Ordinary frames are capped. A keyframe still goes out, but not in a
-    tight burst, so a stream of keyframes cannot undo the cap.
-    """
-    if last_sent <= 0:
-        return True
-    elapsed = now - last_sent
-    if elapsed >= gap:
-        return True
-    return key and elapsed >= 0.12
 
 
 def link_name(raw: dict[str, Any] | None) -> str:
@@ -487,19 +470,6 @@ class Hub:
             if stale:
                 self.subs = [sub for sub in self.subs if sub not in stale]
 
-    def last_sent(self, view: str) -> float:
-        with self.lock:
-            return float(self.views[view].get("_sent") or 0)
-
-    def should_forward(self, view: str, key: bool, now: float) -> bool:
-        with self.lock:
-            slot = self.views[view]
-            last = float(slot.get("_sent") or 0)
-            if not frame_due(last, now, key):
-                return False
-            slot["_sent"] = now
-            return True
-
     def mark(self, view: str, **fields: Any) -> None:
         with self.lock:
             self.views[view].update(fields)
@@ -722,19 +692,13 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
             self.view = view
 
         def on_encoded_video_frame(self, frame_uid, image_buffer, length, info):  # type: ignore[no-untyped-def]
-            now = time.time()
-            last = session.hub.last_sent(self.view)
-            # Drop a burst before copying it. Copying four full-rate streams
-            # was enough to make the rest of the panel wait.
-            if last > 0 and now - last < 0.12:
-                return 1
+            # Every encoded frame has to be forwarded. Dropping some of them
+            # removes the keyframe the browser needs, and the tiles stay black.
             data = copy_frame(image_buffer, length)
             if not data:
                 return 1
             frame_type = getattr(info, "frame_type", None)
             key = annexb_has_idr(data) or frame_type == 3
-            if not session.hub.should_forward(self.view, key, time.time()):
-                return 1
             pts = int(getattr(info, "capture_time_ms", 0) or 0)
             try:
                 uid_num = int(frame_uid)
@@ -1125,11 +1089,6 @@ def self_test() -> int:
     idr = b"\x00\x00\x00\x01\x67\x42" + b"\x00\x00\x00\x01\x65\x88"
     assert annexb_has_idr(idr) is True
     assert annexb_has_idr(b"\x00\x00\x00\x01\x41\x9a") is False
-    assert frame_due(0, 10, False) is True
-    assert frame_due(10, 10.05, False) is False
-    assert frame_due(10, 10.05, True) is False
-    assert frame_due(10, 10.13, True) is True
-    assert frame_due(10, 10.25, False) is True
     print("ok")
     return 0
 

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.25] - 2026-11-19
+
+### Fixed
+
+- The camera tiles said **Online** but the pictures stayed black. Thinning the stream was dropping the keyframe each camera needs before it can draw, so the browser had nothing to show. Every picture frame is sent again. Dock and the lights still stay off the picture path, so those buttons keep working while the cameras are on. Update to latest, then press Stop view and Start live view.
+
 ## [5.0.24] - 2026-11-19
 
 ### Fixed

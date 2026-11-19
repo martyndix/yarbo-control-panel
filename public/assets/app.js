@@ -16944,16 +16944,8 @@ function ensureCameraDecoder(view, sps, pps) {
     return decoder;
 }
 
-const cameraFrameAt = {};
-
 function handleCameraFrame(event) {
     if (!event || !event.view || !event.d) return;
-    // Full-rate pictures were decoded on the click thread, so dock and the
-    // other buttons did nothing until live view stopped.
-    const now = performance.now();
-    const last = cameraFrameAt[event.view] || 0;
-    if (!event.k && now - last < 160) return;
-    cameraFrameAt[event.view] = now;
     const binary = bytesFromBase64(event.d);
     const nals = annexBNals(binary);
     const sps = nals.find((nal) => (nal[0] & 0x1f) === 7);
