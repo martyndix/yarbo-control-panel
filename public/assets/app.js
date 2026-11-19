@@ -16668,6 +16668,7 @@ let cameraLiveSource = null;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
 let cameraLiveRunning = false;
+let cameraLiveSeen = new Set();
 let cameraLivePoll = null;
 let cameraLiveClock = 0;
 
@@ -16743,6 +16744,7 @@ function closeCameraFrames() {
     });
     cameraLiveDecoders = {};
     cameraLiveCodec = {};
+    cameraLiveSeen = new Set();
 }
 
 function stopCameraLivePoll() {
@@ -16765,6 +16767,18 @@ function paintCameraFrame(view, frame) {
     }
     ctx.drawImage(frame, 0, 0);
     frame.close();
+    markCameraTileOnline(view);
+}
+
+function markCameraTileOnline(view) {
+    cameraLiveSeen.add(view);
+    const tile = document.querySelector(`.camera-tile[data-camera-view="${view}"]`);
+    const badge = tile?.querySelector('.camera-status');
+    if (badge) {
+        badge.textContent = 'Online';
+        badge.className = 'camera-status online';
+    }
+    if (els.cameraAlert) els.cameraAlert.classList.add('hidden');
 }
 
 function ensureCameraDecoder(view, sps, pps) {
@@ -16843,21 +16857,33 @@ function setCameraLiveButtons(running) {
 
 function applyCameraLiveStatus(data) {
     const message = data?.message || '';
-    if (els.cameraAlert && message && data?.state && data.state !== 'stopped') {
-        els.cameraAlert.textContent = message;
-        els.cameraAlert.classList.remove('hidden');
-    }
     const views = data?.views || {};
+    let anyLive = cameraLiveSeen.size > 0;
     document.querySelectorAll('.camera-tile').forEach((tile) => {
         const view = tile.dataset.cameraView;
         const slot = views[view];
-        if (!slot) return;
+        if (!slot && !cameraLiveSeen.has(view)) return;
         const badge = tile.querySelector('.camera-status');
         if (!badge) return;
-        const live = Number(slot.frames || 0) > 0;
-        badge.textContent = live ? `${slot.fps || 0} fps` : (data.state === 'live' ? 'waiting' : 'off');
-        badge.className = `camera-status ${live ? 'online' : ''}`;
+        const live = cameraLiveSeen.has(view) || Number(slot?.frames || 0) > 0;
+        if (live) {
+            anyLive = true;
+            cameraLiveSeen.add(view);
+            badge.textContent = 'Online';
+            badge.className = 'camera-status online';
+            return;
+        }
+        badge.textContent = data.state === 'live' ? 'waiting' : 'off';
+        badge.className = 'camera-status';
     });
+    if (els.cameraAlert) {
+        if (anyLive || !message || data?.state === 'stopped') {
+            els.cameraAlert.classList.add('hidden');
+        } else if (data?.state && data.state !== 'stopped') {
+            els.cameraAlert.textContent = message;
+            els.cameraAlert.classList.remove('hidden');
+        }
+    }
     if (data?.state === 'stopped' || data?.state === 'error') {
         cameraLiveRunning = false;
         closeCameraFrames();
@@ -16869,7 +16895,7 @@ function applyCameraLiveStatus(data) {
 
 async function pollCameraLive() {
     try {
-        const res = await fetch('/api/camera_live.php?action=status');
+        const res = await fetch('/api/camera_live.php?action=status', { cache: 'no-store' });
         const data = await res.json();
         if (data.state === 'live' && cameraLiveRunning && !cameraLiveSource) {
             openCameraFrames();

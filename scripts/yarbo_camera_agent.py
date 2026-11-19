@@ -913,8 +913,8 @@ def watch_lease(session: LiveSession, armed_at: float) -> None:
             )
             if session.message != waiting:
                 session.set_state("live", waiting)
-        elif frames > 0 and session.message != "Live view is on":
-            session.set_state("live", "Live view is on")
+        elif frames > 0 and session.message:
+            session.set_state("live", "")
         if now - armed_at >= LEASE_SECONDS:
             session.set_state("stopped", "Live view stopped after 30 minutes. Press Start to watch again.")
             finish_session(session)

@@ -67,6 +67,9 @@ assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Ag
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');
 assert_true(!str_contains($camera, 'set_working_state'), 'live view does not change the job');
 assert_true(str_contains($camera, '"state": 0'), 'stop tells the robot to stop the cameras');
+$appJs = (string) file_get_contents($root . '/public/assets/app.js');
+assert_true(str_contains($appJs, "badge.textContent = 'Online'"), 'a live picture is labelled Online');
+assert_true(str_contains($appJs, 'markCameraTileOnline'), 'the first picture clears the waiting banner');
 $camerasApi = (string) file_get_contents($root . '/public/api/cameras.php');
 assert_true(!str_contains($camerasApi, 'camera-tunnel.sh'), 'the camera card does not ask for the old tunnel');
 

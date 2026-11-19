@@ -8,6 +8,7 @@ use Yarbo\YarboCameraLive;
 
 $root = dirname(__DIR__, 2);
 $live = new YarboCameraLive($root);
+header('Cache-Control: no-store');
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = (string) ($_GET['action'] ?? '');
 

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.17] - 2026-11-19
+
+### Fixed
+
+- The four camera pictures were already on screen, but the yellow bar still said it was waiting and each tile still said **waiting**. As soon as a picture is drawn, that bar goes away and the tile says **Online** in green. Update to latest and refresh the page. If live view is already running, press Stop, then Start live view.
+
 ## [5.0.16] - 2026-11-19
 
 ### Fixed
