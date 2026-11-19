@@ -366,9 +366,10 @@ def publish_vision(
     }
     if ack:
         body["ack"] = True
-    # A keep-alive must not sit on the robot session. Dock and lights use it too.
+    # Waiting here does not hold the robot session. Giving up after 2s let the
+    # cameras go quiet, so Safari had nothing left to draw.
     if timeout is None:
-        timeout = 12.0 if ack else 2.0
+        timeout = 12.0
     if attempts is None:
         attempts = 2 if ack else 1
     result = agent_request(body, timeout=timeout, attempts=attempts)
@@ -583,7 +584,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
             self.end_headers()
-            self.wfile.write(b": live\n\n")
+            # Safari will not deliver the first events until about 2KB has arrived.
+            self.wfile.write(b": " + (b" " * 2048) + b"\n\n")
             self.wfile.flush()
             while not session.stop.is_set():
                 try:
@@ -1020,7 +1022,19 @@ def run(root: Path) -> int:
         # 8766 is the Matter agent. Binding there raises Errno 98 and live view
         # never starts, even though the robot itself is online.
         port = int(os.environ.get("YARBO_CAMERA_PORT") or 8767)
-        httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+        if port == 8766:
+            port = 8767
+        httpd = None
+        bind_error: Exception | None = None
+        for _ in range(10):
+            try:
+                httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+                break
+            except OSError as exc:
+                bind_error = exc
+                time.sleep(0.2)
+        if httpd is None:
+            raise bind_error or OSError("Live view could not open its picture port")
         session.port = port
         session.set_state("live", "Live view is on")
         threading.Thread(target=watch_lease, args=(session, time.time()), daemon=True).start()

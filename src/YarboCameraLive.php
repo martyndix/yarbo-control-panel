@@ -46,15 +46,11 @@ final class YarboCameraLive
             return ['ok' => false, 'error' => self::CELLULAR_MESSAGE];
         }
 
-        $existing = $this->status();
-        if (!empty($existing['running']) && in_array((string) ($existing['state'] ?? ''), ['starting', 'live'], true)) {
-            return [
-                'ok' => true,
-                'already' => true,
-                'state' => $existing['state'],
-                'message' => 'Live view is already on',
-            ];
-        }
+        // A picture process left over from the previous update keeps running
+        // after Stop, and Start used to leave it in place. That process was
+        // still dropping the frames Safari needs.
+        $this->stopAgent();
+        usleep(300000);
 
         $python = $this->pythonBinary();
         $script = $this->projectRoot . '/scripts/yarbo_camera_agent.py';
@@ -106,6 +102,13 @@ final class YarboCameraLive
      */
     public function stop(): array
     {
+        $this->stopAgent();
+
+        return ['ok' => true, 'state' => 'stopped', 'message' => 'Stopping live view'];
+    }
+
+    private function stopAgent(): void
+    {
         $snap = $this->readStatusFile();
         $port = (int) ($snap['port'] ?? (getenv('YARBO_CAMERA_PORT') ?: 8767));
         if ($port === 8766) {
@@ -123,8 +126,8 @@ final class YarboCameraLive
                 @exec('kill ' . (int) $pid . ' 2>/dev/null');
             }
         }
-
-        return ['ok' => true, 'state' => 'stopped', 'message' => 'Stopping live view'];
+        // setsid can leave the picture process running after the pid file is gone.
+        @exec('pkill -f ' . escapeshellarg('[y]arbo_camera_agent.py') . ' 2>/dev/null');
     }
 
     public function proxyFrames(): void

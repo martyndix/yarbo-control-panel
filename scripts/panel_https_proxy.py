@@ -44,6 +44,11 @@ def camera_agent_port() -> int:
     return port
 
 
+def http_chunk(data: bytes) -> bytes:
+    """One HTTP/1.1 chunk. Safari holds a picture stream until it is chunked."""
+    return f"{len(data):X}\r\n".encode("ascii") + data + b"\r\n"
+
+
 def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
     """Copy an upstream body as it arrives. Do not wait for the stream to end."""
     while True:
@@ -196,10 +201,25 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
             self.send_header(key, value)
         self.send_header("Cache-Control", "no-cache, no-store")
         self.send_header("X-Accel-Buffering", "no")
+        # Safari does not hand EventSource any bytes of an endless response
+        # until the connection closes, unless the body is chunked. The pictures
+        # then stay black while the tiles still say Online.
+        self.send_header("Transfer-Encoding", "chunked")
         self.send_header("Connection", "close")
         self.end_headers()
         try:
-            relay_upstream(resp, self.wfile)
+            self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        try:
+            while True:
+                chunk = resp.read(16384)
+                if not chunk:
+                    break
+                self.wfile.write(http_chunk(chunk))
+                self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
         except Exception:
             pass
         finally:

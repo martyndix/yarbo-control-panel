@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.26] - 2026-11-19
+
+### Fixed
+
+- Safari still showed black camera tiles after the pictures were turned back on. It holds this kind of stream until the connection ends, so a live view that stays open never draws. The pictures are now sent in pieces Safari will show as they arrive. A picture process left running from the previous update is replaced when you press Start live view. The tile says **Online** only after a picture is actually drawn. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.25] - 2026-11-19
 
 ### Fixed

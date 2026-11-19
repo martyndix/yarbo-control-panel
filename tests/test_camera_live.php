@@ -86,6 +86,8 @@ assert_true(str_contains($proxy, 'def is_camera_frames'), 'HTTPS proxy recognise
 assert_true(str_contains($proxy, 'def relay_upstream'), 'picture bytes are forwarded as they arrive');
 assert_true(str_contains($proxy, '"/frames"'), 'pictures come from the camera agent, not a PHP worker');
 assert_true(str_contains($proxy, 'def _serve_camera_frames'), 'a missed camera listener does not fall through to PHP');
+assert_true(str_contains($proxy, 'Transfer-Encoding'), 'Safari receives the pictures as chunks');
+assert_true(str_contains($proxy, 'def http_chunk'), 'picture chunks have a length prefix');
 $livePhp = (string) file_get_contents($root . '/src/YarboCameraLive.php');
 assert_true(!str_contains($livePhp, 'set_time_limit(0)'), 'the picture stream does not stay inside a PHP worker');
 assert_true(str_contains($livePhp, 'Live pictures are not served by the panel page'), 'PHP refuses to proxy the picture stream');
@@ -94,8 +96,10 @@ assert_true(!str_contains($camera, 'should_forward'), 'live pictures are not thi
 assert_true(str_contains($camera, 'LINK_CHECK_S = 30'), 'live view does not ask the robot every second');
 assert_true(str_contains($agent, '_control_waiters'), 'dock and lights go ahead of a status read');
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
-assert_true(str_contains($appJs, 'bytesFromBase64'), 'picture bytes are not decoded with a per-byte callback');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
+assert_true(str_contains($appJs, 'has not received a picture'), 'Safari is told when the picture stream is missing');
+assert_true(str_contains($camera, 'b" " * 2048'), 'the picture stream starts with enough bytes for Safari');
+assert_true(str_contains($livePhp, 'pkill -f '), 'Start replaces a picture process left over from the last update');
 assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');
 assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
 assert_true(str_contains($appJs, 'firstPicture'), 'a live picture enables drive once, not on every frame');

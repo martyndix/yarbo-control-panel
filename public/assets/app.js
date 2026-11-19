@@ -16812,13 +16812,6 @@ function cameraAgoraView(camera) {
     return camera.view || CAMERA_VIEWS[camera.id] || camera.id;
 }
 
-function bytesFromBase64(value) {
-    const binary = atob(value);
-    const out = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
-    return out;
-}
-
 function annexBNals(data) {
     const starts = [];
     for (let i = 0; i + 3 < data.length; i += 1) {
@@ -16946,7 +16939,7 @@ function ensureCameraDecoder(view, sps, pps) {
 
 function handleCameraFrame(event) {
     if (!event || !event.view || !event.d) return;
-    const binary = bytesFromBase64(event.d);
+    const binary = Uint8Array.from(atob(event.d), (char) => char.charCodeAt(0));
     const nals = annexBNals(binary);
     const sps = nals.find((nal) => (nal[0] & 0x1f) === 7);
     const pps = nals.find((nal) => (nal[0] & 0x1f) === 8);
@@ -16991,6 +16984,11 @@ function openCameraFrames() {
             /* ignore a bad picture packet */
         }
     };
+    cameraLiveSource.onerror = () => {
+        if (cameraLiveSeen.size > 0 || !els.cameraAlert) return;
+        els.cameraAlert.textContent = 'The cameras are on, but this browser has not received a picture yet.';
+        els.cameraAlert.classList.remove('hidden');
+    };
 }
 
 function setCameraLiveButtons(running) {
@@ -17010,10 +17008,8 @@ function applyCameraLiveStatus(data) {
         if (!slot && !cameraLiveSeen.has(view)) return;
         const badge = tile.querySelector('.camera-status');
         if (!badge) return;
-        const live = cameraLiveSeen.has(view) || Number(slot?.frames || 0) > 0;
-        if (live) {
+        if (cameraLiveSeen.has(view)) {
             anyLive = true;
-            cameraLiveSeen.add(view);
             badge.textContent = 'Online';
             badge.className = 'camera-status online';
             return;
@@ -17022,9 +17018,9 @@ function applyCameraLiveStatus(data) {
         badge.className = 'camera-status';
     });
     if (els.cameraAlert) {
-        if (anyLive || !message || data?.state === 'stopped') {
+        if (anyLive || data?.state === 'stopped') {
             els.cameraAlert.classList.add('hidden');
-        } else if (data?.state && data.state !== 'stopped') {
+        } else if (message) {
             els.cameraAlert.textContent = message;
             els.cameraAlert.classList.remove('hidden');
         }

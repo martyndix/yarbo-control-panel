@@ -52,6 +52,8 @@ def main() -> None:
     assert not proxy.is_camera_frames("/api/camera_live.php?action=status")
     assert not proxy.is_camera_frames("/api/status.php")
     assert proxy.camera_agent_port() != 8766
+    assert proxy.http_chunk(b"hi") == b"2\r\nhi\r\n"
+    assert proxy.http_chunk(b"") == b"0\r\n\r\n"
 
     sink = Sink()
     worker = threading.Thread(target=proxy.relay_upstream, args=(SlowBody(), sink), daemon=True)
