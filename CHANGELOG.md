@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.8] - 2026-11-19
+
+### Fixed
+
+- The robot stayed offline in the panel while the Yarbo phone app showed it online. Version 4 asked the cloud session for a status snapshot when the page did not have one yet. That request had been removed, so the status card never filled in. It is back. Update to latest. Do not press Start live view until the status card shows the robot.
+
 ## [5.0.7] - 2026-11-19
 
 ### Fixed

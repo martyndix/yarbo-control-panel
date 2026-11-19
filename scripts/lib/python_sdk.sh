@@ -158,6 +158,25 @@ ensure_yarbo_venv() {
   return 1
 }
 
+# Earlier live-view updates pip-installed the video library into .venv.
+# panel.sh starts the status agent only when this interpreter can import yarbo.
+repair_yarbo_status_venv() {
+  local root="${1:?}"
+  local py="${root}/.venv/bin/python"
+  if [[ ! -x "$py" ]]; then
+    py="${root}/.venv/bin/python3"
+  fi
+  if [[ ! -x "$py" ]]; then
+    return 0
+  fi
+  if "$py" -c 'import yarbo' >/dev/null 2>&1 \
+    && "$py" -c 'import yarbo_robot_sdk' >/dev/null 2>&1; then
+    return 0
+  fi
+  echo "    Repairing yarbo-data-sdk and python-yarbo in ${root}/.venv"
+  "$py" -m pip install --disable-pip-version-check yarbo-data-sdk python-yarbo
+}
+
 install_yarbo_data_sdk() {
   local python="${1:?}"
   local root="${2:-}"

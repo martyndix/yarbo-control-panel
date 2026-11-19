@@ -302,6 +302,11 @@ if ! $BEHIND; then
     else
       step "Live camera library install failed — Start live view will try again"
     fi
+    if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && repair_yarbo_status_venv '${ROOT}'"; then
+      step "Yarbo status library ready"
+    else
+      step "Yarbo status library still needs ./scripts/install.sh"
+    fi
   fi
   if $SYSTEMD_UNIT && ! $SYSTEMD_ACTIVE; then
     step "Starting systemd service ${SERVICE_NAME}"
@@ -511,16 +516,10 @@ if [[ -n "$PYTHON" ]]; then
   else
     step "Live camera library install failed — Start live view stays off until the next update"
   fi
-  # A previous update may have put the video library in the Yarbo environment.
-  # Put the robot packages back if that import no longer works.
-  RESOLVED="$(yarbo_resolve_python "${ROOT}" || true)"
-  if [[ -n "$RESOLVED" ]] && ! yarbo_sdk_installed "$RESOLVED"; then
-    step "Repairing the Yarbo connection library"
-    if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_yarbo_data_sdk '${PYTHON}' '${ROOT}'"; then
-      step "Yarbo connection library repaired"
-    else
-      step "Yarbo connection library still needs ./scripts/install.sh"
-    fi
+  if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && repair_yarbo_status_venv '${ROOT}'"; then
+    step "Yarbo status library ready"
+  else
+    step "Yarbo status library still needs ./scripts/install.sh"
   fi
 fi
 

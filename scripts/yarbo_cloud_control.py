@@ -103,13 +103,6 @@ class YarboCloudControlClient:
         self._connected = True
         _LOGGER.info("Cloud MQTT ready for SN=%s type_id=%s", self.sn, self.type_id)
 
-    def cached_device_msg(self) -> dict[str, Any] | None:
-        raw = self._last_raw
-        return dict(raw) if isinstance(raw, dict) and raw else None
-
-    def device_msg_at(self) -> float:
-        return float(self._last_raw_at or 0.0)
-
     def _on_device_message(self, _topic: str, data: Any) -> None:
         if isinstance(data, dict) and data:
             self._last_raw = data
