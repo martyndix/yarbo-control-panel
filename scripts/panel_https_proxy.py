@@ -623,7 +623,7 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         reply = b'{"ok":false,"error":"The robot did not answer. Press it again."}'
         conn = None
         try:
-            conn = http.client.HTTPConnection(self.upstream_host, self.upstream_port, timeout=12)
+            conn = http.client.HTTPConnection(self.upstream_host, self.upstream_port, timeout=120)
             host = self.headers.get("Host") or f"{self.upstream_host}:{self.upstream_port}"
             conn.request(
                 "POST",

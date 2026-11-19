@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.44] - 2026-11-20
+
+### Fixed
+
+- Connect showed "The robot did not answer" while the cameras stayed on screen. Connect, Dock, lights and the other buttons now step the pictures aside, send the press, and open the pictures again. A direction still shares the picture connection so the view can stay up while it is held. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.43] - 2026-11-20
 
 ### Fixed

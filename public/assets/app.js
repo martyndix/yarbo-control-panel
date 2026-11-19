@@ -17050,32 +17050,40 @@ function cameraSocketRequest(path, body) {
 }
 
 async function postPanelJson(path, init) {
-    const control = path === '/api/drive.php' || path === '/api/command.php';
-    if (control && location.protocol === 'https:' && (cameraFramesOpen || cameraControlsOpen())) {
-        if (!cameraControlsOpen()) {
-            if (!cameraLiveSource) attachCameraStream();
-            const started = Date.now();
-            while (!cameraControlsOpen() && Date.now() - started < 2000) {
-                await new Promise((resolve) => setTimeout(resolve, 50));
-            }
-        }
-        if (cameraControlsOpen()) {
-            const event = await cameraSocketRequest(path, init && init.body);
-            const text = event.body || '';
-            if (!text) {
-                throw new Error(`Empty response from server (${event.status || 0})`);
-            }
+    // A held direction can share the picture connection. Connect, Dock and the
+    // other presses cannot: that connection kept the press, then answered
+    // "the robot did not answer" while the pictures stayed on screen.
+    // Step the pictures aside, send the press the ordinary way, and open them again.
+    if (path === '/api/command.php' && location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource)) {
+        picturePauseDepth += 1;
+        const source = cameraLiveSource;
+        if (picturePauseDepth === 1 && source) {
+            cameraLiveSource = null;
             try {
-                return JSON.parse(text);
+                source.close();
             } catch {
-                throw new Error('The string did not match the expected pattern.');
+                /* the picture connection was already closing */
             }
+            await new Promise((resolve) => setTimeout(resolve, 80));
         }
-        const missed = new Error(path.endsWith('drive.php')
-            ? 'Drive did not answer. Hold the direction again.'
-            : 'The robot did not answer. Press it again.');
-        missed.name = 'TimeoutError';
-        throw missed;
+        try {
+            const res = await fetch(path, init);
+            return await parseJsonResponse(res);
+        } finally {
+            resumePictures();
+        }
+    }
+    if (path === '/api/drive.php' && cameraControlsOpen()) {
+        const event = await cameraSocketRequest(path, init && init.body);
+        const text = event.body || '';
+        if (!text) {
+            throw new Error(`Empty response from server (${event.status || 0})`);
+        }
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error('The string did not match the expected pattern.');
+        }
     }
     const res = await fetch(path, init);
     return parseJsonResponse(res);
