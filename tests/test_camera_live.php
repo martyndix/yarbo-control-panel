@@ -95,6 +95,8 @@ assert_true(!str_contains($camera, 'def frame_due'), 'live pictures keep every e
 assert_true(!str_contains($camera, 'should_forward'), 'live pictures are not thinned before the browser');
 assert_true(str_contains($camera, 'LINK_CHECK_S = 30'), 'live view does not ask the robot every second');
 assert_true(str_contains($agent, '_control_waiters'), 'dock and lights go ahead of a status read');
+assert_true(str_contains($agent, 'async def publish_quick'), 'a direction is sent without waiting out a camera publish');
+assert_true(str_contains($agent, '_drive_waiters'), 'a direction goes ahead of a camera publish');
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
 assert_true(!str_contains($appJs, 'has not received a picture'), 'the page does not close a picture stream that is still open');

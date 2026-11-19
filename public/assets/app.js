@@ -17273,7 +17273,7 @@ async function loadCameras() {
 
 async function sendDrive(linear, angular, enterManual = false) {
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-        ? AbortSignal.timeout(8000)
+        ? AbortSignal.timeout(12000)
         : undefined;
     try {
         const res = await fetch('/api/drive.php', {

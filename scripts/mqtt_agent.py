@@ -33,6 +33,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Dock, lights, and drive must not wait behind a status read. The camera
 # listener used to ask for status every second and hold this one session.
 _control_waiters = 0
+_drive_waiters = 0
 _CONTROL_OPS = frozenset({
     "controller",
     "lights",
@@ -462,6 +463,16 @@ async def force_controller(client: Any) -> dict[str, Any]:
     await asyncio.sleep(0.45)
     raw = getattr(result, "raw", None) or {}
     return raw if isinstance(raw, dict) else {"msg": str(result)}
+
+
+async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout: float = 0.8) -> bool:
+    """Publish without letting a slow camera command eat the whole press."""
+    try:
+        await asyncio.wait_for(client.publish_command(cmd, payload), timeout=timeout)
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log(f"{cmd} did not finish in time ({exc})")
+        return False
 
 
 async def wake_for_control(client: Any) -> None:
@@ -1018,27 +1029,30 @@ async def handle_request(
                 state["work_hold"] = False
                 state["work_latched"] = False
                 state["control_session"] = True
+                # Tell the robot to move before any session setup. Setup used to
+                # run first and did not finish while the cameras were publishing,
+                # so the page gave up and the robot never moved.
+                sent = 0
+                for _ in range(3):
+                    if await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular}):
+                        sent += 1
+                if sent == 0:
+                    return {
+                        "ok": False,
+                        "error": "Drive did not reach the robot. Hold the direction again.",
+                        "op": "drive",
+                    }
                 if not state.get("manual_drive"):
-                    await ensure_session(client)
-                    # FW 3.13 ignores string state "manual" (working_state unchanged).
-                    # Keep awake with int 1; unlock any latched e-stop once per hold.
-                    await client.publish_command(
+                    await publish_quick(
+                        client,
                         "set_working_state",
                         {"state": 1, "source": "app"},
                     )
                     if charging_status_of(raw) > 0 and not state.get("pad_released"):
-                        try:
-                            await client.publish_command("wireless_charging_cmd", {"cmd": 0})
+                        if await publish_quick(client, "wireless_charging_cmd", {"cmd": 0}):
                             state["pad_released"] = True
                             log("Drive: disabled wireless charge so the robot can leave the pad")
-                            await asyncio.sleep(0.2)
-                        except Exception as e:
-                            log(f"wireless_charging_cmd before drive failed: {e}")
-                    try:
-                        await client.publish_command("emergency_unlock", {})
-                    except Exception as e:
-                        log(f"emergency_unlock failed: {e}")
-                    await asyncio.sleep(0.15)
+                    await publish_quick(client, "emergency_unlock", {})
                     state["manual_drive"] = True
                     state["last_keepalive"] = time.time()
                     warning = dock_block_reason(raw)
@@ -1046,12 +1060,8 @@ async def handle_request(
                         warning = motion_fault_warning(raw)
                     if warning:
                         log(f"Drive warning: {warning}")
-                # Burst: robot often needs several cmd_vel frames (~10 Hz) before motion.
-                for _ in range(3):
-                    await client.publish_command("cmd_vel", {"vel": linear, "rev": angular})
-                    await asyncio.sleep(0.05)
             else:
-                await client.publish_command("cmd_vel", {"vel": 0.0, "rev": 0.0})
+                await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
 
             out = {
                 "ok": True,
@@ -1120,12 +1130,21 @@ async def handle_request(
             # Live view must not call get_controller. That announces
             # "app controller connected" and can pause a running job.
             if session_mode(req) == "vision":
+                # A camera keep-alive must not sit on this session while a
+                # direction is waiting, and it must not hold the session for
+                # the whole publish timeout.
                 acked = False
-                if req.get("ack"):
-                    waited = await client.publish_and_wait(cmd, payload, timeout=4.0)
-                    acked = bool(waited.get("acked")) if isinstance(waited, dict) else False
-                else:
-                    await client.publish_command(cmd, payload)
+                try:
+                    if req.get("ack"):
+                        waited = await asyncio.wait_for(
+                            client.publish_and_wait(cmd, payload, timeout=1.5),
+                            timeout=2.0,
+                        )
+                        acked = bool(waited.get("acked")) if isinstance(waited, dict) else False
+                    else:
+                        await asyncio.wait_for(client.publish_command(cmd, payload), timeout=1.0)
+                except TimeoutError:
+                    log(f"vision {cmd} gave the session back for drive")
                 return {
                     "ok": True,
                     "op": "publish",
@@ -1322,7 +1341,7 @@ async def handle_client(
     lock: asyncio.Lock,
     state: dict[str, Any],
 ) -> None:
-    global _control_waiters
+    global _control_waiters, _drive_waiters
     try:
         while True:
             line = await reader.readline()
@@ -1342,21 +1361,41 @@ async def handle_client(
             req_id = req.get("id") if isinstance(req, dict) else None
             op = str(req.get("op") or "") if isinstance(req, dict) else ""
             control = op in _CONTROL_OPS
-            if control:
+            driving = op in {"drive", "stop"}
+            vision = isinstance(req, dict) and op == "publish" and str(req.get("session") or "") == "vision"
+            counted = False
+            if driving:
+                _drive_waiters += 1
                 _control_waiters += 1
-            else:
+                counted = True
+            elif control and not (vision and _drive_waiters > 0):
+                _control_waiters += 1
+                counted = True
+            elif not control:
                 waited = 0.0
-                while _control_waiters > 0 and waited < 2.0:
+                while (_control_waiters > 0 or _drive_waiters > 0) and waited < 2.0:
                     await asyncio.sleep(0.02)
                     waited += 0.02
             try:
-                async with lock:
-                    if not isinstance(req, dict):
-                        resp = {"ok": False, "error": "Invalid JSON"}
-                    else:
-                        resp = await handle_request(client, req, state)
+                if vision and _drive_waiters > 0:
+                    resp = {
+                        "ok": True,
+                        "op": "publish",
+                        "cmd": str(req.get("cmd") or ""),
+                        "session": "vision",
+                        "skipped": "drive",
+                    }
+                else:
+                    async with lock:
+                        if not isinstance(req, dict):
+                            resp = {"ok": False, "error": "Invalid JSON"}
+                        else:
+                            resp = await handle_request(client, req, state)
             finally:
-                if control:
+                if driving:
+                    _drive_waiters -= 1
+                    _control_waiters -= 1
+                elif counted:
                     _control_waiters -= 1
             if req_id is not None:
                 resp["id"] = req_id

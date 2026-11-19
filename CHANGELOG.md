@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.32] - 2026-11-19
+
+### Fixed
+
+- Holding a direction while the cameras were on ended with “Drive did not answer.” The press waited behind a camera update and the page gave up before the robot was told to move. A direction is sent first now, and a camera update steps aside while you hold the pad. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.31] - 2026-11-19
 
 ### Fixed
