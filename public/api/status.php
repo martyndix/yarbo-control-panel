@@ -254,8 +254,7 @@ if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
     )));
 }
 
-// Yarbo cloud API only (account login on data-api.yarbo.ai). The robot's old
-// local network port is not used for status or control.
+// Cloud MQTT agent only — local LAN :1883 is no longer used for status/control.
 // Browser/Funnel polls must stay fast: never block on agent spawn or a live
 // Powerwall/Lymow refresh (those run in the background watcher). Prefer cached
 // telemetry so a slow get_device_msg cannot turn into a proxy HTML 504.
@@ -279,10 +278,9 @@ if (!($ping['ok'] ?? false) || !$isCloudAgent) {
     );
 }
 
-$robotOnline = !empty($ping['robot_online']);
-if (empty($ping['connected']) && !$robotOnline) {
+if (empty($ping['connected'])) {
     status_failure(
-        'Yarbo cloud API is not connected. Check the account email, password, and serial under Settings → Yarbo.',
+        YarboErrors::MSG_MQTT_FAILED,
         'mqtt',
         503,
         [

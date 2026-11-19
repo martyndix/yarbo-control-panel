@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.6] - 2026-11-19
+
+### Fixed
+
+- The robot stayed **Offline** after the live-view update, including when the phone app showed it online. Status is back to the version 4 connection: the same cloud account session, and the same status fetch that was working before version 5. Update to latest.
+
 ## [5.0.5] - 2026-11-19
 
 ### Fixed

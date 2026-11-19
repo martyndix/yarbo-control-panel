@@ -103,28 +103,6 @@ def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
     return True
 
 
-def pull_device_cache(client: Any, state: dict[str, Any]) -> bool:
-    """Copy a live DeviceMSG push into the status cache.
-
-    A panel restart forgets the last snapshot. The short status poll used to
-    ignore pushes that were older than one second, time out, and then hide
-    the robot for 25 seconds. The robot looked offline while the phone app
-    was still connected.
-    """
-    take = getattr(client, "cached_device_msg", None)
-    if not callable(take):
-        return telemetry_raw_usable(state.get("last_raw"))
-    raw = take()
-    if not telemetry_raw_usable(raw):
-        return telemetry_raw_usable(state.get("last_raw"))
-    stamped = getattr(client, "device_msg_at", None)
-    client_at = float(stamped()) if callable(stamped) else 0.0
-    state_at = float(state.get("last_raw_at") or 0.0)
-    if telemetry_raw_usable(state.get("last_raw")) and state_at >= client_at:
-        return True
-    return store_last_raw(state, raw)
-
-
 def plan_is_active(raw: Any) -> bool:
     """True while StateMSG says a work plan is in progress."""
     if not isinstance(raw, dict):
@@ -711,10 +689,8 @@ async def handle_request(
             "ok": True,
             "controller": bool(getattr(client, "controller_acquired", False)),
             "connected": bool(getattr(client, "is_connected", False)),
-            "robot_online": bool(getattr(client, "robot_online", False)),
             "engine": "yarbo-cloud",
             "transport": "cloud",
-            "via": "yarbo-cloud-api",
             "telemetry": True,
             **state_flags(state, client),
         }
@@ -723,8 +699,8 @@ async def handle_request(
         return {
             "ok": False,
             "error": (
-                "Yarbo cloud API is not connected. Check the account email, password, and serial "
-                "under Settings → Yarbo, then Save."
+                "Cloud MQTT not connected. Check Yarbo account email/password and serial "
+                "in Settings → Yarbo, then Save (that restarts the agent)."
             ),
         }
 
@@ -752,13 +728,9 @@ async def handle_request(
                     "transient": True,
                     **state_flags(state, client),
                 }
-            # The status card must use a DeviceMSG push that arrived after a
-            # restart. Do not throw it away because a one-second fetch missed.
-            if prefer_cache:
-                pull_device_cache(client, state)
             # PaperMono compact polls every ~15s; serve last_raw immediately so the
             # tablet's 8s HTTP budget is not burned waiting on get_status.
-            if prefer_cache and telemetry_raw_usable(state.get("last_raw")):
+            if prefer_cache and isinstance(state.get("last_raw"), dict):
                 await maybe_request_plan_feedback(client, state)
                 return {
                     "ok": True,
@@ -769,15 +741,13 @@ async def handle_request(
                     "cached": True,
                     **state_flags(state, client),
                 }
-            # A one-second fetch from here times out on the Europe path and then
-            # hides the robot for 25 seconds. The background refresh does the
-            # slower fetch and the next poll reads it.
-            if prefer_cache:
+            # Offline robot + empty cache: do not re-wait get_status on every poll.
+            if prefer_cache and telemetry_miss_cooling(state):
                 return {
                     "ok": False,
                     "error": "telemetry timeout",
                     "transient": True,
-                    "cooldown": telemetry_miss_cooling(state),
+                    "cooldown": True,
                     **state_flags(state, client),
                 }
 
@@ -1355,48 +1325,6 @@ async def handle_client(
             pass
 
 
-async def telemetry_refresh_loop(client: Any, state: dict[str, Any]) -> None:
-    """Keep a robot snapshot warm, and reconnect if the cloud session stalls.
-
-    Status polls only read this cache. They no longer open a one-second fetch
-    that fails from Europe and then hides a robot that is still publishing.
-    """
-    failures = 0
-    while True:
-        cached = state.get("last_raw")
-        placeholder = isinstance(cached, dict) and bool(cached.get("_cloud_online"))
-        if telemetry_raw_usable(cached) and not placeholder:
-            await asyncio.sleep(12.0)
-        else:
-            await asyncio.sleep(2.0)
-        if not getattr(client, "is_connected", False):
-            continue
-        pull_device_cache(client, state)
-        cached = state.get("last_raw")
-        placeholder = isinstance(cached, dict) and bool(cached.get("_cloud_online"))
-        age = time.time() - float(state.get("last_raw_at") or 0.0)
-        if telemetry_raw_usable(cached) and not placeholder and age < 20.0:
-            failures = 0
-            continue
-        try:
-            status = await client.get_status(timeout=8.0, acquire_controller=False)
-            raw = getattr(status, "raw", None) if status is not None else None
-            if store_last_raw(state, raw):
-                failures = 0
-                continue
-        except Exception as exc:  # noqa: BLE001
-            log(f"Cloud telemetry refresh failed: {exc}")
-        failures += 1
-        if failures < 3:
-            continue
-        failures = 0
-        log("Yarbo cloud session stalled. Connecting again.")
-        try:
-            await client.disconnect()
-        except Exception as exc:  # noqa: BLE001
-            log(f"Cloud disconnect failed: {exc}")
-
-
 async def connect_mqtt(client: Any) -> None:
     delay = 1.0
     while True:
@@ -1534,7 +1462,6 @@ async def amain() -> int:
     log(f"Agent listening on {sockets} (cloud MQTT SN={serial} email={email})")
 
     asyncio.create_task(connect_mqtt(client))
-    asyncio.create_task(telemetry_refresh_loop(client, state))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())

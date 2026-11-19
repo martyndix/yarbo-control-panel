@@ -85,54 +85,32 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pick_agent() {
-  local py="$ROOT/.venv/bin/python3"
-  if [[ ! -x "$py" ]]; then
-    py="$ROOT/.venv/bin/python"
+  local venv_py="$ROOT/.venv/bin/python"
+  if [[ -x "$venv_py" ]] && "$venv_py" -c "import yarbo" 2>/dev/null; then
+    echo "$venv_py" scripts/mqtt_agent.py
+    return
   fi
-  if [[ ! -x "$py" ]]; then
-    if ! python3 -m venv "$ROOT/.venv"; then
-      echo "ERROR: could not create the Yarbo cloud API environment" >&2
-      return 1
-    fi
-    py="$ROOT/.venv/bin/python3"
+  if command -v python3 >/dev/null 2>&1 && python3 -c "import yarbo" 2>/dev/null; then
+    echo python3 scripts/mqtt_agent.py
+    return
   fi
-  if ! "$py" -c "import yarbo_robot_sdk" >/dev/null 2>&1; then
-    echo "==> Installing the Yarbo cloud API library" >&2
-    "$py" -m pip install --disable-pip-version-check yarbo-data-sdk >/dev/null 2>&1 || true
-  fi
-  if ! "$py" -c "import yarbo_robot_sdk" >/dev/null 2>&1; then
-    echo "ERROR: Yarbo cloud API library is not installed. The local robot port is not used." >&2
-    return 1
-  fi
-  echo "$py" scripts/mqtt_agent.py
+  echo php scripts/mqtt_agent.php
 }
 
-AGENT_LINE="$(pick_agent)" || true
-if [[ -z "${AGENT_LINE}" ]]; then
-  echo "ERROR: Yarbo cloud API agent did not start" >&2
-  AGENT_CMD=()
-else
-  read -r -a AGENT_CMD <<< "${AGENT_LINE}"
-fi
+AGENT_CMD=($(pick_agent))
 
 yarbo_stop_mqtt_agent "${AGENT_PORT}"
-pkill -f '[s]cripts/yarbo_camera_agent.py' 2>/dev/null || true
-pkill -f '[s]cripts/mqtt_agent.php' 2>/dev/null || true
 
-if [[ ${#AGENT_CMD[@]} -gt 0 ]]; then
-  echo "==> Starting Yarbo cloud API agent on 127.0.0.1:${AGENT_PORT}"
-  echo "    ${AGENT_CMD[*]}"
-  YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" &
-  AGENT_PID=$!
-  if ! yarbo_wait_mqtt_agent "${AGENT_PORT}" 10; then
-    if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
-      echo "ERROR: Yarbo cloud API agent failed to start" >&2
-      exit 1
-    fi
-    echo "WARNING: cloud API agent is up but port ${AGENT_PORT} is not listening yet" >&2
+echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
+echo "    ${AGENT_CMD[*]}"
+YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" &
+AGENT_PID=$!
+if ! yarbo_wait_mqtt_agent "${AGENT_PORT}" 10; then
+  if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
+    echo "ERROR: MQTT agent failed to start" >&2
+    exit 1
   fi
-else
-  echo "WARNING: panel is up without the Yarbo cloud API agent" >&2
+  echo "WARNING: MQTT agent process is up but port ${AGENT_PORT} is not listening yet" >&2
 fi
 
 echo "==> Starting Vestaboard Note watcher"
