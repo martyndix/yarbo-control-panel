@@ -111,8 +111,9 @@ assert_true(str_contains($appJs, 'function cameraPictureUrl'), 'pictures are not
 assert_true(str_contains($appJs, 'function cameraControlsOpen'), 'a direction rides on the open picture connection');
 assert_true(str_contains($appJs, 'new WebSocket(url)'), 'Safari can drive without closing the pictures');
 assert_true(str_contains($proxy, 'Sec-WebSocket-Accept'), 'the picture port carries presses back up the picture connection');
-assert_true(str_contains($appJs, 'function suspendPictures'), 'the picture stream is left open when a button is pressed');
-assert_true(str_contains($appJs, 'Leave the pictures running'), 'a press does not close the picture stream');
+assert_true(str_contains($appJs, 'function suspendPictures'), 'an ordinary picture stream can still step aside');
+assert_true(str_contains($appJs, 'location.host'), 'pictures and presses share the panel port Safari already trusts');
+assert_true(str_contains($proxy, 'websocket" in (self.headers.get("Upgrade")'), 'the panel port accepts a press on the picture connection');
 assert_true(str_contains($camera, 'session.user_stop = True'), 'only Stop turns the cameras off');
 assert_true(str_contains($camera, 'if session.user_stop:'), 'a dropped picture connection does not turn the cameras off');
 assert_true(str_contains($proxy, 'class PictureProxyHandler'), 'pictures listen on their own port');

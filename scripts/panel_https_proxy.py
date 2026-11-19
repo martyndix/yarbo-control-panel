@@ -232,6 +232,13 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         # a page worker, or leaving it open on HTTP/1.1, made Safari hand the
         # next drive press a body it could not read.
         if self.command == "GET" and is_camera_frames(path):
+            # Safari will not open a second connection to this robot while a
+            # picture stream is up, so a press on the page never arrives.
+            # The picture socket on this same port carries the press as well.
+            if "websocket" in (self.headers.get("Upgrade") or "").lower():
+                if not self._websocket_pictures():
+                    self._camera_unavailable()
+                return
             if not self._proxy_camera_frames():
                 self._camera_unavailable()
             return
@@ -688,6 +695,18 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         if masked:
             payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
         return first & 0x0F, payload, (first & 0x80) != 0
+
+
+# The page talks to the panel port. The same picture socket has to live there,
+# or Safari keeps the buttons queued behind a stream they cannot share.
+for _ws_name in (
+    "_websocket_pictures",
+    "_websocket_commands",
+    "_websocket_command",
+    "_read_exact",
+    "_read_ws_frame",
+):
+    setattr(PanelHttpsProxyHandler, _ws_name, getattr(PictureProxyHandler, _ws_name))
 
 
 class DualStackServer(ThreadingHTTPServer):

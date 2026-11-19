@@ -67,6 +67,7 @@ def main() -> None:
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
     assert drive_on_picture_socket(proxy), "a direction is answered on the picture connection while pictures keep arriving"
+    assert drive_on_picture_socket(proxy, proxy.PanelHttpsProxyHandler), "the panel port carries a direction on the same picture connection"
     print("ok")
 
 
@@ -303,7 +304,7 @@ def _client_frame(payload: bytes) -> bytes:
     return bytes([0x81, 0x80 | len(payload)]) + mask + masked
 
 
-def drive_on_picture_socket(proxy) -> bool:
+def drive_on_picture_socket(proxy, handler=None) -> bool:
     pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
     buttons = ThreadingHTTPServer(("127.0.0.1", 0), _Drive)
     threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
@@ -315,7 +316,7 @@ def drive_on_picture_socket(proxy) -> bool:
     previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
     proxy.PanelHttpsProxyHandler.upstream_port = buttons.server_address[1]
     _Drive.seen = b""
-    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), handler or proxy.PictureProxyHandler)
     threading.Thread(target=pictures.serve_forever, daemon=True).start()
     client = None
     frames = []

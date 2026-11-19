@@ -16997,7 +16997,6 @@ function handleCameraFrame(event) {
     }));
 }
 
-let pictureSocketFailed = false;
 let cameraCommandSeq = 0;
 const cameraCommandWaiters = new Map();
 
@@ -17051,31 +17050,43 @@ function cameraSocketRequest(path, body) {
 }
 
 async function postPanelJson(path, init) {
-    if (cameraControlsOpen() && (path === '/api/drive.php' || path === '/api/command.php')) {
-        const event = await cameraSocketRequest(path, init && init.body);
-        const text = event.body || '';
-        if (!text) {
-            throw new Error(`Empty response from server (${event.status || 0})`);
+    const control = path === '/api/drive.php' || path === '/api/command.php';
+    if (control && location.protocol === 'https:' && (cameraFramesOpen || cameraControlsOpen())) {
+        if (!cameraControlsOpen()) {
+            if (!cameraLiveSource) attachCameraStream();
+            const started = Date.now();
+            while (!cameraControlsOpen() && Date.now() - started < 2000) {
+                await new Promise((resolve) => setTimeout(resolve, 50));
+            }
         }
-        try {
-            return JSON.parse(text);
-        } catch {
-            throw new Error('The string did not match the expected pattern.');
+        if (cameraControlsOpen()) {
+            const event = await cameraSocketRequest(path, init && init.body);
+            const text = event.body || '';
+            if (!text) {
+                throw new Error(`Empty response from server (${event.status || 0})`);
+            }
+            try {
+                return JSON.parse(text);
+            } catch {
+                throw new Error('The string did not match the expected pattern.');
+            }
         }
+        const missed = new Error(path.endsWith('drive.php')
+            ? 'Drive did not answer. Hold the direction again.'
+            : 'The robot did not answer. Press it again.');
+        missed.name = 'TimeoutError';
+        throw missed;
     }
     const res = await fetch(path, init);
     return parseJsonResponse(res);
 }
 
-function attachCameraSocket(httpUrl) {
-    const url = `wss://${httpUrl.slice('https://'.length)}`;
+function attachCameraSocket() {
+    // Same port as the page. A picture stream on another port still counts as
+    // this robot, and Safari will not send Dock or a direction beside it.
+    const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/camera_live.php?action=frames`;
     const socket = new WebSocket(url);
     cameraLiveSource = socket;
-    const giveUp = setTimeout(() => {
-        if (cameraLiveSource !== socket || cameraLiveSeen.size > 0) return;
-        pictureSocketFailed = true;
-        socket.close();
-    }, 3000);
     socket.onmessage = (message) => {
         let event;
         try {
@@ -17090,20 +17101,14 @@ function attachCameraSocket(httpUrl) {
             waiter.resolve(event);
             return;
         }
-        clearTimeout(giveUp);
         handleCameraFrame(event);
     };
     socket.onclose = () => {
-        clearTimeout(giveUp);
         failCameraCommands(new Error('Picture connection closed'));
         if (cameraLiveSource !== socket) return;
         cameraLiveSource = null;
-        if (cameraLiveSeen.size > 0 && !pictureSocketFailed) {
-            setTimeout(() => attachCameraStream(), 300);
-            return;
-        }
-        pictureSocketFailed = true;
-        attachCameraStream();
+        if (!cameraFramesOpen || picturePauseDepth > 0) return;
+        setTimeout(() => attachCameraStream(), 300);
     };
 }
 
@@ -17112,11 +17117,11 @@ function attachCameraStream() {
     // A held direction used to keep the pictures closed. On the picture
     // connection the direction travels with the pictures, so the view stays up.
     if (driveActive && !(location.protocol === 'https:' && location.port)) return;
-    const url = cameraPictureUrl();
-    if (!pictureSocketFailed && url.startsWith('https://') && typeof WebSocket === 'function') {
-        attachCameraSocket(url);
+    if (location.protocol === 'https:' && location.port && typeof WebSocket === 'function') {
+        attachCameraSocket();
         return;
     }
+    const url = cameraPictureUrl();
     const source = new EventSource(url);
     cameraLiveSource = source;
     source.onmessage = (message) => {
@@ -17143,8 +17148,18 @@ function attachCameraStream() {
 }
 
 async function suspendPictures() {
-    // Leave the pictures running. Closing them for a press froze the view
-    // for the whole direction, and after Dock they did not come back.
+    picturePauseDepth += 1;
+    const source = cameraLiveSource;
+    if (picturePauseDepth !== 1 || !source) return;
+    // The picture socket carries Dock and the direction itself. Closing it
+    // was what dropped the view, and fetching beside it never left Safari.
+    if (typeof WebSocket === 'function' && source instanceof WebSocket) {
+        picturePauseDepth -= 1;
+        return;
+    }
+    cameraLiveSource = null;
+    source.close();
+    await new Promise((resolve) => setTimeout(resolve, 80));
 }
 
 function resumePictures() {

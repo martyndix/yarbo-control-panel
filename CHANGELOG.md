@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.43] - 2026-11-20
+
+### Fixed
+
+- Dock, lights, and the direction pad did nothing while the cameras were showing. Safari will not send those presses beside a picture stream, so the presses now go out on the picture connection itself, on the same port as the page. The pictures stay up, including while the robot is docking. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.42] - 2026-11-20
 
 ### Fixed
