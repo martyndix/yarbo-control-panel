@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.37] - 2026-11-20
+
+### Fixed
+
+- The drive pad’s left and right were swapped. Left now turns the robot left, and right turns it right. Refresh in Safari.
+
 ## [5.0.36] - 2026-11-19
 
 ### Fixed

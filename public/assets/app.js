@@ -382,8 +382,8 @@ const els = {
 const DRIVE_VECTORS = {
     forward: { linear: LINEAR_SPEED, angular: 0 },
     backward: { linear: -LINEAR_SPEED, angular: 0 },
-    left: { linear: 0, angular: ANGULAR_SPEED },
-    right: { linear: 0, angular: -ANGULAR_SPEED },
+    left: { linear: 0, angular: -ANGULAR_SPEED },
+    right: { linear: 0, angular: ANGULAR_SPEED },
     stop: { linear: 0, angular: 0 },
 };
 
