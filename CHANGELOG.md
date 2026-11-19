@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.42] - 2026-11-20
+
+### Fixed
+
+- A direction and Dock were closing the pictures. The picture stream now stays open while those run. If the robot goes quiet on the way to the dock, live view asks it to publish again instead of leaving the tiles on waiting. Update to latest, then press Stop view and Start live view.
+
 ## [5.0.41] - 2026-11-20
 
 ### Fixed

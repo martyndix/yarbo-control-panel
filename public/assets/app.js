@@ -16997,6 +16997,7 @@ function handleCameraFrame(event) {
     }));
 }
 
+let pictureSocketFailed = false;
 let cameraCommandSeq = 0;
 const cameraCommandWaiters = new Map();
 
@@ -17070,6 +17071,11 @@ function attachCameraSocket(httpUrl) {
     const url = `wss://${httpUrl.slice('https://'.length)}`;
     const socket = new WebSocket(url);
     cameraLiveSource = socket;
+    const giveUp = setTimeout(() => {
+        if (cameraLiveSource !== socket || cameraLiveSeen.size > 0) return;
+        pictureSocketFailed = true;
+        socket.close();
+    }, 3000);
     socket.onmessage = (message) => {
         let event;
         try {
@@ -17084,21 +17090,20 @@ function attachCameraSocket(httpUrl) {
             waiter.resolve(event);
             return;
         }
+        clearTimeout(giveUp);
         handleCameraFrame(event);
     };
     socket.onclose = () => {
+        clearTimeout(giveUp);
         failCameraCommands(new Error('Picture connection closed'));
         if (cameraLiveSource !== socket) return;
         cameraLiveSource = null;
-        if (cameraLiveSeen.size > 0) {
+        if (cameraLiveSeen.size > 0 && !pictureSocketFailed) {
             setTimeout(() => attachCameraStream(), 300);
             return;
         }
-        cameraFramesOpen = false;
-        if (!els.cameraAlert) return;
-        const origin = httpUrl.slice(0, httpUrl.indexOf('/api'));
-        els.cameraAlert.textContent = `Open ${origin} once, allow the certificate, then press Start live view again.`;
-        els.cameraAlert.classList.remove('hidden');
+        pictureSocketFailed = true;
+        attachCameraStream();
     };
 }
 
@@ -17108,7 +17113,7 @@ function attachCameraStream() {
     // connection the direction travels with the pictures, so the view stays up.
     if (driveActive && !(location.protocol === 'https:' && location.port)) return;
     const url = cameraPictureUrl();
-    if (url.startsWith('https://') && typeof WebSocket === 'function') {
+    if (!pictureSocketFailed && url.startsWith('https://') && typeof WebSocket === 'function') {
         attachCameraSocket(url);
         return;
     }
@@ -17138,14 +17143,8 @@ function attachCameraStream() {
 }
 
 async function suspendPictures() {
-    picturePauseDepth += 1;
-    const source = cameraLiveSource;
-    if (picturePauseDepth !== 1 || !source) return;
-    cameraLiveSource = null;
-    source.close();
-    // Safari will not send a button while any picture connection to this
-    // robot is still open, including the picture port.
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    // Leave the pictures running. Closing them for a press froze the view
+    // for the whole direction, and after Dock they did not come back.
 }
 
 function resumePictures() {

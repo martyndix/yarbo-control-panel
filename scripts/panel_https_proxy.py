@@ -113,6 +113,43 @@ def encode_ws_frame(opcode: int, payload: bytes) -> bytes:
     return bytes(header) + payload
 
 
+def relay_chunked(sock: socket.socket, wfile, pending: bytes = b"") -> None:
+    """Forward a picture stream as HTTP/1.1 chunks.
+
+    An HTTP/1.0 picture reply makes Safari keep a single connection for the
+    whole robot, so a direction cannot be sent until that reply ends. Chunked
+    HTTP/1.1 leaves room for the press while the pictures stay open.
+    """
+
+    def write_chunk(data: bytes) -> None:
+        if not data:
+            return
+        wfile.write(f"{len(data):X}\r\n".encode("ascii"))
+        wfile.write(data)
+        wfile.write(b"\r\n")
+        wfile.flush()
+
+    if pending:
+        write_chunk(pending)
+    try:
+        sock.settimeout(None)
+    except Exception:
+        pass
+    while True:
+        try:
+            chunk = sock.recv(16384)
+        except Exception:
+            break
+        if not chunk:
+            break
+        write_chunk(chunk)
+    try:
+        wfile.write(b"0\r\n\r\n")
+        wfile.flush()
+    except Exception:
+        pass
+
+
 def relay_socket(sock: socket.socket, wfile, pending: bytes = b"") -> None:
     """Copy a picture stream until the browser or the camera closes it."""
     if pending:
@@ -383,18 +420,19 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
 
         _header, _, pending = head.partition(b"\r\n\r\n")
         self.close_connection = True
-        self.protocol_version = "HTTP/1.0"
+        self.protocol_version = "HTTP/1.1"
         try:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache, no-store")
             self.send_header("Connection", "close")
+            self.send_header("Transfer-Encoding", "chunked")
             # The page is on the panel port. Safari will not draw a cross-port
             # picture stream without this.
             origin = self.headers.get("Origin")
             self.send_header("Access-Control-Allow-Origin", origin or "*")
             self.end_headers()
-            relay_socket(sock, self.wfile, pending)
+            relay_chunked(sock, self.wfile, pending)
         except Exception:
             pass
         finally:

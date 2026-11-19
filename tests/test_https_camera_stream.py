@@ -245,7 +245,8 @@ def picture_port_stays_open(proxy) -> bool:
         else:
             status.write_text(previous, encoding="utf-8")
     return (
-        b"HTTP/1.0 200" in seen
+        b"HTTP/1.1 200" in seen
+        and b"Transfer-Encoding: chunked" in seen
         and b"middle" in seen
         and b"Access-Control-Allow-Origin: https://panel.local:8443" in seen
         and extra == b"open"

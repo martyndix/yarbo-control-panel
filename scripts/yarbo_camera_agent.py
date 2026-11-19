@@ -36,7 +36,7 @@ TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
 # subscriber would sit in an empty room. YARBO_AGORA_AREA overrides it.
 DEFAULT_AREA_CODE = 2
 LEASE_SECONDS = 30 * 60
-IDLE_AFTER_VIEWER_S = 20
+IDLE_AFTER_VIEWER_S = 180
 IDLE_BEFORE_VIEWER_S = 45
 HEARTBEAT_S = 10
 LINK_CHECK_S = 30
@@ -518,6 +518,7 @@ class LiveSession:
         self.rearmed = False
         self.rejoin_at = 0.0
         self.sensors_on = False
+        self.user_stop = False
         self._status_lock = threading.Lock()
 
     def write_status(self) -> None:
@@ -558,6 +559,9 @@ class Handler(BaseHTTPRequestHandler):
             self._frames(session)
             return
         if path == "/stop":
+            # Only an explicit Stop turns the cameras off. A dropped picture
+            # connection used to do that too, and they then stayed on waiting.
+            session.user_stop = True
             session.stop.set()
             self._json(200, {"ok": True})
             threading.Thread(target=session.shutdown_server, daemon=True).start()
@@ -811,6 +815,7 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
                 def on_user_joined(self, agora_rtc_conn, user_id):  # type: ignore[no-untyped-def]
                     if str(user_id) == "1":
                         session.hub.mark(self.name, robot_seen=True)
+                        subscribe_again(session)
 
             try:
                 conn.register_observer(_Conn(view))
@@ -876,6 +881,20 @@ def _wake_once() -> None:
 
 def heartbeat(session: LiveSession) -> None:
     prepare_sensors(session)
+    snap = session.hub.snapshot(session.state, session.message, session.started_at)
+    views = snap.get("views") if isinstance(snap.get("views"), dict) else {}
+    frames = sum(int(slot.get("frames") or 0) for slot in views.values())
+    ages = [slot.get("lastFrameAgeMs") for slot in views.values()]
+    quiet = frames == 0 or all(age is None or int(age) > 8000 for age in ages)
+    if not quiet:
+        return
+    # Docking and a dropped picture connection both leave the robot silent.
+    # Ask it to publish again instead of waiting on a fresh Start.
+    try:
+        publish_vision("smart_vision_control", {"state": 1})
+    except Exception as exc:  # noqa: BLE001
+        print(f"[camera] picture keep-alive failed: {exc}", file=sys.stderr, flush=True)
+    subscribe_again(session)
 
 
 def disarm(session: LiveSession) -> None:
@@ -1056,10 +1075,11 @@ def run(root: Path) -> int:
         return 1
     finally:
         session.stop.set()
-        try:
-            disarm(session)
-        except Exception:
-            pass
+        if session.user_stop:
+            try:
+                disarm(session)
+            except Exception:
+                pass
         for conn, _observer, _user in held:
             try:
                 conn.disconnect()
