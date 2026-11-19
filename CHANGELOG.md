@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.15] - 2026-11-19
+
+### Fixed
+
+- Start live view stopped with **No control topic 'smart_vision_control' defined for device type: yarbo_Y**, and the four pictures stayed offline. That command is not in the cloud library’s topic list for this robot, so the wait-for-a-reply path never sent it. Live view now sends it on the same cloud topic the phone app uses. If the robot does not answer, live view still starts. Update to latest, open the panel with HTTPS, press Stop, then Start live view. Leave it alone while the robot is on 4G.
+
 ## [5.0.14] - 2026-11-19
 
 ### Fixed

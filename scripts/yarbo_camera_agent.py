@@ -346,7 +346,7 @@ def agent_request(payload: dict[str, Any], timeout: float = 8.0) -> dict[str, An
     ) from last_error
 
 
-def publish_vision(cmd: str, payload: dict[str, Any], ack: bool = False) -> None:
+def publish_vision(cmd: str, payload: dict[str, Any], ack: bool = False) -> dict[str, Any]:
     body: dict[str, Any] = {
         "op": "publish",
         "cmd": cmd,
@@ -358,6 +358,7 @@ def publish_vision(cmd: str, payload: dict[str, Any], ack: bool = False) -> None
     result = agent_request(body, timeout=12)
     if not result.get("ok", False):
         raise RuntimeError(str(result.get("error") or f"{cmd} failed"))
+    return result
 
 
 def cached_raw() -> dict[str, Any] | None:
@@ -804,24 +805,36 @@ def prepare_sensors(session: LiveSession) -> None:
 
 
 def arm(session: LiveSession) -> None:
-    """Ask the robot to publish, and wait for its ack. Retry once if it is asleep."""
+    """Ask the robot to publish. Retry once if it is asleep or refuses.
+
+    A missing acknowledgement still counts as sent. The SDK has no
+    registered topic for this command, and blocking on that used to
+    stop live view before any picture could start.
+    """
     last_error = "The robot did not confirm live view"
     for attempt in range(2):
         try:
-            publish_vision("smart_vision_control", {"state": 1}, ack=True)
-            session.armed = True
-            return
+            result = publish_vision("smart_vision_control", {"state": 1}, ack=True)
         except RuntimeError as exc:
             last_error = str(exc)
             if attempt == 0:
-                try:
-                    agent_request(
-                        {"op": "telemetry", "timeout": 8, "wifi": False, "prefer_cache": False},
-                        timeout=12,
-                    )
-                except Exception:
-                    pass
+                _wake_once()
+            continue
+        session.armed = True
+        if result.get("acked") or attempt == 1:
+            return
+        _wake_once()
     raise RuntimeError(last_error)
+
+
+def _wake_once() -> None:
+    try:
+        agent_request(
+            {"op": "telemetry", "timeout": 8, "wifi": False, "prefer_cache": False},
+            timeout=12,
+        )
+    except Exception:
+        pass
 
 
 def heartbeat(session: LiveSession) -> None:

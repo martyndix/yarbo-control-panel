@@ -55,6 +55,33 @@ def main() -> None:
     client._store_plan_feedback(fb)
     taken = client.take_cached_plan_feedback()
     assert taken == fb, "cached feedback returned"
+
+    assert cloud.feedback_state({"topic": "smart_vision_control", "state": 0}) == 0
+    assert cloud.feedback_state({"topic": "smart_vision_control", "data": {"state": 0}}) == 0
+    assert cloud.feedback_state({"topic": "smart_vision_control", "data": {"state": 2}}) == 2
+    wait_body = src.split("def _publish_wait_sync", 1)[1].split("async def get_controller", 1)[0]
+    assert "sdk.request_with_feedback" not in wait_body, "vision ack must not use the SDK topic registry"
+    assert "_publish_sync" in wait_body, "vision ack publishes on the raw app topic"
+
+    published: list[str] = []
+
+    def fake_publish(cmd: str, payload: dict) -> None:
+        published.append(cmd)
+        client._on_data_feedback("feedback", {"topic": cmd, "state": 0, "data": payload})
+
+    client._publish_sync = fake_publish  # type: ignore[method-assign]
+    client._connected = True
+    client._sdk = object()
+    acked = client._publish_wait_sync("smart_vision_control", {"state": 1}, 1.0)
+    assert published == ["smart_vision_control"], "command is published"
+    assert acked.get("acked") is True, "state 0 counts as an ack"
+
+    def silent_publish(cmd: str, payload: dict) -> None:
+        published.append(cmd)
+
+    client._publish_sync = silent_publish  # type: ignore[method-assign]
+    quiet = client._publish_wait_sync("smart_vision_control", {"state": 1}, 0.5)
+    assert quiet.get("acked") is False, "a missing ack still returns after the publish"
     print("cloud plan feedback ok")
 
 

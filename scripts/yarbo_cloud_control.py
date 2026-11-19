@@ -45,6 +45,10 @@ class YarboCloudControlClient:
         self._last_plan_feedback: dict[str, Any] | None = None
         self._last_plan_feedback_at = 0.0
         self._plan_feedback_event = threading.Event()
+        self._last_cmd_feedback: dict[str, Any] | None = None
+        self._last_cmd_feedback_topic = ""
+        self._last_cmd_feedback_at = 0.0
+        self._cmd_feedback_event = threading.Event()
         self._lock = asyncio.Lock()
 
     @property
@@ -117,6 +121,11 @@ class YarboCloudControlClient:
             fb = _unwrap_plan_feedback(payload if isinstance(payload, dict) else data)
             if fb:
                 self._store_plan_feedback(fb)
+        if response_topic:
+            self._last_cmd_feedback = data
+            self._last_cmd_feedback_topic = response_topic
+            self._last_cmd_feedback_at = time.time()
+            self._cmd_feedback_event.set()
 
     def _subscribe_plan_feedback_topic(self, client: Any) -> None:
         """Legacy device push topic (still published by some firmware over cloud)."""
@@ -237,16 +246,35 @@ class YarboCloudControlClient:
         """Publish and wait for the data_feedback ack. state 0 is success."""
         return await asyncio.to_thread(self._publish_wait_sync, str(cmd), payload or {}, timeout)
 
-    def _publish_wait_sync(self, cmd: str, payload: dict[str, Any], timeout: float) -> Any:
-        sdk = self._require_sdk()
-        return sdk.request_with_feedback(
-            self.sn,
-            self.type_id,
-            cmd,
-            payload,
-            cmd,
-            timeout,
-        )
+    def _publish_wait_sync(self, cmd: str, payload: dict[str, Any], timeout: float) -> dict[str, Any]:
+        """Publish, then wait for data_feedback.
+
+        smart_vision_control is not in the SDK registry for yarbo_Y.
+        request_with_feedback raises "No control topic" and never sends
+        the command. The raw snowbot/{sn}/app/{cmd} publish is the path
+        the phone app and the working camera bridge use. A missing ack
+        does not mean the publish failed.
+        """
+        self._cmd_feedback_event.clear()
+        started = time.time()
+        self._publish_sync(cmd, payload)
+        deadline = time.time() + max(0.5, timeout)
+        while time.time() < deadline:
+            if (
+                self._last_cmd_feedback_at >= started
+                and self._last_cmd_feedback_topic == cmd
+                and isinstance(self._last_cmd_feedback, dict)
+            ):
+                state = feedback_state(self._last_cmd_feedback)
+                if state not in (None, 0):
+                    raise RuntimeError(f"The robot refused {cmd} (state {state})")
+                return {"acked": True, "state": 0 if state is None else state}
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            self._cmd_feedback_event.wait(timeout=min(0.4, remaining))
+            self._cmd_feedback_event.clear()
+        return {"acked": False}
 
     async def get_controller(self, timeout: float | None = None) -> Any:
         _ = timeout
@@ -319,6 +347,22 @@ class YarboCloudControlClient:
         if self._sdk is None or not self._connected:
             raise RuntimeError("Cloud MQTT is not connected")
         return self._sdk
+
+
+def feedback_state(data: dict[str, Any]) -> int | None:
+    """Read state from a data_feedback envelope or its inner data object."""
+    sources: list[Any] = [data]
+    inner = data.get("data")
+    if isinstance(inner, dict):
+        sources.append(inner)
+    for source in sources:
+        if not isinstance(source, dict) or "state" not in source:
+            continue
+        try:
+            return int(source["state"])
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _looks_like_plan_feedback(payload: Any) -> bool:
