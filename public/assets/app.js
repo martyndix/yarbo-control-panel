@@ -926,7 +926,8 @@ function updateControlTiles(data) {
 
 async function toggleController(button) {
     if (button.disabled) return;
-    await suspendPictures();
+    const viaSocket = cameraControlsOpen();
+    if (!viaSocket) await suspendPictures();
     try {
     await stopDriveIfHeld();
     const nextOn = !holdController;
@@ -941,12 +942,11 @@ async function toggleController(button) {
     updateControllerTile();
     updateLightsTile();
     try {
-        const res = await fetch('/api/command.php', {
+        const data = await postPanelJson('/api/command.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `action=${encodeURIComponent(action)}`,
         });
-        const data = await res.json();
         if (requestId !== controllerRequest) return;
         if (data.ok) {
             applyControllerStateFromStatus(data);
@@ -984,7 +984,7 @@ async function toggleController(button) {
         showToast(err.message || 'Network error', 'error');
     }
     } finally {
-        resumePictures();
+        if (!viaSocket) resumePictures();
     }
 }
 
@@ -994,7 +994,8 @@ async function toggleLights(button) {
         showToast('Connect the controller first', 'error');
         return;
     }
-    await suspendPictures();
+    const viaSocket = cameraControlsOpen();
+    if (!viaSocket) await suspendPictures();
     try {
     await stopDriveIfHeld();
     const nextOn = !lightsOn;
@@ -1011,12 +1012,11 @@ async function toggleLights(button) {
     updateLightsTile();
     updateControllerTile();
     try {
-        const res = await fetch('/api/command.php', {
+        const data = await postPanelJson('/api/command.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `action=${encodeURIComponent(action)}`,
         });
-        const data = await res.json();
         if (requestId !== lightsRequest) return;
         if (data.ok) {
             applyControllerStateFromStatus(data);
@@ -1053,7 +1053,7 @@ async function toggleLights(button) {
         showToast(err.message || 'Network error', 'error');
     }
     } finally {
-        resumePictures();
+        if (!viaSocket) resumePictures();
     }
 }
 
@@ -16997,9 +16997,121 @@ function handleCameraFrame(event) {
     }));
 }
 
+let cameraCommandSeq = 0;
+const cameraCommandWaiters = new Map();
+
+function cameraControlsOpen() {
+    return typeof WebSocket === 'function'
+        && cameraLiveSource instanceof WebSocket
+        && cameraLiveSource.readyState === WebSocket.OPEN;
+}
+
+function failCameraCommands(err) {
+    cameraCommandWaiters.forEach((waiter) => waiter.reject(err));
+    cameraCommandWaiters.clear();
+}
+
+function cameraSocketRequest(path, body) {
+    return new Promise((resolve, reject) => {
+        if (!cameraControlsOpen()) {
+            reject(new Error('Picture connection closed'));
+            return;
+        }
+        const id = ++cameraCommandSeq;
+        const timedOut = new Error(path.endsWith('drive.php')
+            ? 'Drive did not answer. Hold the direction again.'
+            : 'The robot did not answer. Press it again.');
+        timedOut.name = 'TimeoutError';
+        const timer = setTimeout(() => {
+            cameraCommandWaiters.delete(id);
+            reject(timedOut);
+        }, 12000);
+        cameraCommandWaiters.set(id, {
+            resolve: (event) => {
+                clearTimeout(timer);
+                resolve(event);
+            },
+            reject: (err) => {
+                clearTimeout(timer);
+                reject(err);
+            },
+        });
+        const message = { op: path.endsWith('drive.php') ? 'drive' : 'command', id };
+        try {
+            if (message.op === 'drive') message.json = JSON.parse(body || '{}');
+            else message.body = body || '';
+            cameraLiveSource.send(JSON.stringify(message));
+        } catch (err) {
+            cameraCommandWaiters.delete(id);
+            clearTimeout(timer);
+            reject(err);
+        }
+    });
+}
+
+async function postPanelJson(path, init) {
+    if (cameraControlsOpen() && (path === '/api/drive.php' || path === '/api/command.php')) {
+        const event = await cameraSocketRequest(path, init && init.body);
+        const text = event.body || '';
+        if (!text) {
+            throw new Error(`Empty response from server (${event.status || 0})`);
+        }
+        try {
+            return JSON.parse(text);
+        } catch {
+            throw new Error('The string did not match the expected pattern.');
+        }
+    }
+    const res = await fetch(path, init);
+    return parseJsonResponse(res);
+}
+
+function attachCameraSocket(httpUrl) {
+    const url = `wss://${httpUrl.slice('https://'.length)}`;
+    const socket = new WebSocket(url);
+    cameraLiveSource = socket;
+    socket.onmessage = (message) => {
+        let event;
+        try {
+            event = JSON.parse(message.data);
+        } catch {
+            return;
+        }
+        if (event && event.op === 'reply') {
+            const waiter = cameraCommandWaiters.get(event.id);
+            if (!waiter) return;
+            cameraCommandWaiters.delete(event.id);
+            waiter.resolve(event);
+            return;
+        }
+        handleCameraFrame(event);
+    };
+    socket.onclose = () => {
+        failCameraCommands(new Error('Picture connection closed'));
+        if (cameraLiveSource !== socket) return;
+        cameraLiveSource = null;
+        if (cameraLiveSeen.size > 0) {
+            setTimeout(() => attachCameraStream(), 300);
+            return;
+        }
+        cameraFramesOpen = false;
+        if (!els.cameraAlert) return;
+        const origin = httpUrl.slice(0, httpUrl.indexOf('/api'));
+        els.cameraAlert.textContent = `Open ${origin} once, allow the certificate, then press Start live view again.`;
+        els.cameraAlert.classList.remove('hidden');
+    };
+}
+
 function attachCameraStream() {
-    if (!cameraFramesOpen || cameraLiveSource || picturePauseDepth > 0 || driveActive) return;
+    if (!cameraFramesOpen || cameraLiveSource || picturePauseDepth > 0) return;
+    // A held direction used to keep the pictures closed. On the picture
+    // connection the direction travels with the pictures, so the view stays up.
+    if (driveActive && !(location.protocol === 'https:' && location.port)) return;
     const url = cameraPictureUrl();
+    if (url.startsWith('https://') && typeof WebSocket === 'function') {
+        attachCameraSocket(url);
+        return;
+    }
     const source = new EventSource(url);
     cameraLiveSource = source;
     source.onmessage = (message) => {
@@ -17038,7 +17150,8 @@ async function suspendPictures() {
 
 function resumePictures() {
     picturePauseDepth = Math.max(0, picturePauseDepth - 1);
-    if (picturePauseDepth > 0 || driveActive) return;
+    if (picturePauseDepth > 0) return;
+    if (driveActive && !(location.protocol === 'https:' && location.port)) return;
     attachCameraStream();
 }
 
@@ -17333,18 +17446,18 @@ async function loadCameras() {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    await suspendPictures();
+    const viaSocket = cameraControlsOpen();
+    if (!viaSocket) await suspendPictures();
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
     try {
-        const res = await fetch('/api/drive.php', {
+        const data = await postPanelJson('/api/drive.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ linear, angular, enter_manual: enterManual }),
             signal,
         });
-        const data = await parseJsonResponse(res);
         if (!data.ok) {
             showToast(data.error || 'Drive command failed', 'error');
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
@@ -17362,7 +17475,7 @@ async function sendDrive(linear, angular, enterManual = false) {
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
     } finally {
-        resumePictures();
+        if (!viaSocket) resumePictures();
     }
 }
 
@@ -17517,16 +17630,16 @@ function setupDrivePad() {
 }
 
 async function sendCommand(action, button) {
-    await suspendPictures();
+    const viaSocket = cameraControlsOpen();
+    if (!viaSocket) await suspendPictures();
     try {
     await stopDriveIfHeld();
     try {
-        const res = await fetch('/api/command.php', {
+        const data = await postPanelJson('/api/command.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: `action=${encodeURIComponent(action)}`,
         });
-        const data = await res.json();
         if (data.ok) {
             if (isCommandAckError(data.ack_msg)) {
                 showToast(data.ack_msg, 'error');
@@ -17560,7 +17673,7 @@ async function sendCommand(action, button) {
         updateControllerGatedControls();
     }
     } finally {
-        resumePictures();
+        if (!viaSocket) resumePictures();
     }
 }
 

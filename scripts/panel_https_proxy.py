@@ -8,11 +8,14 @@ keep using HTTP :8080 directly.
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import http.client
 import json
 import os
 import socket
 import ssl
+import struct
 import sys
 import threading
 import time
@@ -84,6 +87,30 @@ def read_picture_batch(sock: socket.socket, pending: bytes) -> bytes:
     if not body.startswith(b"retry:"):
         body = b"retry: 40\n\n" + body
     return body
+
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WS_MAX_FRAME = 2_000_000
+
+
+def websocket_accept(key: str) -> str:
+    digest = hashlib.sha1((key.strip() + WS_GUID).encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def encode_ws_frame(opcode: int, payload: bytes) -> bytes:
+    """One server frame. The browser masks the frames it sends back."""
+    header = bytearray([0x80 | (opcode & 0x0F)])
+    size = len(payload)
+    if size < 126:
+        header.append(size)
+    elif size < 65536:
+        header.append(126)
+        header += struct.pack("!H", size)
+    else:
+        header.append(127)
+        header += struct.pack("!Q", size)
+    return bytes(header) + payload
 
 
 def relay_socket(sock: socket.socket, wfile, pending: bytes = b"") -> None:
@@ -312,6 +339,11 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if is_camera_frames(self.path or "/"):
+            upgrade = (self.headers.get("Upgrade") or "").lower()
+            if "websocket" in upgrade:
+                if not self._websocket_pictures():
+                    self._camera_unavailable()
+                return
             if not self._relay_pictures():
                 self._camera_unavailable()
             return
@@ -371,6 +403,253 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             except Exception:
                 pass
         return True
+
+    def _websocket_pictures(self) -> bool:
+        """Pictures down, drive and other presses back up, on one connection.
+
+        Safari will not open a second connection to this robot while a picture
+        stream is up, even on another port. Closing the pictures for a press
+        made the view drop for the whole time a direction was held. A two-way
+        picture connection carries the press itself, so the view stays up.
+        """
+        key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+        if not key:
+            return False
+        port = camera_agent_port()
+        sock = None
+        try:
+            sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+            sock.sendall(
+                (
+                    f"GET /frames HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                    f"Accept: text/event-stream\r\nConnection: close\r\n\r\n"
+                ).encode("ascii")
+            )
+            head = b""
+            while b"\r\n\r\n" not in head:
+                part = sock.recv(4096)
+                if not part:
+                    break
+                head += part
+                if len(head) > 65536:
+                    break
+        except Exception:
+            if sock is not None:
+                try:
+                    sock.close()
+                except Exception:
+                    pass
+            return False
+        if b"\r\n\r\n" not in head:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            return False
+
+        _header, _, pending = head.partition(b"\r\n\r\n")
+        self.close_connection = True
+        try:
+            self.send_response(101, "Switching Protocols")
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", websocket_accept(key))
+            self.end_headers()
+        except Exception:
+            try:
+                sock.close()
+            except Exception:
+                pass
+            return True
+
+        stop = threading.Event()
+        write_lock = threading.Lock()
+
+        def send_frame(opcode: int, payload: bytes) -> None:
+            if stop.is_set():
+                return
+            try:
+                with write_lock:
+                    self.wfile.write(encode_ws_frame(opcode, payload))
+                    self.wfile.flush()
+            except Exception:
+                stop.set()
+
+        def pump() -> None:
+            buf = bytearray(pending)
+            try:
+                sock.settimeout(0.5)
+                while not stop.is_set():
+                    while b"\n\n" in buf:
+                        block, _, rest = bytes(buf).partition(b"\n\n")
+                        del buf[: len(block) + 2]
+                        payload = b"\n".join(
+                            line[5:].lstrip()
+                            for line in block.split(b"\n")
+                            if line.startswith(b"data:")
+                        )
+                        if payload:
+                            send_frame(0x1, payload)
+                    try:
+                        chunk = sock.recv(16384)
+                    except (TimeoutError, socket.timeout):
+                        continue
+                    if not chunk:
+                        break
+                    buf += chunk
+            except Exception:
+                pass
+            finally:
+                stop.set()
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except Exception:
+                    pass
+
+        threading.Thread(target=pump, daemon=True).start()
+        try:
+            self._websocket_commands(stop, send_frame)
+        finally:
+            stop.set()
+            try:
+                sock.close()
+            except Exception:
+                pass
+        return True
+
+    def _websocket_commands(self, stop: threading.Event, send_frame) -> None:
+        fragments = bytearray()
+        opcode = None
+        while not stop.is_set():
+            try:
+                frame = self._read_ws_frame()
+            except Exception:
+                break
+            if frame is None:
+                break
+            op, payload, fin = frame
+            if op == 0x8:
+                send_frame(0x8, payload[:125])
+                break
+            if op == 0x9:
+                send_frame(0xA, payload[:125])
+                continue
+            if op == 0xA:
+                continue
+            if op == 0x0:
+                fragments += payload
+            elif op == 0x1:
+                opcode = op
+                fragments = bytearray(payload)
+            else:
+                opcode = None
+                fragments = bytearray()
+                continue
+            if not fin or opcode != 0x1:
+                continue
+            message = bytes(fragments)
+            fragments = bytearray()
+            opcode = None
+            self._websocket_command(message, send_frame)
+
+    def _websocket_command(self, message: bytes, send_frame) -> None:
+        if len(message) > 65536:
+            return
+        try:
+            incoming = json.loads(message.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError, TypeError):
+            return
+        if not isinstance(incoming, dict):
+            return
+        op = incoming.get("op")
+        request_id = incoming.get("id")
+        if op == "drive":
+            path = "/api/drive.php"
+            body = json.dumps(incoming.get("json") if isinstance(incoming.get("json"), dict) else {}).encode("utf-8")
+            content_type = "application/json"
+        elif op == "command":
+            path = "/api/command.php"
+            raw = incoming.get("body") if isinstance(incoming.get("body"), str) else ""
+            body = raw.encode("utf-8")[:65536]
+            content_type = "application/x-www-form-urlencoded"
+        else:
+            return
+        status = 502
+        reply = b'{"ok":false,"error":"The robot did not answer. Press it again."}'
+        conn = None
+        try:
+            conn = http.client.HTTPConnection(self.upstream_host, self.upstream_port, timeout=12)
+            host = self.headers.get("Host") or f"{self.upstream_host}:{self.upstream_port}"
+            conn.request(
+                "POST",
+                path,
+                body=body,
+                headers={
+                    "Host": host,
+                    "Content-Type": content_type,
+                    "Content-Length": str(len(body)),
+                    "Connection": "close",
+                    "X-Forwarded-Proto": "https",
+                    "X-Forwarded-For": self.client_address[0],
+                },
+            )
+            resp = conn.getresponse()
+            status = resp.status
+            reply = resp.read(65536)
+        except Exception:
+            pass
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+        try:
+            text = reply.decode("utf-8")
+        except UnicodeError:
+            text = ""
+        send_frame(
+            0x1,
+            json.dumps({"op": "reply", "id": request_id, "status": status, "body": text}).encode("utf-8"),
+        )
+
+    def _read_exact(self, size: int) -> bytes:
+        buf = bytearray()
+        while len(buf) < size:
+            part = self.rfile.read(size - len(buf))
+            if not part:
+                break
+            buf += part
+        return bytes(buf)
+
+    def _read_ws_frame(self):
+        head = self._read_exact(2)
+        if len(head) < 2:
+            return None
+        first, second = head[0], head[1]
+        masked = (second & 0x80) != 0
+        length = second & 0x7F
+        if length == 126:
+            extra = self._read_exact(2)
+            if len(extra) < 2:
+                return None
+            length = struct.unpack("!H", extra)[0]
+        elif length == 127:
+            extra = self._read_exact(8)
+            if len(extra) < 8:
+                return None
+            length = struct.unpack("!Q", extra)[0]
+        if length > WS_MAX_FRAME:
+            raise ValueError("picture frame too large")
+        mask = self._read_exact(4) if masked else b""
+        if masked and len(mask) < 4:
+            return None
+        payload = self._read_exact(length) if length else b""
+        if len(payload) < length:
+            return None
+        if masked:
+            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        return first & 0x0F, payload, (first & 0x80) != 0
 
 
 class DualStackServer(ThreadingHTTPServer):

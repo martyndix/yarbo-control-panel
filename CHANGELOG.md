@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.41] - 2026-11-20
+
+### Fixed
+
+- Holding a direction closed the cameras, so the robot could only be moved a short way at a time. A direction now goes out on the picture connection, and the cameras stay up while it is held. Update to latest and refresh in Safari.
+
 ## [5.0.40] - 2026-11-20
 
 ### Changed

@@ -65,6 +65,8 @@ def main() -> None:
     assert sink.buf.getvalue() == b"data: hi\n\n", "first picture packet must arrive before the stream ends"
     assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
+    assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    assert drive_on_picture_socket(proxy), "a direction is answered on the picture connection while pictures keep arriving"
     print("ok")
 
 
@@ -249,6 +251,148 @@ def picture_port_stays_open(proxy) -> bool:
         and extra == b"open"
         and b"moved" in other
     )
+
+
+class _Pictures(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(b": live\n\n")
+        self.wfile.flush()
+        try:
+            for index in range(30):
+                payload = json.dumps({"view": "middle", "n": index, "d": "QQ"}).encode()
+                self.wfile.write(b"data: " + payload + b"\n\n")
+                self.wfile.flush()
+                time.sleep(0.1)
+        except (BrokenPipeError, ConnectionResetError):
+            return
+
+
+class _Drive(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+    seen = b""
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_POST(self) -> None:  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        _Drive.seen = self.rfile.read(length)
+        body = b'{"ok":true,"via":"picture"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def _client_frame(payload: bytes) -> bytes:
+    mask = b"\x01\x02\x03\x04"
+    masked = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+    return bytes([0x81, 0x80 | len(payload)]) + mask + masked
+
+
+def drive_on_picture_socket(proxy) -> bool:
+    pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
+    buttons = ThreadingHTTPServer(("127.0.0.1", 0), _Drive)
+    threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
+    threading.Thread(target=buttons.serve_forever, daemon=True).start()
+    status = ROOT / "data" / "camera-live-status.json"
+    status.parent.mkdir(exist_ok=True)
+    previous = status.read_text(encoding="utf-8") if status.is_file() else None
+    status.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
+    previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = buttons.server_address[1]
+    _Drive.seen = b""
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
+    threading.Thread(target=pictures.serve_forever, daemon=True).start()
+    client = None
+    frames = []
+    opened = False
+    try:
+        client = socket.create_connection(("127.0.0.1", pictures.server_address[1]), timeout=3)
+        key = "dGhlIHNhbXBsZSBub25jZQ=="
+        client.sendall(
+            (
+                "GET /api/camera_live.php?action=frames HTTP/1.1\r\n"
+                "Host: panel.local:8444\r\n"
+                "Origin: https://panel.local:8443\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n\r\n"
+            ).encode("ascii")
+        )
+        client.settimeout(2.0)
+        head = b""
+        while b"\r\n\r\n" not in head:
+            part = client.recv(4096)
+            if not part:
+                break
+            head += part
+        opened = b"101" in head.split(b"\r\n", 1)[0] and b"s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" in head
+        pending = head.split(b"\r\n\r\n", 1)[1]
+        # Frames can arrive in the same packet as the handshake.
+        blob = pending
+        deadline = time.time() + 2.0
+        sent = False
+        while time.time() < deadline:
+            length = None
+            offset = 2
+            if len(blob) >= 2:
+                length = blob[1] & 0x7F
+                if length == 126 and len(blob) >= 4:
+                    length = int.from_bytes(blob[2:4], "big")
+                    offset = 4
+                elif length == 126:
+                    length = None
+            if length is None or len(blob) < offset + length:
+                try:
+                    part = client.recv(4096)
+                except socket.timeout:
+                    break
+                if not part:
+                    break
+                blob += part
+                continue
+            payload = blob[offset : offset + length]
+            blob = blob[offset + length :]
+            frames.append(payload)
+            if not sent and (b'"view":"middle"' in payload or b'"view": "middle"' in payload):
+                client.sendall(_client_frame(b'{"op":"drive","id":7,"json":{"linear":0.2,"angular":0,"enter_manual":true}}'))
+                sent = True
+            pictures_so_far = sum(1 for frame in frames if b"middle" in frame)
+            if sent and pictures_so_far >= 2 and any(b'"reply"' in frame for frame in frames):
+                break
+    finally:
+        if client is not None:
+            client.close()
+        pictures.shutdown()
+        pictures_upstream.shutdown()
+        buttons.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
+        if previous is None:
+            status.unlink(missing_ok=True)
+        else:
+            status.write_text(previous, encoding="utf-8")
+    reply_at = next((index for index, frame in enumerate(frames) if b'"reply"' in frame), -1)
+    reply = frames[reply_at] if reply_at >= 0 else b""
+    pictures_after = any(b"middle" in frame for frame in frames[reply_at + 1 :]) if reply_at >= 0 else False
+    drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
+    # The drive result is a JSON string inside the picture frame, so its quotes are escaped.
+    answered = b"picture" in reply and b"true" in reply
+    same_press = b'"id": 7' in reply or b'"id":7' in reply
+    return bool(opened and drove and pictures_after and answered and same_press)
 
 
 if __name__ == "__main__":
