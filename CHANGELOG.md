@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.7] - 2026-11-19
+
+### Fixed
+
+- Yarbo status could come back as **504** and the battery, state, and other metrics stayed blank. The page was waiting on a fresh cloud fetch instead of using the snapshot the cloud session already had, and the proxy cut that wait off. The status card reads the snapshot again, and a slow fetch no longer becomes a 504. Update to latest and leave the page open for a few seconds.
+
 ## [5.0.6] - 2026-11-19
 
 ### Fixed

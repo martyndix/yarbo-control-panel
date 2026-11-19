@@ -103,6 +103,26 @@ def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
     return True
 
 
+def pull_device_cache(client: Any, state: dict[str, Any]) -> bool:
+    """Copy the cloud session's latest DeviceMSG into the status snapshot.
+
+    The page used to miss that snapshot, wait on a one-second fetch, and then
+    hide the robot. The battery and the other metrics were already on the session.
+    """
+    take = getattr(client, "cached_device_msg", None)
+    if not callable(take):
+        return telemetry_raw_usable(state.get("last_raw"))
+    raw = take()
+    if not telemetry_raw_usable(raw):
+        return telemetry_raw_usable(state.get("last_raw"))
+    stamped = getattr(client, "device_msg_at", None)
+    client_at = float(stamped()) if callable(stamped) else 0.0
+    state_at = float(state.get("last_raw_at") or 0.0)
+    if telemetry_raw_usable(state.get("last_raw")) and state_at >= client_at:
+        return True
+    return store_last_raw(state, raw)
+
+
 def plan_is_active(raw: Any) -> bool:
     """True while StateMSG says a work plan is in progress."""
     if not isinstance(raw, dict):
@@ -728,9 +748,11 @@ async def handle_request(
                     "transient": True,
                     **state_flags(state, client),
                 }
-            # PaperMono compact polls every ~15s; serve last_raw immediately so the
-            # tablet's 8s HTTP budget is not burned waiting on get_status.
-            if prefer_cache and isinstance(state.get("last_raw"), dict):
+            # The status page must answer from the snapshot the cloud session
+            # already has. A live fetch here is what turned into a 504.
+            if prefer_cache:
+                pull_device_cache(client, state)
+            if prefer_cache and telemetry_raw_usable(state.get("last_raw")):
                 await maybe_request_plan_feedback(client, state)
                 return {
                     "ok": True,
@@ -741,13 +763,11 @@ async def handle_request(
                     "cached": True,
                     **state_flags(state, client),
                 }
-            # Offline robot + empty cache: do not re-wait get_status on every poll.
-            if prefer_cache and telemetry_miss_cooling(state):
+            if prefer_cache:
                 return {
                     "ok": False,
                     "error": "telemetry timeout",
                     "transient": True,
-                    "cooldown": True,
                     **state_flags(state, client),
                 }
 
@@ -1306,11 +1326,23 @@ async def handle_client(
                 continue
 
             req_id = req.get("id") if isinstance(req, dict) else None
-            async with lock:
-                if not isinstance(req, dict):
-                    resp = {"ok": False, "error": "Invalid JSON"}
-                else:
-                    resp = await handle_request(client, req, state)
+            # Status polls only read the snapshot. They must not queue behind a
+            # cloud fetch, or the browser's proxy returns 504.
+            fast = (
+                isinstance(req, dict)
+                and (
+                    str(req.get("op") or "") == "ping"
+                    or (str(req.get("op") or "") == "telemetry" and bool(req.get("prefer_cache")))
+                )
+            )
+            if fast:
+                resp = await handle_request(client, req, state)
+            else:
+                async with lock:
+                    if not isinstance(req, dict):
+                        resp = {"ok": False, "error": "Invalid JSON"}
+                    else:
+                        resp = await handle_request(client, req, state)
             if req_id is not None:
                 resp["id"] = req_id
             writer.write((json.dumps(resp, separators=(",", ":")) + "\n").encode())
@@ -1323,6 +1355,35 @@ async def handle_client(
             await writer.wait_closed()
         except Exception:
             pass
+
+
+async def telemetry_refresh_loop(
+    client: Any,
+    lock: asyncio.Lock,
+    state: dict[str, Any],
+) -> None:
+    """Fill the status snapshot from the cloud session without blocking the page."""
+    while True:
+        if telemetry_raw_usable(state.get("last_raw")):
+            await asyncio.sleep(15.0)
+        else:
+            await asyncio.sleep(2.0)
+        if not getattr(client, "is_connected", False):
+            continue
+        pull_device_cache(client, state)
+        age = time.time() - float(state.get("last_raw_at") or 0.0)
+        if telemetry_raw_usable(state.get("last_raw")) and age < 20.0:
+            continue
+        try:
+            async with lock:
+                status = await asyncio.wait_for(
+                    client.get_status(timeout=10.0, acquire_controller=False),
+                    timeout=12.0,
+                )
+            raw = getattr(status, "raw", None) if status is not None else None
+            store_last_raw(state, raw)
+        except Exception as exc:  # noqa: BLE001
+            log(f"Cloud telemetry refresh failed: {exc}")
 
 
 async def connect_mqtt(client: Any) -> None:
@@ -1462,6 +1523,7 @@ async def amain() -> int:
     log(f"Agent listening on {sockets} (cloud MQTT SN={serial} email={email})")
 
     asyncio.create_task(connect_mqtt(client))
+    asyncio.create_task(telemetry_refresh_loop(client, lock, state))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())
