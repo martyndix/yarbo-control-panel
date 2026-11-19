@@ -59,6 +59,9 @@ assert_true($sensor !== false && $toggle !== false && $sensor < $toggle, 'sensor
 $subscribe = strpos($camera, 'local_user.subscribe_all_video(options)');
 $connect = strpos($camera, 'conn.connect(grant["token"]');
 assert_true($subscribe !== false && $connect !== false && $subscribe < $connect, 'video is subscribed before connect');
+$listen = strpos($camera, 'register_video_encoded_frame_observer');
+assert_true($listen !== false && $connect !== false && $listen < $connect, 'picture listener is registered before connect');
+assert_true(!str_contains($camera, 'def rejoin_quiet'), 'live view does not leave the channel to rejoin');
 assert_true(str_contains($camera, 'annexb_has_idr'), 'keyframes are detected from the IDR NAL');
 assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Agora token');
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');

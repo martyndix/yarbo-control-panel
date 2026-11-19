@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.16] - 2026-11-19
+
+### Fixed
+
+- Live view reached **Live view is on** and then every tile stayed on **waiting**. The channel had joined, but the picture listener was attached to the wrong part of the video library, so no frames were delivered. It is now attached to the connection before the cameras connect. Live view also no longer drops the channel after 15 seconds, which removed that listener. Update to latest, open the panel with HTTPS, press Stop, then Start live view. Leave it alone while the robot is on 4G.
+
 ## [5.0.15] - 2026-11-19
 
 ### Fixed

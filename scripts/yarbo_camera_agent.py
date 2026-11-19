@@ -690,7 +690,7 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
 
     options = VideoSubscriptionOptions(
         type=VideoStreamType.VIDEO_STREAM_HIGH,
-        encodedFrameOnly=1,
+        encodedFrameOnly=True,
     )
     session.video_options = options
     publish_cls = None
@@ -758,9 +758,26 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
         session.links[view] = conn
         local_user = conn.get_local_user()
         observer = Encoded(view)
-        register = getattr(local_user, "register_video_encoded_frame_observer", None)
-        if callable(register):
-            register(observer)
+        # SDK 2.4 exposes this on the connection. The local-user name is
+        # private, so looking it up there registers nothing and every tile
+        # stays on "waiting" after the channel has joined.
+        listened = False
+        for target in (conn, local_user):
+            register = getattr(target, "register_video_encoded_frame_observer", None) if target is not None else None
+            if not callable(register):
+                continue
+            try:
+                ret = register(observer)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[camera] {view} picture listener was rejected: {exc}", file=sys.stderr, flush=True)
+                continue
+            if not isinstance(ret, int) or ret >= 0:
+                listened = True
+                break
+        if not listened:
+            print(f"[camera] {view} has no picture listener", file=sys.stderr, flush=True)
+            session.hub.mark(view, connected=False)
+            continue
         saw_callback = False
         if base is not None and hasattr(conn, "register_observer"):
             class _Conn(base):  # type: ignore[misc, valid-type]
@@ -858,57 +875,46 @@ def finish_session(session: LiveSession) -> None:
         shutdown()
 
 
-def rejoin_quiet(session: LiveSession, quiet: list[str]) -> None:
-    session.rejoined = True
-    session.rejoin_at = time.time()
-    for view in quiet:
-        conn = session.links.get(view)
-        grant = session.grants.get(view)
-        if conn is None or not grant:
-            continue
+def subscribe_again(session: LiveSession) -> None:
+    """Ask for pictures again without leaving the channel.
+
+    Disconnecting unregisters the picture listener, so a rejoin leaves
+    the tiles on "waiting" for good.
+    """
+    options = session.video_options
+    if options is None:
+        return
+    for view, conn in session.links.items():
         try:
-            conn.disconnect()
             user = conn.get_local_user()
-            if user is not None and session.video_options is not None:
-                user.subscribe_all_video(session.video_options)
-            conn.connect(grant["token"], channel_name(session.serial, view), str(session.viewer_uid))
-            session.hub.mark(view, connected=True)
+            if user is not None:
+                user.subscribe_all_video(options)
         except Exception:
-            print(f"[camera] {view} rejoin failed", file=sys.stderr, flush=True)
+            print(f"[camera] {view} subscribe again failed", file=sys.stderr, flush=True)
 
 
 def watch_lease(session: LiveSession, armed_at: float) -> None:
     last_beat = time.time()
     quiet_since: float | None = None
+    resubscribed = False
     while not session.stop.is_set():
         now = time.time()
-        if not session.rejoined and now - armed_at >= 15:
-            snap = session.hub.snapshot(session.state, session.message, session.started_at)
-            quiet = [
-                name
-                for name, slot in snap["views"].items()
-                if slot.get("connected") and (slot.get("lastFrameAgeMs") is None or slot["lastFrameAgeMs"] > 15000)
-            ]
-            if quiet:
-                rejoin_quiet(session, quiet)
-        elif (
-            session.rejoined
-            and not session.rearmed
-            and session.rejoin_at
-            and now - session.rejoin_at >= 15
-        ):
-            snap = session.hub.snapshot(session.state, session.message, session.started_at)
-            still_quiet = [
-                name
-                for name, slot in snap["views"].items()
-                if slot.get("connected") and (slot.get("frames") or 0) == 0
-            ]
-            if still_quiet:
-                session.rearmed = True
-                try:
-                    arm(session)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[camera] re-arm failed: {exc}", file=sys.stderr, flush=True)
+        snap = session.hub.snapshot(session.state, session.message, session.started_at)
+        frames = sum(int(slot.get("frames") or 0) for slot in snap["views"].values())
+        robots = sum(1 for slot in snap["views"].values() if slot.get("robotSeen"))
+        if frames == 0 and session.state == "live":
+            if not resubscribed and now - armed_at >= 12:
+                resubscribed = True
+                subscribe_again(session)
+            waiting = (
+                "The robot joined the cameras. Waiting for the first picture."
+                if robots
+                else "Cameras joined. Waiting for the robot to send pictures."
+            )
+            if session.message != waiting:
+                session.set_state("live", waiting)
+        elif frames > 0 and session.message != "Live view is on":
+            session.set_state("live", "Live view is on")
         if now - armed_at >= LEASE_SECONDS:
             session.set_state("stopped", "Live view stopped after 30 minutes. Press Start to watch again.")
             finish_session(session)
