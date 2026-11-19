@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.10] - 2026-11-19
+
+### Fixed
+
+- The status card said the Yarbo agent was not running and told you to enter the account email and password, while Settings → Test cloud connection already logged in and found the robot. That test uses `.venv/bin/python3`. The status process was still being started with a different Python check, so it never stayed up to deliver battery and state. The panel now starts the status agent with that same Python, restarts it if it exits, and a status refresh starts it when it is down. Update to latest, then refresh the Yarbo page.
+
 ## [5.0.9] - 2026-11-19
 
 ### Fixed

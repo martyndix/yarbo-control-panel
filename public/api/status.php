@@ -255,9 +255,9 @@ if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
 }
 
 // Cloud MQTT agent only — local LAN :1883 is no longer used for status/control.
-// Browser/Funnel polls must stay fast: never block on agent spawn or a live
-// Powerwall/Lymow refresh (those run in the background watcher). Prefer cached
-// telemetry so a slow get_device_msg cannot turn into a proxy HTML 504.
+// If the agent port is closed, start the cloud agent once. That spawn is
+// detached; the wait below is only until the local ping answers.
+// Do not refresh Powerwall/Lymow on this request (those run in the background).
 $agent = YarboMqttAgentClient::fromEnv();
 $pingStarted = microtime(true);
 $ping = $agent->ping(0.8);
@@ -265,9 +265,21 @@ $statusTiming['ping_ms'] = status_ms_since($pingStarted);
 $engine = (string) ($ping['engine'] ?? '');
 $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
 
+// Account login (Settings → Test cloud connection) is a one-shot REST call.
+// Battery and state come from the long-running cloud agent. If that process
+// is down, or the retired local agent is what answered, start the cloud one.
+// spawn is detached; this only waits until the port accepts a ping.
+if (!($ping['ok'] ?? false) || !$isCloudAgent) {
+    $agent->ensurePreferredEngine();
+    $ping = $agent->ping(1.5);
+    $statusTiming['ping_ms'] = status_ms_since($pingStarted);
+    $engine = (string) ($ping['engine'] ?? '');
+    $isCloudAgent = $engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud';
+}
+
 if (!($ping['ok'] ?? false) || !$isCloudAgent) {
     status_failure(
-        'Yarbo cloud agent is not running. Set account email/password in Settings → Yarbo, then Save.',
+        'The Yarbo status agent is not running. Account login is already saved; this is the process that fetches battery and state. It is starting — wait a few seconds and refresh.',
         'agent',
         503,
         [

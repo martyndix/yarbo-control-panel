@@ -51,6 +51,9 @@ cleanup() {
     pkill -P "${PHP_PID}" 2>/dev/null || true
     kill "${PHP_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${AGENT_WATCH_PID:-}" ]]; then
+    kill "${AGENT_WATCH_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${AGENT_PID:-}" ]]; then
     kill "${AGENT_PID}" 2>/dev/null || true
   fi
@@ -79,6 +82,8 @@ cleanup() {
   if [[ -n "${PROTECT_EVENTS_PID:-}" ]]; then
     kill "${PROTECT_EVENTS_PID}" 2>/dev/null || true
   fi
+  pkill -f '[s]cripts/mqtt_agent.py' 2>/dev/null || true
+  pkill -f '[s]cripts/mqtt_agent.php' 2>/dev/null || true
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
   pkill -f '[s]cripts/yarbo_camera_agent.py' 2>/dev/null || true
   pkill -f '[s]cripts/homepod_agent.py' 2>/dev/null || true
@@ -91,41 +96,51 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-pick_agent() {
-  local venv_py="$ROOT/.venv/bin/python"
-  local probe='import yarbo, yarbo_robot_sdk'
-  if [[ -x "$venv_py" ]] && "$venv_py" -c "$probe" 2>/dev/null; then
-    echo "$venv_py" scripts/mqtt_agent.py
-    return
+start_mqtt_agent() {
+  local py=""
+  repair_yarbo_status_venv "$ROOT" || true
+  if py="$(yarbo_status_python "$ROOT")"; then
+    AGENT_CMD=("$py" "${ROOT}/scripts/mqtt_agent.py")
+  elif [[ -x "${ROOT}/.venv/bin/python3" ]]; then
+    AGENT_CMD=("${ROOT}/.venv/bin/python3" "${ROOT}/scripts/mqtt_agent.py")
+  elif [[ -x "${ROOT}/.venv/bin/python" ]]; then
+    AGENT_CMD=("${ROOT}/.venv/bin/python" "${ROOT}/scripts/mqtt_agent.py")
+  else
+    echo "ERROR: No Python for the Yarbo cloud status agent. Not starting local MQTT." >&2
+    return 1
   fi
-  if command -v python3 >/dev/null 2>&1 && python3 -c "$probe" 2>/dev/null; then
-    echo python3 scripts/mqtt_agent.py
-    return
-  fi
-  echo "ERROR: Yarbo cloud SDK is not importable (yarbo / yarbo_robot_sdk)." >&2
-  echo "ERROR: Not using the retired local MQTT agent for status." >&2
-  if [[ -x "$venv_py" ]]; then
-    echo "$venv_py" scripts/mqtt_agent.py
-    return
-  fi
-  echo php scripts/mqtt_agent.php
+  echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
+  echo "    ${AGENT_CMD[*]}"
+  YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" &
+  AGENT_PID=$!
 }
-
-AGENT_CMD=($(pick_agent))
 
 yarbo_stop_mqtt_agent "${AGENT_PORT}"
 
-echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
-echo "    ${AGENT_CMD[*]}"
-YARBO_MQTT_AGENT_PORT="${AGENT_PORT}" "${AGENT_CMD[@]}" &
-AGENT_PID=$!
-if ! yarbo_wait_mqtt_agent "${AGENT_PORT}" 10; then
+if ! start_mqtt_agent; then
+  echo "WARNING: Yarbo status agent did not start; the panel will keep retrying" >&2
+elif ! yarbo_wait_mqtt_agent "${AGENT_PORT}" 10; then
   if ! kill -0 "${AGENT_PID}" 2>/dev/null; then
-    echo "ERROR: MQTT agent failed to start" >&2
-    exit 1
+    echo "WARNING: MQTT agent exited. See data/mqtt-agent.log. The panel will retry." >&2
+  else
+    echo "WARNING: MQTT agent process is up but port ${AGENT_PORT} is not listening yet" >&2
   fi
-  echo "WARNING: MQTT agent process is up but port ${AGENT_PORT} is not listening yet" >&2
 fi
+
+# The website stays up if this process dies. Bring the cloud agent back.
+# A dead agent is what the status card calls "not running" even when the
+# Yarbo account test on the Settings page succeeds.
+(
+  while true; do
+    sleep 5
+    if yarbo_agent_is_up "${AGENT_PORT}"; then
+      continue
+    fi
+    echo "==> Yarbo status agent is not listening; starting it again"
+    start_mqtt_agent || true
+  done
+) &
+AGENT_WATCH_PID=$!
 
 echo "==> Starting Vestaboard Note watcher"
 (

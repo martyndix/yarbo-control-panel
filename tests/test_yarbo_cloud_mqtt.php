@@ -73,6 +73,12 @@ assert_true(!str_contains($diag, 'probeTcp'), 'diagnostics no longer TCP-probe 1
 
 $status = (string) file_get_contents($root . '/public/api/status.php');
 assert_true(str_contains($status, 'yarbo-cloud'), 'status prefers yarbo-cloud agent');
+assert_true(str_contains($status, 'ensurePreferredEngine'), 'status starts the cloud agent when it is down');
+$panel = (string) file_get_contents($root . '/scripts/panel.sh');
+assert_true(str_contains($panel, 'yarbo_status_python'), 'panel starts the agent with the cloud SDK interpreter');
+assert_true(str_contains($panel, '.venv/bin/python3'), 'panel prefers the same python3 the cloud test uses');
+$sdk = (string) file_get_contents($root . '/scripts/lib/python_sdk.sh');
+assert_true(str_contains($sdk, 'function yarbo_status_python') || str_contains($sdk, 'yarbo_status_python()'), 'status python helper exists');
 assert_true(!str_contains($status, 'probeTcp'), 'status no longer TCP-probes local 1883');
 assert_true(!str_contains($status, 'yarbo_client('), 'status no longer opens a direct local MQTT client');
 
