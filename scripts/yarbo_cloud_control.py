@@ -228,6 +228,26 @@ class YarboCloudControlClient:
         if cmd == "get_controller":
             self._controller_acquired = True
 
+    async def publish_and_wait(
+        self,
+        cmd: str,
+        payload: dict[str, Any] | None = None,
+        timeout: float = 6.0,
+    ) -> Any:
+        """Publish and wait for the data_feedback ack. state 0 is success."""
+        return await asyncio.to_thread(self._publish_wait_sync, str(cmd), payload or {}, timeout)
+
+    def _publish_wait_sync(self, cmd: str, payload: dict[str, Any], timeout: float) -> Any:
+        sdk = self._require_sdk()
+        return sdk.request_with_feedback(
+            self.sn,
+            self.type_id,
+            cmd,
+            payload,
+            cmd,
+            timeout,
+        )
+
     async def get_controller(self, timeout: float | None = None) -> Any:
         _ = timeout
         await self.publish_command("get_controller", {})

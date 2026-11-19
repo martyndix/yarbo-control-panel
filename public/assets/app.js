@@ -16808,14 +16808,15 @@ function handleCameraFrame(event) {
     }
     const known = cameraLiveCodec[event.view];
     if (!known) return;
-    if (!cameraLiveDecoders[event.view] && !event.k) return;
     const picture = nals.filter((nal) => ![7, 8, 9].includes(nal[0] & 0x1f));
     if (!picture.length) return;
+    const key = Boolean(event.k) || picture.some((nal) => (nal[0] & 0x1f) === 5);
+    if (!cameraLiveDecoders[event.view] && !key) return;
     const decoder = ensureCameraDecoder(event.view, known.sps, known.pps);
     if (!decoder || decoder.state === 'closed') return;
     cameraLiveClock += 33333;
     decoder.decode(new EncodedVideoChunk({
-        type: event.k ? 'key' : 'delta',
+        type: key ? 'key' : 'delta',
         timestamp: cameraLiveClock,
         data: nalsToAvcc(picture),
     }));
@@ -17014,6 +17015,10 @@ function updateCameraStatus(cameraState) {
             ? Number(cameraState[stateKeys[camera.id]] ?? 0) === 1
             : camera.online,
     }));
+
+    // cam_*_state is the obstacle camera, not the live picture. While live
+    // view is running, the badges come from encoded frame counts.
+    if (cameraLiveRunning) return;
 
     document.querySelectorAll('.camera-tile').forEach((tile) => {
         const id = tile.dataset.camera;

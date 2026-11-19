@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.14] - 2026-11-19
+
+### Fixed
+
+- Live view said it was on, but all four pictures stayed black and the tiles said offline. Camera tokens now come from the `/prod` service the working bridge uses. Each camera subscribes before it connects, and the robot is asked to publish only after all four have joined. The camera-awake commands repeat every 10 seconds, in the working order. A picture counts as a keyframe when it contains an IDR frame, which is what the browser needs before it can draw. The offline badge is no longer taken from the obstacle-camera fields while live view is running. Update to latest, open the panel with HTTPS, press Stop, then Start live view. Leave it alone while the robot is on 4G.
+
 ## [5.0.13] - 2026-11-19
 
 ### Fixed

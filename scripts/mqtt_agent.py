@@ -1093,7 +1093,10 @@ async def handle_request(
             # Live view must not call get_controller. That announces
             # "app controller connected" and can pause a running job.
             if session_mode(req) == "vision":
-                await client.publish_command(cmd, payload)
+                if req.get("ack"):
+                    await client.publish_and_wait(cmd, payload, timeout=6.0)
+                else:
+                    await client.publish_command(cmd, payload)
                 return {
                     "ok": True,
                     "op": "publish",

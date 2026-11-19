@@ -51,6 +51,15 @@ assert_true(!str_contains($slice, 'apply_command_session'), 'vision does not use
 $camera = (string) file_get_contents($root . '/scripts/yarbo_camera_agent.py');
 assert_true(str_contains($camera, 'or 8767'), 'live view does not bind the Matter agent port');
 assert_true(!str_contains($camera, 'or 8766'), 'live view default port is not 8766');
+assert_true(str_contains($camera, 'execute-api.us-east-1.amazonaws.com/prod'), 'camera tokens come from /prod');
+assert_true(!str_contains($camera, 'amazonaws.com/Stage'), 'camera tokens do not use /Stage');
+$sensor = strpos($camera, 'publish_vision("set_manul_camera_check"');
+$toggle = strpos($camera, 'publish_vision("camera_toggle"');
+assert_true($sensor !== false && $toggle !== false && $sensor < $toggle, 'sensor check is sent before camera toggle');
+$subscribe = strpos($camera, 'local_user.subscribe_all_video(options)');
+$connect = strpos($camera, 'conn.connect(grant["token"]');
+assert_true($subscribe !== false && $connect !== false && $subscribe < $connect, 'video is subscribed before connect');
+assert_true(str_contains($camera, 'annexb_has_idr'), 'keyframes are detected from the IDR NAL');
 assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Agora token');
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');
 assert_true(!str_contains($camera, 'set_working_state'), 'live view does not change the job');

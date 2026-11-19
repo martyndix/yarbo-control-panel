@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 VIEWS = ("middle", "left", "right", "back")
-SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/Stage"
+SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/prod"
 TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
 # The robot's video service is the Yarbo app region, North America (2),
 # which is also where the token service lives. 4 would be Europe and the
@@ -346,11 +346,16 @@ def agent_request(payload: dict[str, Any], timeout: float = 8.0) -> dict[str, An
     ) from last_error
 
 
-def publish_vision(cmd: str, payload: dict[str, Any]) -> None:
-    result = agent_request(
-        {"op": "publish", "cmd": cmd, "payload": payload, "session": "vision"},
-        timeout=12,
-    )
+def publish_vision(cmd: str, payload: dict[str, Any], ack: bool = False) -> None:
+    body: dict[str, Any] = {
+        "op": "publish",
+        "cmd": cmd,
+        "payload": payload,
+        "session": "vision",
+    }
+    if ack:
+        body["ack"] = True
+    result = agent_request(body, timeout=12)
     if not result.get("ok", False):
         raise RuntimeError(str(result.get("error") or f"{cmd} failed"))
 
@@ -580,6 +585,35 @@ class Handler(BaseHTTPRequestHandler):
             session.hub.unsubscribe(sub)
 
 
+def annexb_has_idr(data: bytes) -> bool:
+    """True when the access unit contains an H.264 IDR NAL (type 5).
+
+    The Agora frame_type field is often 0 on this path. Waiting for
+    frame_type == 3 leaves the browser black forever.
+    """
+    size = len(data)
+    index = 0
+    while index + 4 < size:
+        if data[index] == 0 and data[index + 1] == 0 and data[index + 2] == 1:
+            nal = data[index + 3]
+            index += 3
+        elif (
+            data[index] == 0
+            and data[index + 1] == 0
+            and data[index + 2] == 0
+            and data[index + 3] == 1
+            and index + 4 < size
+        ):
+            nal = data[index + 4]
+            index += 4
+        else:
+            index += 1
+            continue
+        if (nal & 0x1F) == 5:
+            return True
+    return False
+
+
 def copy_frame(image_buffer: Any, length: int) -> bytes:
     try:
         size = int(length or 0)
@@ -644,7 +678,7 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
             if not data:
                 return 1
             frame_type = getattr(info, "frame_type", None)
-            key = frame_type == 3
+            key = annexb_has_idr(data) or frame_type == 3
             pts = int(getattr(info, "capture_time_ms", 0) or 0)
             try:
                 uid_num = int(frame_uid)
@@ -726,12 +760,7 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
         register = getattr(local_user, "register_video_encoded_frame_observer", None)
         if callable(register):
             register(observer)
-        ret = conn.connect(grant["token"], channel_name(serial, view), str(uid))
-        connected = isinstance(ret, int) and ret >= 0
-        session.hub.mark(view, connected=connected)
-        if connected and local_user is not None:
-            local_user.subscribe_all_video(options)
-        held.append((conn, observer, local_user))
+        saw_callback = False
         if base is not None and hasattr(conn, "register_observer"):
             class _Conn(base):  # type: ignore[misc, valid-type]
                 def __init__(self, name: str) -> None:
@@ -747,22 +776,52 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
 
             try:
                 conn.register_observer(_Conn(view))
+                saw_callback = True
             except Exception:
-                pass
+                saw_callback = False
+        # Subscribe before connect. Doing it afterwards misses the robot's first pictures.
+        if local_user is not None:
+            local_user.subscribe_all_video(options)
+        ret = conn.connect(grant["token"], channel_name(serial, view), str(uid))
+        if isinstance(ret, int) and ret < 0:
+            session.hub.mark(view, connected=False)
+        elif not saw_callback:
+            session.hub.mark(view, connected=True)
+        held.append((conn, observer, local_user))
 
     return service, held
 
 
 def prepare_sensors(session: LiveSession) -> None:
-    """The cameras must already be on before Smart Vision is asked to publish."""
-    publish_vision("camera_toggle", {"enabled": True})
+    """Keep the cameras awake. The manual check must go out before the toggle.
+
+    overtime is 30 seconds, so this pair is repeated about every 10 seconds
+    while live view is armed. One shot lets the robot stop publishing.
+    """
     publish_vision("set_manul_camera_check", {"state": 1, "overtime": 30})
+    publish_vision("camera_toggle", {"enabled": True})
     session.sensors_on = True
 
 
 def arm(session: LiveSession) -> None:
-    publish_vision("smart_vision_control", {"state": 1})
-    session.armed = True
+    """Ask the robot to publish, and wait for its ack. Retry once if it is asleep."""
+    last_error = "The robot did not confirm live view"
+    for attempt in range(2):
+        try:
+            publish_vision("smart_vision_control", {"state": 1}, ack=True)
+            session.armed = True
+            return
+        except RuntimeError as exc:
+            last_error = str(exc)
+            if attempt == 0:
+                try:
+                    agent_request(
+                        {"op": "telemetry", "timeout": 8, "wifi": False, "prefer_cache": False},
+                        timeout=12,
+                    )
+                except Exception:
+                    pass
+    raise RuntimeError(last_error)
 
 
 def heartbeat(session: LiveSession) -> None:
@@ -796,10 +855,10 @@ def rejoin_quiet(session: LiveSession, quiet: list[str]) -> None:
             continue
         try:
             conn.disconnect()
-            conn.connect(grant["token"], channel_name(session.serial, view), str(session.viewer_uid))
             user = conn.get_local_user()
             if user is not None and session.video_options is not None:
                 user.subscribe_all_video(session.video_options)
+            conn.connect(grant["token"], channel_name(session.serial, view), str(session.viewer_uid))
             session.hub.mark(view, connected=True)
         except Exception:
             print(f"[camera] {view} rejoin failed", file=sys.stderr, flush=True)
@@ -894,19 +953,27 @@ def run(root: Path) -> int:
             grants[view] = request_token(jwt, serial, view, uid)
         if link_is_cellular(cached_raw()):
             raise RuntimeError("Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.")
-        session.set_state("starting", "Turning the cameras on")
-        prepare_sensors(session)
         session.set_state("starting", "Joining the cameras")
         service, held = join_views(session, serial, uid, grants)
-        connected = [
-            view
-            for view, slot in session.hub.snapshot(session.state, session.message, session.started_at)["views"].items()
-            if slot.get("connected")
-        ]
-        if not connected:
-            raise RuntimeError("None of the cameras joined. The update may still be installing the video library.")
+        deadline = time.time() + 12.0
+        missing = list(VIEWS)
+        while time.time() < deadline and missing:
+            snap = session.hub.snapshot(session.state, session.message, session.started_at)
+            missing = [
+                name
+                for name, slot in snap["views"].items()
+                if not slot.get("connected")
+            ]
+            if missing:
+                time.sleep(0.2)
+        if missing:
+            raise RuntimeError(
+                "These cameras did not join: " + ", ".join(missing) + ". Press Start live view again."
+            )
         if link_is_cellular(cached_raw()):
             raise RuntimeError("Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.")
+        session.set_state("starting", "Turning the cameras on")
+        prepare_sensors(session)
         session.set_state("starting", "Asking the robot to publish")
         arm(session)
         # 8766 is the Matter agent. Binding there raises Errno 98 and live view
@@ -978,6 +1045,9 @@ def self_test() -> int:
     assert decode_salt(salt) == b"s" * 32
     assert find_jwt({"nested": {"accessToken": "aaa." + ("b" * 20) + "." + ("c" * 20)}}) == "aaa." + ("b" * 20) + "." + ("c" * 20)
     assert find_jwt({"password": "secret"}) is None
+    idr = b"\x00\x00\x00\x01\x67\x42" + b"\x00\x00\x00\x01\x65\x88"
+    assert annexb_has_idr(idr) is True
+    assert annexb_has_idr(b"\x00\x00\x00\x01\x41\x9a") is False
     print("ok")
     return 0
 
