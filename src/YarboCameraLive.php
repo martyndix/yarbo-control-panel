@@ -203,7 +203,18 @@ final class YarboCameraLive
 
     private function pythonBinary(): string
     {
-        foreach ([$this->projectRoot . '/.venv/bin/python3', $this->projectRoot . '/.venv/bin/python'] as $path) {
+        $noted = $this->projectRoot . '/data/camera-python.txt';
+        if (is_file($noted)) {
+            $path = trim((string) file_get_contents($noted));
+            if ($path !== '' && is_executable($path)) {
+                return $path;
+            }
+        }
+        foreach ([
+            $this->projectRoot . '/.venv-camera/bin/python3',
+            $this->projectRoot . '/.venv/bin/python3',
+            $this->projectRoot . '/.venv/bin/python',
+        ] as $path) {
             if (is_executable($path)) {
                 return $path;
             }

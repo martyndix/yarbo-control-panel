@@ -12,12 +12,16 @@ try {
     $cameraState = null;
     $probe = ['host' => (string) ($config['broker_host'] ?? ''), 'ports' => []];
     if ($enabled) {
-        $probe = YarboCamera::probePorts($config);
-        $client = yarbo_client($config);
-        $client->connect();
-        $raw = $client->requestTelemetry(5);
-        $client->disconnect();
-        $cameraState = is_array($raw) ? ($raw['camera_state'] ?? null) : null;
+        try {
+            $probe = YarboCamera::probePorts($config);
+            $client = yarbo_client($config);
+            $client->connect();
+            $raw = $client->requestTelemetry(5);
+            $client->disconnect();
+            $cameraState = is_array($raw) ? ($raw['camera_state'] ?? null) : null;
+        } catch (Throwable) {
+            $cameraState = null;
+        }
     }
 
     $listed = $enabled

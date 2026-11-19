@@ -16657,6 +16657,12 @@ function cameraModeUrl(cameraId) {
 }
 
 const CAMERA_VIEWS = { front: 'middle', left: 'left', right: 'right', rear: 'back' };
+const DEFAULT_CAMERAS = [
+    { id: 'front', name: 'Front', view: 'middle' },
+    { id: 'left', name: 'Left', view: 'left' },
+    { id: 'right', name: 'Right', view: 'right' },
+    { id: 'rear', name: 'Rear', view: 'back' },
+];
 let cameraLiveSource = null;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
@@ -16918,8 +16924,7 @@ async function stopCameraLive(button) {
 function renderCameras() {
     if (!els.cameraGrid) return;
     if (!cameras.length) {
-        els.cameraGrid.innerHTML = '<p class="camera-placeholder">No cameras configured.</p>';
-        return;
+        cameras = DEFAULT_CAMERAS.map((camera) => ({ ...camera }));
     }
 
     if (cameraMode === 'stream') {
@@ -17036,14 +17041,19 @@ async function loadCameras() {
     try {
         const res = await fetch('/api/cameras.php');
         const data = await res.json();
-        if (!data.ok) return;
-        cameras = data.cameras || [];
+        if (!data.ok) {
+            renderCameras();
+            return;
+        }
+        cameras = Array.isArray(data.cameras) && data.cameras.length ? data.cameras : DEFAULT_CAMERAS.map((camera) => ({ ...camera }));
         streamsAvailable = Boolean(data.ports_open);
-        if (data.message) {
-            els.cameraAlert.textContent = data.message;
-            els.cameraAlert.classList.remove('hidden');
-        } else {
-            els.cameraAlert.classList.add('hidden');
+        if (!cameraLiveRunning) {
+            if (data.message) {
+                els.cameraAlert.textContent = data.message;
+                els.cameraAlert.classList.remove('hidden');
+            } else {
+                els.cameraAlert.classList.add('hidden');
+            }
         }
         const setup = document.getElementById('camera-setup');
         if (data.setup && !streamsAvailable) {
@@ -18930,6 +18940,7 @@ document.addEventListener('keydown', (event) => {
 });
 
 if (document.getElementById('camera-grid')) {
+    renderCameras();
     loadCameras();
 }
 if (document.getElementById('map')) {

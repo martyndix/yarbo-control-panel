@@ -15,7 +15,9 @@ import os
 import queue
 import random
 import re
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -153,6 +155,78 @@ def find_jwt(value: Any, depth: int = 0) -> str | None:
     if hasattr(value, "__dict__"):
         return find_jwt(vars(value), depth + 1)
     return None
+
+
+def python_is_310(path: str) -> bool:
+    try:
+        result = subprocess.run(
+            [path, "-c", "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"],
+            check=False,
+            capture_output=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+def newer_python() -> str | None:
+    for name in ("python3.13", "python3.12", "python3.11", "python3.10", "python3"):
+        path = shutil.which(name)
+        if path and python_is_310(path) and os.path.realpath(path) != os.path.realpath(sys.executable):
+            return path
+    return None
+
+
+def agora_ready() -> bool:
+    try:
+        import agora.rtc.agora_service  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def pip_install_agora() -> str:
+    cmd = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check", "agora_python_server_sdk"]
+    result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        result = subprocess.run(
+            cmd + ["--break-system-packages"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+    if result.returncode != 0:
+        lines = [line.strip() for line in (result.stderr or result.stdout or "").splitlines() if line.strip()]
+        detail = lines[-1] if lines else "pip failed"
+        if len(detail) > 180:
+            detail = detail[:180]
+        raise RuntimeError("The video library did not install. " + detail)
+    return ""
+
+
+def ensure_agora(session: LiveSession, root: Path) -> None:
+    if sys.version_info < (3, 10):
+        other = newer_python()
+        if not other:
+            raise RuntimeError(
+                f"Live view needs Python 3.10 or newer. This panel is on Python {sys.version_info[0]}.{sys.version_info[1]}."
+            )
+        camera_venv = root / ".venv-camera"
+        venv_py = camera_venv / "bin" / "python3"
+        if not venv_py.is_file():
+            session.set_state("starting", "Preparing Python for the video library")
+            made = subprocess.run([other, "-m", "venv", str(camera_venv)], check=False, capture_output=True, text=True)
+            if made.returncode != 0 or not venv_py.is_file():
+                raise RuntimeError("Could not prepare Python 3.10 or newer for live view")
+        os.execv(str(venv_py), [str(venv_py), str(Path(__file__).resolve()), "--root", str(root)])
+    if agora_ready():
+        return
+    session.set_state("starting", "Installing the video library. This can take a minute.")
+    pip_install_agora()
+    if not agora_ready():
+        raise RuntimeError("The video library installed, but this Python cannot load it")
 
 
 def read_serial(root: Path) -> str:
@@ -754,6 +828,7 @@ def run(root: Path) -> int:
     session.shutdown_server = shutdown  # type: ignore[attr-defined]
 
     try:
+        ensure_agora(session, root)
         serial = read_serial(root)
         email, password = read_cloud(root)
         session.set_state("starting", "Signing in to Yarbo")

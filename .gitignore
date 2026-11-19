@@ -7,6 +7,7 @@
 /data/update.log
 /data/mqtt-agent.log
 /data/camera-live.log
+/data/camera-python.txt
 /data/camera-live-status.json
 /data/camera-live.pid
 /data/agora.log

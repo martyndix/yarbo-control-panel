@@ -293,6 +293,16 @@ fi
 
 if ! $BEHIND; then
   STARTED=false
+  # The jump onto 5.0.0 ran the previous updater, which does not know about
+  # the video library. A later "already latest" click still has to install it.
+  if [[ -f "${ROOT}/scripts/lib/python_sdk.sh" ]]; then
+    step "Live camera library"
+    if run_owner "source '${ROOT}/scripts/lib/python_sdk.sh' && install_agora_camera_sdk '${ROOT}'"; then
+      step "Live camera library ready"
+    else
+      step "Live camera library install failed — Start live view will try again"
+    fi
+  fi
   if $SYSTEMD_UNIT && ! $SYSTEMD_ACTIVE; then
     step "Starting systemd service ${SERVICE_NAME}"
     if sudo -n systemctl start "${SERVICE_NAME}" 2>/dev/null; then

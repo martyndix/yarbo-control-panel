@@ -201,23 +201,74 @@ install_yarbo_data_sdk() {
 }
 
 # Agora's Python server SDK carries the live camera pictures. It is not
-# committed; Panel updates installs it into the same venv as the Yarbo SDK.
+# committed. Panel updates and Start live view both install it.
+python_is_310() {
+  local py="${1:?}"
+  "$py" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+agora_pick_python() {
+  local root="${1:?}"
+  local candidate path
+  for candidate in "${root}/.venv-camera/bin/python3" "${root}/.venv/bin/python3"; do
+    if [[ -x "$candidate" ]] && python_is_310 "$candidate"; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    path="$(command -v "$candidate" 2>/dev/null || true)"
+    if [[ -n "$path" ]] && python_is_310 "$path"; then
+      echo "$path"
+      return 0
+    fi
+  done
+  return 1
+}
+
 install_agora_camera_sdk() {
   local root="${1:?}"
-  local py major minor
-  py="$(yarbo_resolve_python "$root" || true)"
-  if [[ -z "$py" ]]; then
-    echo "    Python not found — live cameras stay off" >&2
+  local base py err_file
+  base="$(agora_pick_python "$root" || true)"
+  if [[ -z "$base" ]]; then
+    echo "    Live cameras need Python 3.10 or newer. Install it with: sudo apt install python3.11 python3.11-venv" >&2
     return 1
   fi
-  major="$("$py" -c 'import sys; print(sys.version_info[0])')"
-  minor="$("$py" -c 'import sys; print(sys.version_info[1])')"
-  if [[ "$major" -lt 3 || ( "$major" -eq 3 && "$minor" -lt 10 ) ]]; then
-    echo "    Python ${major}.${minor} is older than 3.10 — live cameras need 3.10 or newer" >&2
-    return 1
+  if [[ "$base" != "${root}/.venv/"* && "$base" != "${root}/.venv-camera/"* ]]; then
+    py="${root}/.venv/bin/python3"
+    if [[ -x "$py" ]] && python_is_310 "$py"; then
+      base="$py"
+    else
+      echo "    Creating ${root}/.venv-camera for the video library"
+      if ! "$base" -m venv "${root}/.venv-camera"; then
+        echo "    Could not create a Python 3.10+ environment for live cameras" >&2
+        return 1
+      fi
+      base="${root}/.venv-camera/bin/python3"
+    fi
   fi
-  if "$py" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
+  if ! "$base" -m pip --version >/dev/null 2>&1; then
+    "$base" -m ensurepip --upgrade >/dev/null 2>&1 || true
+  fi
+  if "$base" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
+    mkdir -p "${root}/data"
+    printf '%s\n' "$base" > "${root}/data/camera-python.txt"
     return 0
   fi
-  "$py" -m pip install --disable-pip-version-check agora_python_server_sdk
+  err_file="$(mktemp)"
+  if ! "$base" -m pip install --disable-pip-version-check agora_python_server_sdk >"$err_file" 2>&1; then
+    if ! "$base" -m pip install --disable-pip-version-check --break-system-packages agora_python_server_sdk >"$err_file" 2>&1; then
+      echo "    Live camera library install failed:" >&2
+      sed 's/^/    /' "$err_file" >&2
+      rm -f "$err_file"
+      return 1
+    fi
+  fi
+  rm -f "$err_file"
+  if ! "$base" -c 'import agora.rtc.agora_service' >/dev/null 2>&1; then
+    echo "    The video library installed but this Python cannot load it" >&2
+    return 1
+  fi
+  mkdir -p "${root}/data"
+  printf '%s\n' "$base" > "${root}/data/camera-python.txt"
 }

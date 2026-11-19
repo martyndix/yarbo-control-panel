@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-11-19
+
+### Fixed
+
+- **Start live view** said the video library was not installed. The update that brought in 5.0.0 was still the previous updater, so it never downloaded that library, and Update to latest did nothing once the panel was already current. The panel now installs the library on update even when the code is already current, and Start live view installs it if it is still missing. The four camera tiles stay on the page while that happens.
+
 ## [5.0.0] - 2026-11-19
 
 Panel version is 5.0.0. The previous release is 4.0.388.
