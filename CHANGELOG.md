@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.24] - 2026-11-19
+
+### Fixed
+
+- Dock, lights, and the other buttons work while the cameras are on. The pictures were still being copied through the same PHP page that runs every button, and four full-rate streams kept that page and the robot connection busy, so a click did nothing until Stop view. The pictures stay on their own path, each camera is limited to about five frames a second, and a button goes ahead of a status read. The rest of the panel stays usable while live view is on. Update to latest, then restart the panel once (Settings → Panel updates, or restart) so the HTTPS proxy picks this up, and refresh.
+
 ## [5.0.23] - 2026-11-19
 
 ### Fixed

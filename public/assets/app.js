@@ -16812,6 +16812,13 @@ function cameraAgoraView(camera) {
     return camera.view || CAMERA_VIEWS[camera.id] || camera.id;
 }
 
+function bytesFromBase64(value) {
+    const binary = atob(value);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+    return out;
+}
+
 function annexBNals(data) {
     const starts = [];
     for (let i = 0; i + 3 < data.length; i += 1) {
@@ -16937,9 +16944,17 @@ function ensureCameraDecoder(view, sps, pps) {
     return decoder;
 }
 
+const cameraFrameAt = {};
+
 function handleCameraFrame(event) {
     if (!event || !event.view || !event.d) return;
-    const binary = Uint8Array.from(atob(event.d), (char) => char.charCodeAt(0));
+    // Full-rate pictures were decoded on the click thread, so dock and the
+    // other buttons did nothing until live view stopped.
+    const now = performance.now();
+    const last = cameraFrameAt[event.view] || 0;
+    if (!event.k && now - last < 160) return;
+    cameraFrameAt[event.view] = now;
+    const binary = bytesFromBase64(event.d);
     const nals = annexBNals(binary);
     const sps = nals.find((nal) => (nal[0] & 0x1f) === 7);
     const pps = nals.find((nal) => (nal[0] & 0x1f) === 8);

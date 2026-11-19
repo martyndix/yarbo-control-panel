@@ -30,6 +30,21 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Dock, lights, and drive must not wait behind a status read. The camera
+# listener used to ask for status every second and hold this one session.
+_control_waiters = 0
+_CONTROL_OPS = frozenset({
+    "controller",
+    "lights",
+    "buzzer",
+    "drive",
+    "stop",
+    "publish",
+    "publish_variants",
+    "start_plan",
+    "return_to_dock",
+})
+
 # Match home-assistant-yarbo / python-yarbo exactly (no refresh — refresh flickers).
 COMMUNITY_LIGHTS_ON = {
     "led_head": 255,
@@ -706,6 +721,18 @@ async def handle_request(
 
     try:
         if op == "telemetry":
+            # A dock / lights / drive click is already waiting. Hand back the
+            # last snapshot and let that click use the session.
+            if _control_waiters > 0 and telemetry_raw_usable(state.get("last_raw")):
+                return {
+                    "ok": True,
+                    "op": "telemetry",
+                    "raw": attach_plan_feedback(state["last_raw"], state),
+                    "wifi": state.get("last_wifi"),
+                    "battery_cells": state.get("last_battery_cells"),
+                    "cached": True,
+                    **state_flags(state, client),
+                }
             timeout = float(req.get("timeout") or 4.0)
             want_wifi = bool(req.get("wifi", True))
             prefer_cache = bool(req.get("prefer_cache", False))
@@ -1295,6 +1322,7 @@ async def handle_client(
     lock: asyncio.Lock,
     state: dict[str, Any],
 ) -> None:
+    global _control_waiters
     try:
         while True:
             line = await reader.readline()
@@ -1312,11 +1340,24 @@ async def handle_client(
                 continue
 
             req_id = req.get("id") if isinstance(req, dict) else None
-            async with lock:
-                if not isinstance(req, dict):
-                    resp = {"ok": False, "error": "Invalid JSON"}
-                else:
-                    resp = await handle_request(client, req, state)
+            op = str(req.get("op") or "") if isinstance(req, dict) else ""
+            control = op in _CONTROL_OPS
+            if control:
+                _control_waiters += 1
+            else:
+                waited = 0.0
+                while _control_waiters > 0 and waited < 2.0:
+                    await asyncio.sleep(0.02)
+                    waited += 0.02
+            try:
+                async with lock:
+                    if not isinstance(req, dict):
+                        resp = {"ok": False, "error": "Invalid JSON"}
+                    else:
+                        resp = await handle_request(client, req, state)
+            finally:
+                if control:
+                    _control_waiters -= 1
             if req_id is not None:
                 resp["id"] = req_id
             writer.write((json.dumps(resp, separators=(",", ":")) + "\n").encode())

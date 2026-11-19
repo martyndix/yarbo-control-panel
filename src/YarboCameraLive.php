@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * Starts the local live-view listener and forwards its picture stream to the browser.
+ * Starts the local live-view listener. Pictures are not copied through PHP.
  * Tokens stay in the Python process.
  */
 final class YarboCameraLive
@@ -129,62 +129,16 @@ final class YarboCameraLive
 
     public function proxyFrames(): void
     {
-        $snap = $this->readStatusFile();
-        $port = (int) ($snap['port'] ?? 0);
-        $state = (string) ($snap['state'] ?? '');
-        if ($port <= 0 || !in_array($state, ['starting', 'live'], true) || !$this->pidAlive($this->readPid())) {
-            http_response_code(409);
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode([
-                'ok' => false,
-                'error' => (string) ($snap['message'] ?? 'Live view is not running. Press Start live view.'),
-            ]);
-
-            return;
-        }
-
-        $socket = @stream_socket_client('tcp://127.0.0.1:' . $port, $errno, $errstr, 3);
-        if (!is_resource($socket)) {
-            http_response_code(409);
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode(['ok' => false, 'error' => 'Live view is not running. Press Start live view.']);
-
-            return;
-        }
-
-        fwrite($socket, "GET /frames HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-        $header = '';
-        while (!str_contains($header, "\r\n\r\n")) {
-            $chunk = fread($socket, 1024);
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
-            $header .= $chunk;
-            if (strlen($header) > 8192) {
-                break;
-            }
-        }
-        $parts = explode("\r\n\r\n", $header, 2);
-        header('Content-Type: text/event-stream');
-        header('Cache-Control: no-cache');
-        header('X-Accel-Buffering: no');
-        @set_time_limit(0);
-        while (ob_get_level() > 0) {
-            ob_end_flush();
-        }
-        if (isset($parts[1]) && $parts[1] !== '') {
-            echo $parts[1];
-            flush();
-        }
-        while (!connection_aborted()) {
-            $chunk = fread($socket, 65536);
-            if ($chunk === false || $chunk === '') {
-                break;
-            }
-            echo $chunk;
-            flush();
-        }
-        fclose($socket);
+        // The picture stream used to stay inside this PHP worker until Stop
+        // view. Dock, lights, and every other page waited behind it.
+        // HTTPS sends the pictures straight from the camera listener.
+        http_response_code(503);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo json_encode([
+            'ok' => false,
+            'error' => 'Live pictures are not served by the panel page. Open the panel with HTTPS.',
+        ]);
     }
 
     /**

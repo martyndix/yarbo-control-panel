@@ -102,12 +102,12 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length > 0 else None
 
         path = self.path or "/"
-        # Pictures are a stream that never ends. Serving them through PHP
-        # keeps one of the few panel workers busy the whole time, so every
-        # other phone and tablet waits. Talk to the camera agent directly.
+        # Pictures are a stream that never ends. They must not enter PHP,
+        # even when the camera listener is down — a fallback used to pin
+        # the only page worker until Stop view.
         if self.command == "GET" and is_camera_frames(path):
-            if self._proxy_camera_frames():
-                return
+            self._serve_camera_frames()
+            return
 
         headers = {}
         for key, value in self.headers.items():
@@ -151,6 +151,22 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD" and resp_body:
             self.wfile.write(resp_body)
+
+    def _serve_camera_frames(self) -> None:
+        """Pictures come from the camera listener. Never from PHP."""
+        if self._proxy_camera_frames():
+            return
+        body = b'{"ok":false,"error":"Live view is not running. Press Start live view."}'
+        try:
+            self.send_response(503)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            pass
 
     def _proxy_camera_frames(self) -> bool:
         """Stream pictures from the camera agent. False if it is not listening."""

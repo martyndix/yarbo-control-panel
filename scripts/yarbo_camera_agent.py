@@ -39,6 +39,24 @@ LEASE_SECONDS = 30 * 60
 IDLE_AFTER_VIEWER_S = 20
 IDLE_BEFORE_VIEWER_S = 45
 HEARTBEAT_S = 10
+# About five pictures a second per camera. Full rate kept the panel busy
+# copying and decoding four streams, so dock and the other buttons waited.
+FRAME_GAP_S = 0.2
+LINK_CHECK_S = 30
+
+
+def frame_due(last_sent: float, now: float, key: bool, gap: float = FRAME_GAP_S) -> bool:
+    """True when this picture should be forwarded.
+
+    Ordinary frames are capped. A keyframe still goes out, but not in a
+    tight burst, so a stream of keyframes cannot undo the cap.
+    """
+    if last_sent <= 0:
+        return True
+    elapsed = now - last_sent
+    if elapsed >= gap:
+        return True
+    return key and elapsed >= 0.12
 
 
 def link_name(raw: dict[str, Any] | None) -> str:
@@ -319,12 +337,16 @@ def request_token(jwt: str, serial: str, view: str, uid: int) -> dict[str, Any]:
     return {"token": token, "key": key, "salt": salt, "app_id": app_id_from_token(token)}
 
 
-def agent_request(payload: dict[str, Any], timeout: float = 8.0) -> dict[str, Any]:
+def agent_request(
+    payload: dict[str, Any],
+    timeout: float = 8.0,
+    attempts: int = 8,
+) -> dict[str, Any]:
     port = int(os.environ.get("YARBO_MQTT_AGENT_PORT") or 8765)
     message = dict(payload)
     message["id"] = f"{random.randint(0, 0xFFFFFF):06x}"
     last_error: Exception | None = None
-    for attempt in range(8):
+    for attempt in range(max(1, attempts)):
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
                 sock.settimeout(timeout)
@@ -346,7 +368,13 @@ def agent_request(payload: dict[str, Any], timeout: float = 8.0) -> dict[str, An
     ) from last_error
 
 
-def publish_vision(cmd: str, payload: dict[str, Any], ack: bool = False) -> dict[str, Any]:
+def publish_vision(
+    cmd: str,
+    payload: dict[str, Any],
+    ack: bool = False,
+    timeout: float | None = None,
+    attempts: int | None = None,
+) -> dict[str, Any]:
     body: dict[str, Any] = {
         "op": "publish",
         "cmd": cmd,
@@ -355,7 +383,12 @@ def publish_vision(cmd: str, payload: dict[str, Any], ack: bool = False) -> dict
     }
     if ack:
         body["ack"] = True
-    result = agent_request(body, timeout=12)
+    # A keep-alive must not sit on the robot session. Dock and lights use it too.
+    if timeout is None:
+        timeout = 12.0 if ack else 2.0
+    if attempts is None:
+        attempts = 2 if ack else 1
+    result = agent_request(body, timeout=timeout, attempts=attempts)
     if not result.get("ok", False):
         raise RuntimeError(str(result.get("error") or f"{cmd} failed"))
     return result
@@ -365,7 +398,8 @@ def cached_raw() -> dict[str, Any] | None:
     try:
         result = agent_request(
             {"op": "telemetry", "timeout": 1.0, "wifi": False, "prefer_cache": True},
-            timeout=4,
+            timeout=1.5,
+            attempts=1,
         )
     except Exception:
         return None
@@ -452,6 +486,19 @@ class Hub:
                         stale.append(sub)
             if stale:
                 self.subs = [sub for sub in self.subs if sub not in stale]
+
+    def last_sent(self, view: str) -> float:
+        with self.lock:
+            return float(self.views[view].get("_sent") or 0)
+
+    def should_forward(self, view: str, key: bool, now: float) -> bool:
+        with self.lock:
+            slot = self.views[view]
+            last = float(slot.get("_sent") or 0)
+            if not frame_due(last, now, key):
+                return False
+            slot["_sent"] = now
+            return True
 
     def mark(self, view: str, **fields: Any) -> None:
         with self.lock:
@@ -675,11 +722,19 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
             self.view = view
 
         def on_encoded_video_frame(self, frame_uid, image_buffer, length, info):  # type: ignore[no-untyped-def]
+            now = time.time()
+            last = session.hub.last_sent(self.view)
+            # Drop a burst before copying it. Copying four full-rate streams
+            # was enough to make the rest of the panel wait.
+            if last > 0 and now - last < 0.12:
+                return 1
             data = copy_frame(image_buffer, length)
             if not data:
                 return 1
             frame_type = getattr(info, "frame_type", None)
             key = annexb_has_idr(data) or frame_type == 3
+            if not session.hub.should_forward(self.view, key, time.time()):
+                return 1
             pts = int(getattr(info, "capture_time_ms", 0) or 0)
             try:
                 uid_num = int(frame_uid)
@@ -895,6 +950,7 @@ def subscribe_again(session: LiveSession) -> None:
 
 def watch_lease(session: LiveSession, armed_at: float) -> None:
     last_beat = time.time()
+    last_link = 0.0
     quiet_since: float | None = None
     resubscribed = False
     while not session.stop.is_set():
@@ -919,10 +975,12 @@ def watch_lease(session: LiveSession, armed_at: float) -> None:
             session.set_state("stopped", "Live view stopped after 30 minutes. Press Start to watch again.")
             finish_session(session)
             return
-        if link_is_cellular(cached_raw()):
-            session.set_state("stopped", "Live view stopped because the robot is on 4G.")
-            finish_session(session)
-            return
+        if now - last_link >= LINK_CHECK_S:
+            last_link = now
+            if link_is_cellular(cached_raw()):
+                session.set_state("stopped", "Live view stopped because the robot is on 4G.")
+                finish_session(session)
+                return
         viewers = session.hub.subscriber_count()
         if viewers == 0:
             if quiet_since is None:
@@ -1067,6 +1125,11 @@ def self_test() -> int:
     idr = b"\x00\x00\x00\x01\x67\x42" + b"\x00\x00\x00\x01\x65\x88"
     assert annexb_has_idr(idr) is True
     assert annexb_has_idr(b"\x00\x00\x00\x01\x41\x9a") is False
+    assert frame_due(0, 10, False) is True
+    assert frame_due(10, 10.05, False) is False
+    assert frame_due(10, 10.05, True) is False
+    assert frame_due(10, 10.13, True) is True
+    assert frame_due(10, 10.25, False) is True
     print("ok")
     return 0
 
