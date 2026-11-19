@@ -84,10 +84,11 @@ assert_true(!str_contains($index, 'camera-recheck'), 'recheck streams button is 
 $proxy = (string) file_get_contents($root . '/scripts/panel_https_proxy.py');
 assert_true(str_contains($proxy, 'def is_camera_frames'), 'HTTPS proxy recognises the picture stream');
 assert_true(str_contains($proxy, 'def relay_upstream'), 'picture bytes are forwarded as they arrive');
-assert_true(str_contains($proxy, '"/frames"'), 'pictures come from the camera agent');
+assert_true(str_contains($proxy, 'GET /frames'), 'pictures come from the camera agent');
 assert_true(str_contains($proxy, 'if not self._proxy_camera_frames()'), 'pictures use the listener that was showing them');
 assert_true(!str_contains($proxy, 'def _relay_php_camera'), 'the picture stream does not stay inside a page worker');
-assert_true(str_contains($proxy, 'HTTP/1.0'), 'the picture stream does not share Safari\'s connection with drive');
+assert_true(str_contains($proxy, 'retry: 40'), 'Safari asks for the next pictures straight away');
+assert_true(str_contains($proxy, 'def read_picture_batch'), 'a picture reply ends so drive is not queued behind it');
 $livePhp = (string) file_get_contents($root . '/src/YarboCameraLive.php');
 assert_true(str_contains($livePhp, 'set_time_limit(0)'), 'the picture stream is flushed the way it was when the cameras showed');
 assert_true(str_contains($livePhp, "header('Content-Type: text/event-stream')"), 'the page sends a picture stream');

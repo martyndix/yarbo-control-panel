@@ -15,6 +15,7 @@ import socket
 import ssl
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -42,6 +43,47 @@ def camera_agent_port() -> int:
     if port <= 0 or port == 8766:
         return fallback
     return port
+
+
+def read_picture_batch(sock: socket.socket, pending: bytes) -> bytes:
+    """One short picture reply. An endless reply makes Safari queue drive behind it."""
+    buf = bytearray(pending)
+    soft = time.monotonic() + 0.25
+    hard = time.monotonic() + 1.2
+    sock.settimeout(0.05)
+
+    def complete_end() -> int:
+        return buf.rfind(b"\n\n")
+
+    while time.monotonic() < hard and len(buf) < 512000:
+        end = complete_end()
+        if end >= 0 and (b"data:" in buf or time.monotonic() >= soft):
+            del buf[end + 2 :]
+            break
+        try:
+            part = sock.recv(16384)
+        except (TimeoutError, socket.timeout):
+            if end >= 0 and time.monotonic() >= soft:
+                del buf[end + 2 :]
+                break
+            continue
+        if not part:
+            if end >= 0:
+                del buf[end + 2 :]
+            else:
+                buf.clear()
+            break
+        buf += part
+    else:
+        end = complete_end()
+        if end >= 0:
+            del buf[end + 2 :]
+        else:
+            buf.clear()
+    body = bytes(buf)
+    if not body.startswith(b"retry:"):
+        body = b"retry: 40\n\n" + body
+    return body
 
 
 def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
@@ -156,53 +198,64 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(resp_body)
 
     def _proxy_camera_frames(self) -> bool:
-        """Stream pictures from the camera agent. False if it is not listening."""
+        """Send one short batch of pictures, then close.
+
+        Safari queues lights, dock, and drive behind a picture reply that
+        never ends. Those presses only ran after the cameras were disconnected.
+        """
         port = camera_agent_port()
-        conn = None
+        sock = None
         try:
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
-            conn.request(
-                "GET",
-                "/frames",
-                headers={"Host": f"127.0.0.1:{port}", "Connection": "close"},
+            sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+            sock.sendall(
+                (
+                    f"GET /frames HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                    f"Accept: text/event-stream\r\nConnection: close\r\n\r\n"
+                ).encode("ascii")
             )
-            resp = conn.getresponse()
+            head = b""
+            while b"\r\n\r\n" not in head:
+                part = sock.recv(4096)
+                if not part:
+                    break
+                head += part
+                if len(head) > 65536:
+                    break
         except Exception:
-            if conn is not None:
+            if sock is not None:
                 try:
-                    conn.close()
+                    sock.close()
                 except Exception:
                     pass
             return False
 
-        # A 20s read limit was closing the pictures, and HTTP/1.1 let Safari
-        # reuse this endless response for the next drive press.
+        header, _, pending = head.partition(b"\r\n\r\n")
+        status = 200
+        first = header.split(b"\r\n", 1)[0].split()
+        if len(first) >= 2 and first[1].isdigit():
+            status = int(first[1])
         try:
-            if conn.sock is not None:
-                conn.sock.settimeout(None)
-        except Exception:
-            pass
-        self.close_connection = True
-        self.protocol_version = "HTTP/1.0"
-        self.send_response(resp.status, resp.reason)
-        for key, value in resp.getheaders():
-            lk = key.lower()
-            if lk in HOP_BY_HOP or lk == "content-length":
-                continue
-            self.send_header(key, value)
-        self.send_header("Cache-Control", "no-cache, no-store")
-        self.send_header("X-Accel-Buffering", "no")
-        self.send_header("Connection", "close")
-        self.end_headers()
-        try:
-            relay_upstream(resp, self.wfile)
-        except Exception:
-            pass
+            body = read_picture_batch(sock, pending) if status == 200 else pending[:4096]
         finally:
             try:
-                conn.close()
+                sock.close()
             except Exception:
                 pass
+        self.close_connection = True
+        try:
+            self.send_response(status)
+            if status == 200:
+                self.send_header("Content-Type", "text/event-stream")
+            else:
+                self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache, no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if body:
+                self.wfile.write(body)
+        except Exception:
+            pass
         return True
 
     def _camera_unavailable(self) -> None:

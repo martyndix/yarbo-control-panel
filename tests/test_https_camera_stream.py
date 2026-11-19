@@ -133,7 +133,16 @@ def stream_reaches_client(proxy) -> bool:
             if not part:
                 break
             buf += part
-        # Pictures are still open. A drive press has to get its own reply.
+        # The picture reply must finish while the camera is still sending,
+        # so a drive press is not left waiting on that connection.
+        while time.time() < deadline:
+            try:
+                part = client.recv(4096)
+            except socket.timeout:
+                break
+            if not part:
+                break
+            buf += part
         other = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=3)
         other.sendall(b"GET /api/drive.php HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         other.settimeout(1.0)
@@ -158,7 +167,14 @@ def stream_reaches_client(proxy) -> bool:
             status.unlink(missing_ok=True)
         else:
             status.write_text(previous, encoding="utf-8")
-    pictures = b"HTTP/1.0 200" in buf and b"middle" in buf and b"text/event-stream" in buf and b"Transfer-Encoding:" not in buf
+    pictures = (
+        b"HTTP/1.1 200" in buf
+        and b"Content-Length:" in buf
+        and b"middle" in buf
+        and b"retry: 40" in buf
+        and b"text/event-stream" in buf
+        and b"Transfer-Encoding:" not in buf
+    )
     return pictures and b'"ok":true' in other_buf and b"moved" in other_buf
 
 

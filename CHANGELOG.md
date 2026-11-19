@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.33] - 2026-11-19
+
+### Fixed
+
+- Lights, dock, and drive did nothing while the cameras were on, then the robot moved after the cameras were disconnected. Those presses were waiting behind the picture connection. Each picture reply now finishes so the buttons can run while the pictures stay on. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.32] - 2026-11-19
 
 ### Fixed
