@@ -88,6 +88,8 @@ assert_true(str_contains($proxy, '"/frames"'), 'pictures come from the camera ag
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');
 assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
+assert_true(str_contains($appJs, 'firstPicture'), 'a live picture enables drive once, not on every frame');
+assert_true(str_contains($appJs, 'el.disabled !== disabled'), 'drive hold is not cancelled by rewriting disabled');
 assert_true(str_contains($appJs, "badge.textContent = 'Online'"), 'a live picture is labelled Online');
 assert_true(str_contains($appJs, 'markCameraTileOnline'), 'the first picture clears the waiting banner');
 $camerasApi = (string) file_get_contents($root . '/public/api/cameras.php');

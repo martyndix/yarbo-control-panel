@@ -849,12 +849,17 @@ function releaseDriveIfBlind() {
     if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
 }
 
+function setControlDisabled(el, disabled) {
+    // Rewriting disabled on every camera frame drops the finger hold.
+    if (el.disabled !== disabled) el.disabled = disabled;
+}
+
 function updateControllerGatedControls() {
     const live = isControllerLive();
     const driveOk = canDrive() && cameraStreamLive();
     document.querySelectorAll('[data-needs-controller]').forEach((el) => {
         const held = el.dataset.control === 'lights' && lightsBusy;
-        el.disabled = held || !live;
+        setControlDisabled(el, held || !live);
         if (!live && !el.title?.includes('Connect controller')) {
             el.dataset.titleUnlocked = el.title || '';
             el.title = 'Connect controller first';
@@ -864,13 +869,14 @@ function updateControllerGatedControls() {
     });
     document.querySelectorAll('#drive-pad [data-drive]').forEach((btn) => {
         if (btn.dataset.drive === 'stop') {
-            btn.disabled = false;
+            setControlDisabled(btn, false);
             return;
         }
-        btn.disabled = !driveOk;
+        // Keep the held direction alive. Disabling it releases the press.
+        setControlDisabled(btn, !driveOk && !driveActive);
         if (!cameraStreamLive()) btn.title = 'Start live view and wait for a picture';
         else if (!live) btn.title = 'Connect controller first';
-        else btn.title = '';
+        else if (!btn.title || btn.title.includes('picture') || btn.title.includes('controller')) btn.title = '';
     });
     // Head controls (attached module) also need a controller session.
     [
@@ -16898,15 +16904,16 @@ function paintCameraFrame(view, frame) {
 }
 
 function markCameraTileOnline(view) {
+    const firstPicture = !cameraLiveSeen.has(view);
     cameraLiveSeen.add(view);
     const tile = document.querySelector(`.camera-tile[data-camera-view="${view}"]`);
     const badge = tile?.querySelector('.camera-status');
-    if (badge) {
+    if (badge && badge.textContent !== 'Online') {
         badge.textContent = 'Online';
         badge.className = 'camera-status online';
     }
     if (els.cameraAlert) els.cameraAlert.classList.add('hidden');
-    if (typeof updateControllerGatedControls === 'function') updateControllerGatedControls();
+    if (firstPicture && typeof updateControllerGatedControls === 'function') updateControllerGatedControls();
 }
 
 function ensureCameraDecoder(view, sps, pps) {

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.22] - 2026-11-19
+
+### Fixed
+
+- Holding a direction works again while the cameras are showing. Each picture was refreshing the drive buttons, and that refresh let go of the press, so the robot stopped before it could move. Lights still need the robot off the charger; the firmware only flashes them while it is charging. Update to latest and refresh.
+
 ## [5.0.21] - 2026-11-19
 
 ### Changed
