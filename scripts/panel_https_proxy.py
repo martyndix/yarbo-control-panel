@@ -9,13 +9,49 @@ from __future__ import annotations
 
 import argparse
 import http.client
+import json
 import os
 import socket
 import ssl
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from urllib.parse import urlsplit
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def is_camera_frames(path: str) -> bool:
+    """True for the live-picture stream. That request must not sit inside PHP."""
+    raw = path or "/"
+    base, _, query = raw.partition("?")
+    return base.rstrip("/").endswith("camera_live.php") and "action=frames" in query
+
+
+def camera_agent_port() -> int:
+    """Port the camera agent is actually listening on. Never the Matter port."""
+    fallback = int(os.environ.get("YARBO_CAMERA_PORT") or 8767)
+    if fallback == 8766:
+        fallback = 8767
+    try:
+        data = json.loads((ROOT / "data" / "camera-live-status.json").read_text(encoding="utf-8"))
+        port = int(data.get("port") or 0)
+    except (OSError, ValueError, TypeError):
+        return fallback
+    if port <= 0 or port == 8766:
+        return fallback
+    return port
+
+
+def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
+    """Copy an upstream body as it arrives. Do not wait for the stream to end."""
+    while True:
+        chunk = resp.read(chunk_size)
+        if not chunk:
+            break
+        wfile.write(chunk)
+        wfile.flush()
 
 
 HOP_BY_HOP = {
@@ -66,6 +102,13 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length > 0 else None
 
         path = self.path or "/"
+        # Pictures are a stream that never ends. Serving them through PHP
+        # keeps one of the few panel workers busy the whole time, so every
+        # other phone and tablet waits. Talk to the camera agent directly.
+        if self.command == "GET" and is_camera_frames(path):
+            if self._proxy_camera_frames():
+                return
+
         headers = {}
         for key, value in self.headers.items():
             lk = key.lower()
@@ -78,6 +121,7 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         headers["X-Forwarded-For"] = self.client_address[0]
         headers["Connection"] = "close"
 
+        conn = None
         try:
             conn = http.client.HTTPConnection(self.upstream_host, self.upstream_port, timeout=120)
             conn.request(self.command, path, body=body, headers=headers)
@@ -86,6 +130,12 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             self.send_error(502, f"Upstream error: {exc}")
             return
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         self.send_response(resp.status, resp.reason)
         for key, value in resp.getheaders():
@@ -101,10 +151,47 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         if self.command != "HEAD" and resp_body:
             self.wfile.write(resp_body)
+
+    def _proxy_camera_frames(self) -> bool:
+        """Stream pictures from the camera agent. False if it is not listening."""
+        port = camera_agent_port()
+        conn = None
         try:
-            conn.close()
+            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
+            conn.request(
+                "GET",
+                "/frames",
+                headers={"Host": f"127.0.0.1:{port}", "Connection": "close"},
+            )
+            resp = conn.getresponse()
+        except Exception:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            return False
+
+        self.send_response(resp.status, resp.reason)
+        for key, value in resp.getheaders():
+            lk = key.lower()
+            if lk in HOP_BY_HOP or lk == "content-length":
+                continue
+            self.send_header(key, value)
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        try:
+            relay_upstream(resp, self.wfile)
         except Exception:
             pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        return True
 
     def _rewrite_location(self, location: str) -> str:
         """Keep redirects on the HTTPS listener when upstream points at itself."""

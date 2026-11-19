@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.20] - 2026-11-19
+
+### Changed
+
+- Start, Stop, and the controller sit in one row above the cameras. The direction pad between the pictures is smaller, and each picture is capped so the four views fit on the screen.
+- A live view no longer ties up the panel. The pictures were being copied through the same small set of PHP workers that load every other page, and the HTTPS proxy was holding the whole stream in memory until it ended. Other phones and tablets could not get a page while that was going on. The picture stream now goes straight from the camera agent out through HTTPS, and the rest of the panel stays available. Update to latest and refresh. Restart the panel once so the HTTPS proxy picks this up (Settings, Panel updates, or restart). The cameras themselves still use some processor time while they are on. That is the video, and it no longer blocks everyone else.
+
 ## [5.0.19] - 2026-11-19
 
 ### Changed

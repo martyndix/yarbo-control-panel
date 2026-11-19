@@ -69,8 +69,16 @@ assert_true(!str_contains($camera, 'set_working_state'), 'live view does not cha
 assert_true(str_contains($camera, '"state": 0'), 'stop tells the robot to stop the cameras');
 $index = (string) file_get_contents($root . '/public/index.php');
 assert_true(str_contains($index, 'id="camera-hub"') || str_contains($index, 'class="camera-hub"'), 'drive pad sits with the cameras');
+assert_true(str_contains($index, 'camera-toolbar'), 'start and the controller sit above the cameras');
+$toolbarAt = strpos($index, 'camera-toolbar');
+$stageAt = strpos($index, 'camera-stage');
+assert_true($toolbarAt !== false && $stageAt !== false && $toolbarAt < $stageAt, 'the camera toolbar is above the pictures');
 assert_true(!str_contains($index, 'camera-prepare'), 'prepare cameras button is gone');
 assert_true(!str_contains($index, 'camera-recheck'), 'recheck streams button is gone');
+$proxy = (string) file_get_contents($root . '/scripts/panel_https_proxy.py');
+assert_true(str_contains($proxy, 'def is_camera_frames'), 'HTTPS proxy recognises the picture stream');
+assert_true(str_contains($proxy, 'def relay_upstream'), 'picture bytes are forwarded as they arrive');
+assert_true(str_contains($proxy, '"/frames"'), 'pictures come from the camera agent, not a PHP worker');
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');
 assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
