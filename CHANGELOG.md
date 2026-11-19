@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.23] - 2026-11-19
+
+### Fixed
+
+- Lights and the controller stay clickable after the first press. A direction that was still held had greyed those buttons out and left the lights tip saying “Turn lights on” while the label said On, so they could not be turned off or the controller released. Pressing lights, the controller, or another command now stops the direction first. Update to latest and refresh.
+
 ## [5.0.22] - 2026-11-19
 
 ### Fixed

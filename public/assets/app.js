@@ -493,7 +493,8 @@ let mapLoadingTimer = null;
 let mapLoadingStartedAt = 0;
 let mapBackupCompatible = false;
 let lightsOn = false;
-let lightsBusy = false;
+let lightsRequest = 0;
+let controllerRequest = 0;
 let holdController = false;
 let controlAwake = false;
 let onChargePad = false;
@@ -858,13 +859,15 @@ function updateControllerGatedControls() {
     const live = isControllerLive();
     const driveOk = canDrive() && cameraStreamLive();
     document.querySelectorAll('[data-needs-controller]').forEach((el) => {
-        const held = el.dataset.control === 'lights' && lightsBusy;
-        setControlDisabled(el, held || !live);
-        if (!live && !el.title?.includes('Connect controller')) {
-            el.dataset.titleUnlocked = el.title || '';
-            el.title = 'Connect controller first';
-        } else if (live && el.dataset.titleUnlocked) {
+        setControlDisabled(el, !live);
+        if (!live) {
+            if (el.title !== 'Connect controller first') {
+                el.dataset.titleUnlocked = el.title || '';
+                el.title = 'Connect controller first';
+            }
+        } else if (el.title === 'Connect controller first' && el.dataset.titleUnlocked) {
             el.title = el.dataset.titleUnlocked;
+            delete el.dataset.titleUnlocked;
         }
     });
     document.querySelectorAll('#drive-pad [data-drive]').forEach((btn) => {
@@ -923,8 +926,10 @@ function updateControlTiles(data) {
 
 async function toggleController(button) {
     if (button.disabled) return;
+    await stopDriveIfHeld();
     const nextOn = !holdController;
     const action = nextOn ? 'controller_on' : 'controller_off';
+    const requestId = ++controllerRequest;
     holdController = nextOn;
     try {
         localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
@@ -932,7 +937,7 @@ async function toggleController(button) {
         // ignore
     }
     updateControllerTile();
-    button.disabled = true;
+    updateLightsTile();
     try {
         const res = await fetch('/api/command.php', {
             method: 'POST',
@@ -940,6 +945,7 @@ async function toggleController(button) {
             body: `action=${encodeURIComponent(action)}`,
         });
         const data = await res.json();
+        if (requestId !== controllerRequest) return;
         if (data.ok) {
             applyControllerStateFromStatus(data);
             applyLightsStateFromStatus(data);
@@ -960,9 +966,11 @@ async function toggleController(button) {
                 // ignore
             }
             updateControllerTile();
+            updateLightsTile();
             showToast(data.error || 'Controller command failed', 'error');
         }
     } catch (err) {
+        if (requestId !== controllerRequest) return;
         holdController = !nextOn;
         try {
             localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
@@ -970,37 +978,31 @@ async function toggleController(button) {
             // ignore
         }
         updateControllerTile();
+        updateLightsTile();
         showToast(err.message || 'Network error', 'error');
-    } finally {
-        button.disabled = false;
     }
 }
 
 async function toggleLights(button) {
-    if (button.disabled || lightsBusy) return;
+    if (button.disabled) return;
     if (!isControllerLive()) {
         showToast('Connect the controller first', 'error');
         return;
     }
+    await stopDriveIfHeld();
     const nextOn = !lightsOn;
     const action = nextOn ? 'lights_on' : 'lights_off';
-    // Optimistic UI + disable avoids double-click sending on then off.
+    const requestId = ++lightsRequest;
     lightsOn = nextOn;
-    if (nextOn) {
-        holdController = true;
-    }
+    if (nextOn) holdController = true;
     try {
         localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
-        if (nextOn) {
-            localStorage.setItem(CONTROLLER_HOLD_KEY, '1');
-        }
+        if (nextOn) localStorage.setItem(CONTROLLER_HOLD_KEY, '1');
     } catch {
         // ignore
     }
     updateLightsTile();
     updateControllerTile();
-    lightsBusy = true;
-    updateControllerGatedControls();
     try {
         const res = await fetch('/api/command.php', {
             method: 'POST',
@@ -1008,12 +1010,15 @@ async function toggleLights(button) {
             body: `action=${encodeURIComponent(action)}`,
         });
         const data = await res.json();
+        if (requestId !== lightsRequest) return;
         if (data.ok) {
             applyControllerStateFromStatus(data);
+            applyLightsStateFromStatus(data);
             updateControllerTile();
+            updateLightsTile();
             if (lightsOn && data.charging) {
                 showToast(
-                    'Light command sent, but the robot is charging — firmware often only flashes lights briefly while charging. Unplug the cable and try again.',
+                    'Light command sent, but the robot is charging — firmware often only flashes lights briefly while charging. Drive it off the charger, then turn the lights on again.',
                     'error'
                 );
             } else {
@@ -1030,6 +1035,7 @@ async function toggleLights(button) {
             showToast(data.error || 'Command failed', 'error');
         }
     } catch (err) {
+        if (requestId !== lightsRequest) return;
         lightsOn = !nextOn;
         try {
             localStorage.setItem(LIGHTS_ON_KEY, lightsOn ? '1' : '0');
@@ -1038,9 +1044,6 @@ async function toggleLights(button) {
         }
         updateLightsTile();
         showToast(err.message || 'Network error', 'error');
-    } finally {
-        lightsBusy = false;
-        updateControllerGatedControls();
     }
 }
 
@@ -17343,6 +17346,13 @@ function stopDriveLoop() {
     document.querySelectorAll('.btn-drive.active').forEach((btn) => btn.classList.remove('active'));
 }
 
+async function stopDriveIfHeld() {
+    if (!driveActive) return;
+    stopDriveLoop();
+    if (els.driveStatus) els.driveStatus.textContent = 'Ready';
+    await sendDrive(0, 0, false);
+}
+
 async function startDrive(direction, button) {
     const vector = DRIVE_VECTORS[direction];
     if (!vector) return;
@@ -17422,11 +17432,23 @@ function setupDrivePad() {
         button.addEventListener('pointercancel', endDrive);
         button.addEventListener('lostpointercapture', endDrive);
     });
+
+    if (!pad.dataset.releaseBound) {
+        pad.dataset.releaseBound = '1';
+        const release = () => {
+            if (!driveActive) return;
+            stopDriveLoop();
+            sendDrive(0, 0, false);
+            if (els.driveStatus) els.driveStatus.textContent = 'Ready';
+        };
+        window.addEventListener('pointerup', release);
+        window.addEventListener('pointercancel', release);
+        window.addEventListener('blur', release);
+    }
 }
 
 async function sendCommand(action, button) {
-    const keepEnabled = action === 'stop';
-    if (!keepEnabled) button.disabled = true;
+    await stopDriveIfHeld();
     try {
         const res = await fetch('/api/command.php', {
             method: 'POST',
@@ -17464,7 +17486,7 @@ async function sendCommand(action, button) {
     } catch (err) {
         showToast(err.message || 'Network error', 'error');
     } finally {
-        button.disabled = false;
+        updateControllerGatedControls();
     }
 }
 

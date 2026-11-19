@@ -90,6 +90,8 @@ assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved i
 assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
 assert_true(str_contains($appJs, 'firstPicture'), 'a live picture enables drive once, not on every frame');
 assert_true(str_contains($appJs, 'el.disabled !== disabled'), 'drive hold is not cancelled by rewriting disabled');
+assert_true(str_contains($appJs, 'stopDriveIfHeld'), 'lights and the controller stop a stuck direction');
+assert_true(!str_contains($appJs, 'lightsBusy'), 'lights stay clickable after the first press');
 assert_true(str_contains($appJs, "badge.textContent = 'Online'"), 'a live picture is labelled Online');
 assert_true(str_contains($appJs, 'markCameraTileOnline'), 'the first picture clears the waiting banner');
 $camerasApi = (string) file_get_contents($root . '/public/api/cameras.php');
