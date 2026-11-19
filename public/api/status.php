@@ -279,8 +279,9 @@ if (!($ping['ok'] ?? false) || !$isCloudAgent) {
 }
 
 if (empty($ping['connected'])) {
+    $connectError = trim((string) ($ping['connect_error'] ?? ''));
     status_failure(
-        YarboErrors::MSG_MQTT_FAILED,
+        $connectError !== '' ? $connectError : YarboErrors::MSG_MQTT_FAILED,
         'mqtt',
         503,
         [
@@ -299,7 +300,10 @@ try {
     $statusTiming['telemetry_ms'] = status_ms_since($telemetryStarted);
     status_from_agent($result);
 
-    $error = (string) ($result['error'] ?? 'telemetry timeout');
+    $connectError = trim((string) ($result['connect_error'] ?? ''));
+    $error = $connectError !== ''
+        ? $connectError
+        : (string) ($result['error'] ?? 'telemetry timeout');
     $lower = strtolower($error);
     $transient = (bool) ($result['transient'] ?? false)
         || str_contains($lower, 'data_feedback')

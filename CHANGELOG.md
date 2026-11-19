@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.9] - 2026-11-19
+
+### Fixed
+
+- Yarbo stayed Offline and battery, state, and the other metrics never filled in, even though the phone app showed the robot online. The cloud session tried once for a few seconds and then gave up, and a short status poll could hide a message that had already arrived. The session now subscribes the way the current Yarbo SDK requires, keeps requesting a snapshot until battery and state are in it, and the status card shows the real connection error while that is still in progress. Update to latest. Do not press Start live view until the status card shows the robot.
+
 ## [5.0.8] - 2026-11-19
 
 ### Fixed

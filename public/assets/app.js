@@ -3231,7 +3231,8 @@ function applyYarboOfflineHint(data) {
         els.state.textContent = 'Offline';
         els.state.className = 'value badge';
         if (els.updatedAt) {
-            els.updatedAt.textContent = 'waiting for Yarbo…';
+            const err = String(data?.error || '').trim();
+            els.updatedAt.textContent = err || 'waiting for Yarbo…';
         }
     }
 }

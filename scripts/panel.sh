@@ -20,6 +20,13 @@ source "${ROOT}/scripts/lib/homepod_agent.sh"
 source "${ROOT}/scripts/lib/unifi_protect_events.sh"
 # shellcheck source=scripts/lib/panel_https.sh
 source "${ROOT}/scripts/lib/panel_https.sh"
+# shellcheck source=scripts/lib/python_sdk.sh
+source "${ROOT}/scripts/lib/python_sdk.sh"
+
+# A live-view install can leave .venv unable to import the cloud SDK. The
+# status agent would then fall through to local MQTT, which this panel no
+# longer accepts, and the robot stays Offline.
+repair_yarbo_status_venv "$ROOT" || true
 
 if [[ -z "$PHP_BIN" ]]; then
   echo "ERROR: php not found on PATH" >&2
@@ -86,12 +93,19 @@ trap cleanup EXIT INT TERM
 
 pick_agent() {
   local venv_py="$ROOT/.venv/bin/python"
-  if [[ -x "$venv_py" ]] && "$venv_py" -c "import yarbo" 2>/dev/null; then
+  local probe='import yarbo, yarbo_robot_sdk'
+  if [[ -x "$venv_py" ]] && "$venv_py" -c "$probe" 2>/dev/null; then
     echo "$venv_py" scripts/mqtt_agent.py
     return
   fi
-  if command -v python3 >/dev/null 2>&1 && python3 -c "import yarbo" 2>/dev/null; then
+  if command -v python3 >/dev/null 2>&1 && python3 -c "$probe" 2>/dev/null; then
     echo python3 scripts/mqtt_agent.py
+    return
+  fi
+  echo "ERROR: Yarbo cloud SDK is not importable (yarbo / yarbo_robot_sdk)." >&2
+  echo "ERROR: Not using the retired local MQTT agent for status." >&2
+  if [[ -x "$venv_py" ]]; then
+    echo "$venv_py" scripts/mqtt_agent.py
     return
   fi
   echo php scripts/mqtt_agent.php
