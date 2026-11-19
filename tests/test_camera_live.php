@@ -67,7 +67,13 @@ assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Ag
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');
 assert_true(!str_contains($camera, 'set_working_state'), 'live view does not change the job');
 assert_true(str_contains($camera, '"state": 0'), 'stop tells the robot to stop the cameras');
+$index = (string) file_get_contents($root . '/public/index.php');
+assert_true(str_contains($index, 'id="camera-hub"') || str_contains($index, 'class="camera-hub"'), 'drive pad sits with the cameras');
+assert_true(!str_contains($index, 'camera-prepare'), 'prepare cameras button is gone');
+assert_true(!str_contains($index, 'camera-recheck'), 'recheck streams button is gone');
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
+assert_true(str_contains($appJs, 'yarbo-camera-order'), 'camera order is saved in this browser');
+assert_true(str_contains($appJs, 'cameraStreamLive'), 'drive stays off until a live picture is showing');
 assert_true(str_contains($appJs, "badge.textContent = 'Online'"), 'a live picture is labelled Online');
 assert_true(str_contains($appJs, 'markCameraTileOnline'), 'the first picture clears the waiting banner');
 $camerasApi = (string) file_get_contents($root . '/public/api/cameras.php');

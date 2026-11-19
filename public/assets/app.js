@@ -825,18 +825,33 @@ function updateControllerTile() {
     }
 
     if (els.driveControllerNote) {
-        els.driveControllerNote.textContent = live
-            ? 'Controller connected — hold a direction to drive.'
-            : 'Connect the controller to enable the drive pad.';
-        els.driveControllerNote.classList.toggle('is-ready', canDrive());
+        if (!cameraStreamLive()) {
+            els.driveControllerNote.textContent = 'Drive stays off until a live picture is showing.';
+        } else if (live) {
+            els.driveControllerNote.textContent = 'Controller connected — hold a direction to drive.';
+        } else {
+            els.driveControllerNote.textContent = 'Connect the controller to enable the drive pad.';
+        }
+        els.driveControllerNote.classList.toggle('is-ready', canDrive() && cameraStreamLive());
     }
 
     updateControllerGatedControls();
 }
 
+function cameraStreamLive() {
+    return cameraLiveRunning && cameraLiveSeen.size > 0;
+}
+
+function releaseDriveIfBlind() {
+    if (typeof driveActive === 'undefined' || !driveActive) return;
+    stopDriveLoop();
+    sendDrive(0, 0, false);
+    if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
+}
+
 function updateControllerGatedControls() {
     const live = isControllerLive();
-    const driveOk = canDrive();
+    const driveOk = canDrive() && cameraStreamLive();
     document.querySelectorAll('[data-needs-controller]').forEach((el) => {
         el.disabled = !live;
         if (!live && !el.title?.includes('Connect controller')) {
@@ -852,7 +867,9 @@ function updateControllerGatedControls() {
             return;
         }
         btn.disabled = !driveOk;
-        btn.title = !live ? 'Connect controller first' : '';
+        if (!cameraStreamLive()) btn.title = 'Start live view and wait for a picture';
+        else if (!live) btn.title = 'Connect controller first';
+        else btn.title = '';
     });
     // Head controls (attached module) also need a controller session.
     [
@@ -16680,12 +16697,93 @@ function cameraModeUrl(cameraId) {
 }
 
 const CAMERA_VIEWS = { front: 'middle', left: 'left', right: 'right', rear: 'back' };
+const CAMERA_ORDER_KEY = 'yarbo-camera-order';
+const DEFAULT_CAMERA_ORDER = ['front', 'left', 'right', 'rear'];
 const DEFAULT_CAMERAS = [
     { id: 'front', name: 'Front', view: 'middle' },
     { id: 'left', name: 'Left', view: 'left' },
     { id: 'right', name: 'Right', view: 'right' },
     { id: 'rear', name: 'Rear', view: 'back' },
 ];
+
+function cameraOrder() {
+    let saved = [];
+    try {
+        const raw = JSON.parse(localStorage.getItem(CAMERA_ORDER_KEY) || '[]');
+        if (Array.isArray(raw)) {
+            saved = raw.map(String).filter((id) => DEFAULT_CAMERA_ORDER.includes(id));
+        }
+    } catch {
+        saved = [];
+    }
+    DEFAULT_CAMERA_ORDER.forEach((id) => {
+        if (!saved.includes(id)) saved.push(id);
+    });
+    return saved;
+}
+
+function saveCameraOrder(order) {
+    localStorage.setItem(CAMERA_ORDER_KEY, JSON.stringify(order));
+}
+
+function orderCameras(list) {
+    const rank = new Map(cameraOrder().map((id, index) => [id, index]));
+    return [...list].sort((a, b) => (rank.get(a.id) ?? 99) - (rank.get(b.id) ?? 99));
+}
+
+function placeCameraTiles() {
+    cameraOrder().forEach((id, index) => {
+        const tile = els.cameraGrid?.querySelector(`.camera-tile[data-camera="${id}"]`);
+        if (tile) tile.dataset.slot = String(index);
+    });
+}
+
+function bindCameraReorder() {
+    const stage = document.getElementById('camera-stage');
+    if (!stage || stage.dataset.reorderBound) return;
+    stage.dataset.reorderBound = '1';
+    let dragging = '';
+    stage.addEventListener('dragstart', (event) => {
+        const tile = event.target.closest?.('.camera-tile');
+        if (!tile) return;
+        dragging = tile.dataset.camera || '';
+        event.dataTransfer?.setData('text/plain', dragging);
+        if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+    });
+    stage.addEventListener('dragover', (event) => {
+        const tile = event.target.closest?.('.camera-tile');
+        if (!tile || !dragging) return;
+        event.preventDefault();
+        stage.querySelectorAll('.camera-drop').forEach((el) => el.classList.remove('camera-drop'));
+        if (tile.dataset.camera !== dragging) tile.classList.add('camera-drop');
+    });
+    stage.addEventListener('dragleave', (event) => {
+        event.target.closest?.('.camera-tile')?.classList.remove('camera-drop');
+    });
+    stage.addEventListener('drop', (event) => {
+        const tile = event.target.closest?.('.camera-tile');
+        stage.querySelectorAll('.camera-drop').forEach((el) => el.classList.remove('camera-drop'));
+        if (!tile || !dragging) return;
+        event.preventDefault();
+        const target = tile.dataset.camera || '';
+        const fromId = dragging;
+        dragging = '';
+        if (!target || target === fromId) return;
+        const order = cameraOrder();
+        const from = order.indexOf(fromId);
+        const to = order.indexOf(target);
+        if (from < 0 || to < 0) return;
+        order.splice(from, 1);
+        order.splice(to, 0, fromId);
+        saveCameraOrder(order);
+        cameras = orderCameras(cameras);
+        placeCameraTiles();
+    });
+    stage.addEventListener('dragend', () => {
+        dragging = '';
+        stage.querySelectorAll('.camera-drop').forEach((el) => el.classList.remove('camera-drop'));
+    });
+}
 let cameraLiveSource = null;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
@@ -16801,6 +16899,7 @@ function markCameraTileOnline(view) {
         badge.className = 'camera-status online';
     }
     if (els.cameraAlert) els.cameraAlert.classList.add('hidden');
+    if (typeof updateControllerGatedControls === 'function') updateControllerGatedControls();
 }
 
 function ensureCameraDecoder(view, sps, pps) {
@@ -16911,7 +17010,11 @@ function applyCameraLiveStatus(data) {
         closeCameraFrames();
         stopCameraLivePoll();
         setCameraLiveButtons(false);
+        releaseDriveIfBlind();
+        updateControllerGatedControls();
         if (message) showToast(message, data.state === 'error' ? 'error' : 'success');
+    } else if (typeof updateControllerGatedControls === 'function') {
+        updateControllerGatedControls();
     }
 }
 
@@ -16967,6 +17070,8 @@ async function startCameraLive(button) {
 async function stopCameraLive(button) {
     if (button) button.disabled = true;
     cameraLiveRunning = false;
+    releaseDriveIfBlind();
+    updateControllerGatedControls();
     closeCameraFrames();
     stopCameraLivePoll();
     try {
@@ -16983,14 +17088,21 @@ async function stopCameraLive(button) {
     }
 }
 
+function cameraTileHead(camera) {
+    return `<span class="camera-drag" draggable="true" title="Drag onto another camera to move it">⋮⋮ ${camera.name}</span>`;
+}
+
 function renderCameras() {
     if (!els.cameraGrid) return;
     if (!cameras.length) {
         cameras = DEFAULT_CAMERAS.map((camera) => ({ ...camera }));
     }
+    cameras = orderCameras(cameras);
+    bindCameraReorder();
 
     if (cameraMode === 'stream') {
         if (cameraLiveRunning && els.cameraGrid.querySelector('canvas')) {
+            placeCameraTiles();
             return;
         }
         els.cameraGrid.innerHTML = cameras.map((camera) => {
@@ -16998,7 +17110,7 @@ function renderCameras() {
             return `
                 <article class="camera-tile" data-camera="${camera.id}" data-camera-view="${view}">
                     <div class="camera-head">
-                        <span>${camera.name}</span>
+                        ${cameraTileHead(camera)}
                         <span class="camera-status">off</span>
                     </div>
                     <div class="camera-viewport">
@@ -17007,6 +17119,7 @@ function renderCameras() {
                 </article>
             `;
         }).join('');
+        placeCameraTiles();
         return;
     }
 
@@ -17017,15 +17130,16 @@ function renderCameras() {
             return `
                 <article class="camera-tile" data-camera="${camera.id}">
                     <div class="camera-head">
-                        <span>${camera.name}</span>
+                        ${cameraTileHead(camera)}
                         <span class="camera-status ${statusClass}">${statusText}</span>
                     </div>
                     <div class="camera-viewport has-error">
                         <div class="camera-error">Stream unavailable.<br>RTSP not reachable on this host.</div>
                     </div>
-                </article>
-            `;
+            </article>
+        `;
         }).join('');
+        placeCameraTiles();
         return;
     }
 
@@ -17035,7 +17149,7 @@ function renderCameras() {
         return `
             <article class="camera-tile" data-camera="${camera.id}">
                 <div class="camera-head">
-                    <span>${camera.name}</span>
+                    ${cameraTileHead(camera)}
                     <span class="camera-status ${statusClass}">${statusText}</span>
                 </div>
                 <div class="camera-viewport">
@@ -17045,6 +17159,7 @@ function renderCameras() {
             </article>
         `;
     }).join('');
+    placeCameraTiles();
 }
 
 function updateCameraStatus(cameraState) {
@@ -17139,24 +17254,6 @@ async function loadCameras() {
     }
 }
 
-async function prepareCameras(button) {
-    button.disabled = true;
-    try {
-        const res = await fetch('/api/camera_prepare.php', { method: 'POST' });
-        const data = await res.json();
-        if (data.ok) {
-            showToast('Camera MQTT commands sent', 'success');
-            await loadCameras();
-        } else {
-            showToast(data.error || 'Prepare failed', 'error');
-        }
-    } catch (err) {
-        showToast(err.message || 'Network error', 'error');
-    } finally {
-        button.disabled = false;
-    }
-}
-
 async function sendDrive(linear, angular, enterManual = false) {
     try {
         const res = await fetch('/api/drive.php', {
@@ -17243,8 +17340,13 @@ async function startDrive(direction, button) {
         return;
     }
 
+    if (!cameraStreamLive()) {
+        showToast('Start live view and wait for a picture before driving', 'error');
+        if (els.driveStatus) els.driveStatus.textContent = 'Live view required';
+        return;
+    }
     if (!isControllerLive()) {
-        showToast('Connect the controller first (in Manual Drive or Controls)', 'error');
+        showToast('Connect the controller first (between the cameras, or in Controls)', 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Controller required';
         return;
     }
@@ -17261,6 +17363,13 @@ async function startDrive(direction, button) {
     sendDrivePulse(vector.linear, vector.angular);
     driveInterval = setInterval(() => {
         if (!driveActive) return;
+        if (!cameraStreamLive()) {
+            stopDriveLoop();
+            sendDrive(0, 0, false);
+            if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
+            updateControllerGatedControls();
+            return;
+        }
         if (!isControllerLive()) {
             stopDriveLoop();
             sendDrive(0, 0, false);
@@ -17383,18 +17492,6 @@ document.getElementById('camera-live-start')?.addEventListener('click', (e) => {
 
 document.getElementById('camera-live-stop')?.addEventListener('click', (e) => {
     stopCameraLive(e.currentTarget);
-});
-
-document.getElementById('camera-prepare')?.addEventListener('click', (e) => {
-    prepareCameras(e.currentTarget);
-});
-
-document.getElementById('camera-recheck')?.addEventListener('click', async (e) => {
-    const button = e.currentTarget;
-    button.disabled = true;
-    await loadCameras();
-    button.disabled = false;
-    showToast(streamsAvailable ? 'Streams available' : 'Still no RTSP — is the tunnel running?', streamsAvailable ? 'success' : 'error');
 });
 
 document.getElementById('map-load-areas')?.addEventListener('click', (e) => {

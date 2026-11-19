@@ -393,16 +393,34 @@ $config = require dirname(__DIR__) . '/config.php';
                     <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
                 </div>
             </div>
-            <p class="hint">Start live view opens the four cameras. The pictures go out through Yarbo's video service and come back to this page on your home network. It stays off, and stops, while the robot is on 4G. Open the panel with HTTPS so the browser can show the pictures. Stopping here also stops Smart Vision in the Yarbo phone app.</p>
+            <p class="hint">Start live view opens the four cameras. The pictures go out through Yarbo's video service and come back to this page on your home network. It stays off, and stops, while the robot is on 4G. Open the panel with HTTPS so the browser can show the pictures. Stopping here also stops Smart Vision in the Yarbo phone app. Drag a camera name onto another camera to move it. Drive stays off until a live picture is showing.</p>
             <div id="camera-alert" class="banner warning hidden" role="status"></div>
             <ol id="camera-setup" class="camera-setup hidden"></ol>
-            <div class="camera-actions">
-                <button type="button" class="btn" id="camera-live-start">Start live view</button>
-                <button type="button" class="btn btn-secondary" id="camera-live-stop" disabled>Stop</button>
-                <button type="button" class="btn btn-secondary" id="camera-prepare">Prepare cameras (MQTT)</button>
-                <button type="button" class="btn btn-secondary" id="camera-recheck">Recheck streams</button>
+            <div class="camera-stage" id="camera-stage">
+                <div id="camera-grid" class="camera-grid"></div>
+                <div class="camera-hub">
+                    <div class="camera-actions">
+                        <button type="button" class="btn" id="camera-live-start">Start live view</button>
+                        <button type="button" class="btn btn-secondary" id="camera-live-stop" disabled>Stop</button>
+                    </div>
+                    <p class="drive-block-banner hidden" id="drive-block-banner" role="status"></p>
+                    <div class="drive-controller-row">
+                        <button type="button" class="control-tile" id="control-controller-drive" data-control="controller" aria-pressed="false" title="Connect app controller">
+                            <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
+                            <span class="control-tile-label" data-controller-label>Off</span>
+                        </button>
+                    </div>
+                    <div class="dpad" id="drive-pad">
+                        <button type="button" class="btn btn-drive" data-drive="forward" aria-label="Forward" disabled>▲</button>
+                        <button type="button" class="btn btn-drive" data-drive="left" aria-label="Turn left" disabled>◀</button>
+                        <button type="button" class="btn btn-drive btn-drive-stop" data-drive="stop" aria-label="Stop">■</button>
+                        <button type="button" class="btn btn-drive" data-drive="right" aria-label="Turn right" disabled>▶</button>
+                        <button type="button" class="btn btn-drive" data-drive="backward" aria-label="Backward" disabled>▼</button>
+                    </div>
+                    <p class="drive-status" id="drive-status">Ready</p>
+                    <p class="drive-controller-note" id="drive-controller-note">Drive stays off until a live picture is showing.</p>
+                </div>
             </div>
-            <div id="camera-grid" class="camera-grid"></div>
             <p id="camera-note" class="camera-note hidden"></p>
         </section>
 
@@ -411,23 +429,7 @@ $config = require dirname(__DIR__) . '/config.php';
                 <h2>Manual Drive</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">Connect the controller below first, then hold a direction to move. Release to stop. Use only on flat, clear ground. Watching the map and status does not need the controller.</p>
-            <p class="drive-block-banner hidden" id="drive-block-banner" role="status"></p>
-            <div class="drive-controller-row">
-                <button type="button" class="control-tile" id="control-controller-drive" data-control="controller" aria-pressed="false" title="Connect app controller">
-                    <span class="control-tile-icon" data-controller-icon aria-hidden="true">📴</span>
-                    <span class="control-tile-label" data-controller-label>Off</span>
-                </button>
-                <p class="drive-controller-note" id="drive-controller-note">Controller required for drive.</p>
-            </div>
-            <div class="dpad" id="drive-pad">
-                <button type="button" class="btn btn-drive" data-drive="forward" aria-label="Forward" disabled>▲</button>
-                <button type="button" class="btn btn-drive" data-drive="left" aria-label="Turn left" disabled>◀</button>
-                <button type="button" class="btn btn-drive btn-drive-stop" data-drive="stop" aria-label="Stop">■</button>
-                <button type="button" class="btn btn-drive" data-drive="right" aria-label="Turn right" disabled>▶</button>
-                <button type="button" class="btn btn-drive" data-drive="backward" aria-label="Backward" disabled>▼</button>
-            </div>
-            <p class="drive-status" id="drive-status">Ready</p>
+            <p class="hint">The direction pad sits between the cameras. It stays off until live view is showing a picture, then you also need the controller connected. Release or press Stop to halt.</p>
         </section>
 
         <section class="card panel-section plans-card" data-panel-id="plans" data-module="yarbo">

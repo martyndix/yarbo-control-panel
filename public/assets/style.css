@@ -1901,10 +1901,49 @@ body.map-is-fullscreen {
     cursor: not-allowed;
 }
 
-.camera-grid {
+.camera-stage {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-rows: auto auto;
     gap: 0.75rem;
+    align-items: center;
+}
+
+.camera-grid {
+    display: contents;
+}
+
+.camera-hub {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.65rem;
+    min-width: 11rem;
+}
+
+.camera-hub .camera-actions {
+    justify-content: center;
+}
+
+.camera-hub .dpad {
+    margin: 0;
+}
+
+.camera-tile[data-slot="0"] { grid-column: 1; grid-row: 1; }
+.camera-tile[data-slot="1"] { grid-column: 3; grid-row: 1; }
+.camera-tile[data-slot="2"] { grid-column: 1; grid-row: 2; }
+.camera-tile[data-slot="3"] { grid-column: 3; grid-row: 2; }
+
+.camera-drag {
+    cursor: grab;
+}
+
+.camera-tile.camera-drop {
+    outline: 2px solid var(--accent, #7ddea0);
+    outline-offset: -2px;
 }
 
 .camera-tile {
@@ -2635,10 +2674,36 @@ html[data-theme="light"] .plan-activity {
     border-top: 1px solid var(--border);
 }
 
+@media (max-width: 720px) {
+    .camera-stage {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .camera-hub {
+        grid-column: 1 / -1;
+        grid-row: 2;
+    }
+
+    .camera-tile[data-slot="0"] { grid-column: 1; grid-row: 1; }
+    .camera-tile[data-slot="1"] { grid-column: 2; grid-row: 1; }
+    .camera-tile[data-slot="2"] { grid-column: 1; grid-row: 3; }
+    .camera-tile[data-slot="3"] { grid-column: 2; grid-row: 3; }
+}
+
 @media (max-width: 560px) {
-    .camera-grid {
+    .camera-stage {
         grid-template-columns: 1fr;
     }
+
+    .camera-hub {
+        grid-column: 1;
+        grid-row: 3;
+    }
+
+    .camera-tile[data-slot="0"] { grid-column: 1; grid-row: 1; }
+    .camera-tile[data-slot="1"] { grid-column: 1; grid-row: 2; }
+    .camera-tile[data-slot="2"] { grid-column: 1; grid-row: 4; }
+    .camera-tile[data-slot="3"] { grid-column: 1; grid-row: 5; }
 
     .map {
         height: 260px;

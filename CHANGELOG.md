@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.19] - 2026-11-19
+
+### Changed
+
+- The drive pad sits between the four cameras. Drag a camera name onto another camera to move it; that arrangement stays in this browser. **Prepare cameras** and **Recheck streams** are gone — Start and Stop already open and close the live pictures. The direction buttons stay off until a live picture is on screen, and they stop the robot if live view ends. Update to latest and refresh the page.
+
 ## [5.0.18] - 2026-11-19
 
 ### Fixed
