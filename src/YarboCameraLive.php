@@ -46,12 +46,6 @@ final class YarboCameraLive
             return ['ok' => false, 'error' => self::CELLULAR_MESSAGE];
         }
 
-        try {
-            YarboMqttAgentClient::fromEnv()->ensureStarted();
-        } catch (\Throwable) {
-            // The camera helper retries the panel connection itself.
-        }
-
         $existing = $this->status();
         if (!empty($existing['running']) && in_array((string) ($existing['state'] ?? ''), ['starting', 'live'], true)) {
             return [

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.3] - 2026-11-19
+
+### Fixed
+
+- The robot could show **Offline** and “waiting for Yarbo…” after the live-view update. The North America video region did not do that. It is used only when you press **Start live view**, and it is not the robot’s home country. Start live view was opening a second Yarbo connection, which knocked the status connection off. The video library now installs beside that connection instead of into it. Update to latest, then wait until the robot shows online before starting live view.
+
 ## [5.0.2] - 2026-11-19
 
 ### Fixed

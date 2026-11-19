@@ -73,6 +73,7 @@ cleanup() {
     kill "${PROTECT_EVENTS_PID}" 2>/dev/null || true
   fi
   pkill -f '[s]cripts/matter_agent.py' 2>/dev/null || true
+  pkill -f '[s]cripts/yarbo_camera_agent.py' 2>/dev/null || true
   pkill -f '[s]cripts/homepod_agent.py' 2>/dev/null || true
   pkill -f '[s]cripts/unifi_protect_events.py' 2>/dev/null || true
   pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
@@ -84,21 +85,27 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 pick_agent() {
-  local venv_py="$ROOT/.venv/bin/python"
-  if [[ -x "$venv_py" ]] && "$venv_py" -c "import yarbo" 2>/dev/null; then
-    echo "$venv_py" scripts/mqtt_agent.py
-    return
-  fi
-  if command -v python3 >/dev/null 2>&1 && python3 -c "import yarbo" 2>/dev/null; then
-    echo python3 scripts/mqtt_agent.py
-    return
-  fi
+  local candidate
+  for candidate in "$ROOT/.venv/bin/python3" "$ROOT/.venv/bin/python" python3; do
+    if [[ "$candidate" == python3 ]] && ! command -v python3 >/dev/null 2>&1; then
+      continue
+    fi
+    if [[ "$candidate" != python3 && ! -x "$candidate" ]]; then
+      continue
+    fi
+    if "$candidate" -c "import yarbo_robot_sdk" >/dev/null 2>&1 \
+      || "$candidate" -c "import yarbo" >/dev/null 2>&1; then
+      echo "$candidate" scripts/mqtt_agent.py
+      return
+    fi
+  done
   echo php scripts/mqtt_agent.php
 }
 
 AGENT_CMD=($(pick_agent))
 
 yarbo_stop_mqtt_agent "${AGENT_PORT}"
+pkill -f '[s]cripts/yarbo_camera_agent.py' 2>/dev/null || true
 
 echo "==> Starting MQTT agent on 127.0.0.1:${AGENT_PORT}"
 echo "    ${AGENT_CMD[*]}"

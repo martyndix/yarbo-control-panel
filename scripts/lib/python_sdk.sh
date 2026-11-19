@@ -210,12 +210,12 @@ python_is_310() {
 agora_pick_python() {
   local root="${1:?}"
   local candidate path
-  for candidate in "${root}/.venv-camera/bin/python3" "${root}/.venv/bin/python3"; do
-    if [[ -x "$candidate" ]] && python_is_310 "$candidate"; then
-      echo "$candidate"
-      return 0
-    fi
-  done
+  # Never use the Yarbo .venv. The video library stays in its own environment
+  # so installing it cannot knock the robot connection offline.
+  if [[ -x "${root}/.venv-camera/bin/python3" ]] && python_is_310 "${root}/.venv-camera/bin/python3"; then
+    echo "${root}/.venv-camera/bin/python3"
+    return 0
+  fi
   for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
     path="$(command -v "$candidate" 2>/dev/null || true)"
     if [[ -n "$path" ]] && python_is_310 "$path"; then
@@ -228,24 +228,19 @@ agora_pick_python() {
 
 install_agora_camera_sdk() {
   local root="${1:?}"
-  local base py err_file
+  local base err_file
   base="$(agora_pick_python "$root" || true)"
   if [[ -z "$base" ]]; then
     echo "    Live cameras need Python 3.10 or newer. Install it with: sudo apt install python3.11 python3.11-venv" >&2
     return 1
   fi
-  if [[ "$base" != "${root}/.venv/"* && "$base" != "${root}/.venv-camera/"* ]]; then
-    py="${root}/.venv/bin/python3"
-    if [[ -x "$py" ]] && python_is_310 "$py"; then
-      base="$py"
-    else
-      echo "    Creating ${root}/.venv-camera for the video library"
-      if ! "$base" -m venv "${root}/.venv-camera"; then
-        echo "    Could not create a Python 3.10+ environment for live cameras" >&2
-        return 1
-      fi
-      base="${root}/.venv-camera/bin/python3"
+  if [[ "$base" != "${root}/.venv-camera/"* ]]; then
+    echo "    Creating ${root}/.venv-camera for the video library"
+    if ! "$base" -m venv "${root}/.venv-camera"; then
+      echo "    Could not create a Python 3.10+ environment for live cameras" >&2
+      return 1
     fi
+    base="${root}/.venv-camera/bin/python3"
   fi
   if ! "$base" -m pip --version >/dev/null 2>&1; then
     "$base" -m ensurepip --upgrade >/dev/null 2>&1 || true
