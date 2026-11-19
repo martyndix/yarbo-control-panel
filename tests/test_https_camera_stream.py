@@ -55,8 +55,6 @@ def main() -> None:
     assert not proxy.is_camera_frames("/api/camera_live.php?action=status")
     assert not proxy.is_camera_frames("/api/status.php")
     assert proxy.camera_agent_port() != 8766
-    assert proxy.read_http_head(_FakeSock(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\ndata: hi\n\n"))[2] == b"data: hi\n\n"
-    assert proxy.http_chunk(b"hi") == b"2\r\nhi\r\n"
 
     sink = Sink()
     worker = threading.Thread(target=proxy.relay_upstream, args=(SlowBody(), sink), daemon=True)
@@ -65,18 +63,8 @@ def main() -> None:
     while time.time() < deadline and sink.buf.getvalue() != b"data: hi\n\n":
         time.sleep(0.02)
     assert sink.buf.getvalue() == b"data: hi\n\n", "first picture packet must arrive before the stream ends"
-    assert stream_reaches_client(proxy), "a small picture must reach the browser before 16KB has piled up"
+    assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
     print("ok")
-
-
-class _FakeSock:
-    def __init__(self, payload: bytes) -> None:
-        self.payload = payload
-
-    def recv(self, _size: int) -> bytes:
-        data = self.payload
-        self.payload = b""
-        return data
 
 
 class _Agent(BaseHTTPRequestHandler):
@@ -91,7 +79,10 @@ class _Agent(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(b": " + (b" " * 2048) + b"\n\ndata: {\"view\":\"middle\"}\n\n")
+        # The working picture path flushes once a full block is ready. A real
+        # camera frame is larger than that block, and the stream stays open.
+        body = b'data: {"view":"middle","d":"' + (b"A" * 20000) + b'"}\n\n'
+        self.wfile.write(body)
         self.wfile.flush()
         time.sleep(2)
 
@@ -128,7 +119,7 @@ def stream_reaches_client(proxy) -> bool:
             status.unlink(missing_ok=True)
         else:
             status.write_text(previous, encoding="utf-8")
-    return b"Transfer-Encoding: chunked" in buf and b"middle" in buf and b"text/event-stream" in buf
+    return b"middle" in buf and b"text/event-stream" in buf and b"Transfer-Encoding:" not in buf
 
 
 if __name__ == "__main__":

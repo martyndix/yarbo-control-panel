@@ -584,8 +584,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "close")
             self.end_headers()
-            # Safari will not deliver the first events until about 2KB has arrived.
-            self.wfile.write(b": " + (b" " * 2048) + b"\n\n")
+            self.wfile.write(b": live\n\n")
             self.wfile.flush()
             while not session.stop.is_set():
                 try:

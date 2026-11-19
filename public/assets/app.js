@@ -16984,26 +16984,6 @@ function openCameraFrames() {
             /* ignore a bad picture packet */
         }
     };
-    cameraLiveSource.onerror = () => {
-        const source = cameraLiveSource;
-        if (!source || source.readyState !== EventSource.CLOSED) return;
-        if (cameraLiveSeen.size > 0) return;
-        // Safari closes the stream for good on a refused response, and the
-        // page used to keep that dead stream. The cameras can be up a moment
-        // later and the tiles stay black. Drop it so the next check opens another.
-        cameraLiveSource = null;
-        try {
-            source.close();
-        } catch {
-            /* already closed */
-        }
-        setTimeout(() => {
-            if (cameraLiveRunning && !cameraLiveSource) openCameraFrames();
-        }, 400);
-        if (!els.cameraAlert) return;
-        els.cameraAlert.textContent = 'The cameras are on, but this browser has not received a picture yet.';
-        els.cameraAlert.classList.remove('hidden');
-    };
 }
 
 function setCameraLiveButtons(running) {
@@ -17023,8 +17003,10 @@ function applyCameraLiveStatus(data) {
         if (!slot && !cameraLiveSeen.has(view)) return;
         const badge = tile.querySelector('.camera-status');
         if (!badge) return;
-        if (cameraLiveSeen.has(view)) {
+        const live = cameraLiveSeen.has(view) || Number(slot?.frames || 0) > 0;
+        if (live) {
             anyLive = true;
+            cameraLiveSeen.add(view);
             badge.textContent = 'Online';
             badge.className = 'camera-status online';
             return;
@@ -17033,9 +17015,9 @@ function applyCameraLiveStatus(data) {
         badge.className = 'camera-status';
     });
     if (els.cameraAlert) {
-        if (anyLive || data?.state === 'stopped') {
+        if (anyLive || !message || data?.state === 'stopped') {
             els.cameraAlert.classList.add('hidden');
-        } else if (message) {
+        } else if (data?.state && data.state !== 'stopped') {
             els.cameraAlert.textContent = message;
             els.cameraAlert.classList.remove('hidden');
         }

@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Yarbo;
 
 /**
- * Starts the local live-view listener. Pictures are not copied through PHP.
+ * Starts the local live-view listener and, if needed, flushes its pictures.
  * Tokens stay in the Python process.
  */
 final class YarboCameraLive
@@ -46,11 +46,15 @@ final class YarboCameraLive
             return ['ok' => false, 'error' => self::CELLULAR_MESSAGE];
         }
 
-        // A picture process left over from the previous update keeps running
-        // after Stop, and Start used to leave it in place. That process was
-        // still dropping the frames Safari needs.
-        $this->stopAgent();
-        usleep(300000);
+        $existing = $this->status();
+        if (!empty($existing['running']) && in_array((string) ($existing['state'] ?? ''), ['starting', 'live'], true)) {
+            return [
+                'ok' => true,
+                'already' => true,
+                'state' => $existing['state'],
+                'message' => 'Live view is already on',
+            ];
+        }
 
         $python = $this->pythonBinary();
         $script = $this->projectRoot . '/scripts/yarbo_camera_agent.py';
@@ -65,14 +69,7 @@ final class YarboCameraLive
 
         $log = $data . '/camera-live.log';
         $pidFile = $data . '/camera-live.pid';
-        // The old status file still said live after the picture process was
-        // stopped. The page opened the stream at a port nothing was listening
-        // on, Safari closed it, and the tiles stayed on waiting.
-        file_put_contents($data . '/camera-live-status.json', json_encode([
-            'state' => 'starting',
-            'message' => 'Starting live view',
-            'running' => true,
-        ]));
+        @unlink($data . '/camera-live-status.json');
         $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
         $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
         $mqttPort = (int) (getenv('YARBO_MQTT_AGENT_PORT') ?: 8765);
@@ -109,20 +106,7 @@ final class YarboCameraLive
      */
     public function stop(): array
     {
-        $this->stopAgent();
-
-        return ['ok' => true, 'state' => 'stopped', 'message' => 'Stopping live view'];
-    }
-
-    private function stopAgent(): void
-    {
         $snap = $this->readStatusFile();
-        $statusPath = $this->projectRoot . '/data/camera-live-status.json';
-        @file_put_contents($statusPath, json_encode([
-            'state' => 'stopped',
-            'message' => 'Stopping live view',
-            'running' => false,
-        ]));
         $port = (int) ($snap['port'] ?? (getenv('YARBO_CAMERA_PORT') ?: 8767));
         if ($port === 8766) {
             $port = 8767;
@@ -139,22 +123,68 @@ final class YarboCameraLive
                 @exec('kill ' . (int) $pid . ' 2>/dev/null');
             }
         }
-        // setsid can leave the picture process running after the pid file is gone.
-        @exec('pkill -f ' . escapeshellarg('[y]arbo_camera_agent.py') . ' 2>/dev/null');
+
+        return ['ok' => true, 'state' => 'stopped', 'message' => 'Stopping live view'];
     }
 
     public function proxyFrames(): void
     {
-        // The picture stream used to stay inside this PHP worker until Stop
-        // view. Dock, lights, and every other page waited behind it.
-        // HTTPS sends the pictures straight from the camera listener.
-        http_response_code(503);
-        header('Content-Type: application/json; charset=utf-8');
-        header('Cache-Control: no-store');
-        echo json_encode([
-            'ok' => false,
-            'error' => 'Live pictures are not served by the panel page. Open the panel with HTTPS.',
-        ]);
+        $snap = $this->readStatusFile();
+        $port = (int) ($snap['port'] ?? 0);
+        $state = (string) ($snap['state'] ?? '');
+        if ($port <= 0 || !in_array($state, ['starting', 'live'], true) || !$this->pidAlive($this->readPid())) {
+            http_response_code(409);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'ok' => false,
+                'error' => (string) ($snap['message'] ?? 'Live view is not running. Press Start live view.'),
+            ]);
+
+            return;
+        }
+
+        $socket = @stream_socket_client('tcp://127.0.0.1:' . $port, $errno, $errstr, 3);
+        if (!is_resource($socket)) {
+            http_response_code(409);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['ok' => false, 'error' => 'Live view is not running. Press Start live view.']);
+
+            return;
+        }
+
+        fwrite($socket, "GET /frames HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        $header = '';
+        while (!str_contains($header, "\r\n\r\n")) {
+            $chunk = fread($socket, 1024);
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            $header .= $chunk;
+            if (strlen($header) > 8192) {
+                break;
+            }
+        }
+        $parts = explode("\r\n\r\n", $header, 2);
+        header('Content-Type: text/event-stream');
+        header('Cache-Control: no-cache');
+        header('X-Accel-Buffering: no');
+        @set_time_limit(0);
+        while (ob_get_level() > 0) {
+            ob_end_flush();
+        }
+        if (isset($parts[1]) && $parts[1] !== '') {
+            echo $parts[1];
+            flush();
+        }
+        while (!connection_aborted()) {
+            $chunk = fread($socket, 65536);
+            if ($chunk === false || $chunk === '') {
+                break;
+            }
+            echo $chunk;
+            flush();
+        }
+        fclose($socket);
     }
 
     /**

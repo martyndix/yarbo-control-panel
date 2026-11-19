@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.30] - 2026-11-19
+
+### Fixed
+
+- The four camera pictures are sent again the way they were when they last showed, before the change that took the picture stream off the page. Dock, lights, and driving still go ahead of a status read, so those buttons stay usable while the cameras are on. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.29] - 2026-11-19
 
 ### Fixed
