@@ -16791,7 +16791,19 @@ function handleCameraFrame(event) {
     const sps = nals.find((nal) => (nal[0] & 0x1f) === 7);
     const pps = nals.find((nal) => (nal[0] & 0x1f) === 8);
     if (sps && pps) {
-        cameraLiveCodec[event.view] = { sps, pps };
+        const sig = `${sps[1] || 0}.${sps[2] || 0}.${sps[3] || 0}.${sps.length}.${pps.length}`;
+        const previous = cameraLiveCodec[event.view];
+        if (!previous || previous.sig !== sig) {
+            if (cameraLiveDecoders[event.view]) {
+                try {
+                    cameraLiveDecoders[event.view].close();
+                } catch {
+                    /* already closed */
+                }
+                delete cameraLiveDecoders[event.view];
+            }
+            cameraLiveCodec[event.view] = { sps, pps, sig };
+        }
     }
     const known = cameraLiveCodec[event.view];
     if (!known) return;

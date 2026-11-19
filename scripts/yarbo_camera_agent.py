@@ -31,9 +31,10 @@ from typing import Any
 VIEWS = ("middle", "left", "right", "back")
 SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/Stage"
 TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
-# Agora Python SDK: 2 is North America, 4 is Europe. This household is in
-# Switzerland, so the default is Europe. YARBO_AGORA_AREA overrides it.
-DEFAULT_AREA_CODE = 4
+# The robot's video service is the Yarbo app region, North America (2),
+# which is also where the token service lives. 4 would be Europe and the
+# subscriber would sit in an empty room. YARBO_AGORA_AREA overrides it.
+DEFAULT_AREA_CODE = 2
 LEASE_SECONDS = 30 * 60
 IDLE_AFTER_VIEWER_S = 20
 IDLE_BEFORE_VIEWER_S = 45
@@ -308,18 +309,27 @@ def agent_request(payload: dict[str, Any], timeout: float = 8.0) -> dict[str, An
     port = int(os.environ.get("YARBO_MQTT_AGENT_PORT") or 8765)
     message = dict(payload)
     message["id"] = f"{random.randint(0, 0xFFFFFF):06x}"
-    with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
-        sock.settimeout(timeout)
-        sock.sendall((json.dumps(message) + "\n").encode("utf-8"))
-        buf = b""
-        while b"\n" not in buf:
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            buf += chunk
-    line = buf.split(b"\n", 1)[0]
-    decoded = json.loads(line.decode("utf-8") or "{}")
-    return decoded if isinstance(decoded, dict) else {}
+    last_error: Exception | None = None
+    for attempt in range(8):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                sock.sendall((json.dumps(message) + "\n").encode("utf-8"))
+                buf = b""
+                while b"\n" not in buf:
+                    chunk = sock.recv(65536)
+                    if not chunk:
+                        break
+                    buf += chunk
+            line = buf.split(b"\n", 1)[0]
+            decoded = json.loads(line.decode("utf-8") or "{}")
+            return decoded if isinstance(decoded, dict) else {}
+        except ConnectionRefusedError as exc:
+            last_error = exc
+            time.sleep(0.4)
+    raise RuntimeError(
+        "The panel is not connected to the Yarbo yet. Wait until the robot shows online, then press Start live view again."
+    ) from last_error
 
 
 def publish_vision(cmd: str, payload: dict[str, Any]) -> None:
@@ -349,6 +359,7 @@ class Hub:
         self.subs: list[queue.Queue[dict[str, Any] | None]] = []
         self.ever_subscribed = False
         self.drops = 0
+        self.last_key: dict[str, dict[str, Any]] = {}
         self.views: dict[str, dict[str, Any]] = {
             view: {
                 "connected": False,
@@ -366,6 +377,11 @@ class Hub:
         with self.lock:
             self.subs.append(item)
             self.ever_subscribed = True
+            for event in self.last_key.values():
+                try:
+                    item.put_nowait(event)
+                except queue.Full:
+                    break
         return item
 
     def unsubscribe(self, item: queue.Queue[dict[str, Any] | None]) -> None:
@@ -398,6 +414,8 @@ class Hub:
             times.append(now)
             slot["_times"] = [stamp for stamp in times if now - stamp <= 2.0]
             slot["fps"] = round(len(slot["_times"]) / 2.0, 1)
+            if key:
+                self.last_key[view] = event
             stale: list[queue.Queue[dict[str, Any] | None]] = []
             for sub in self.subs:
                 try:
@@ -459,6 +477,9 @@ class LiveSession:
         self.viewer_uid = 0
         self.video_options: Any = None
         self.rejoined = False
+        self.rearmed = False
+        self.rejoin_at = 0.0
+        self.sensors_on = False
         self._status_lock = threading.Lock()
 
     def write_status(self) -> None:
@@ -718,16 +739,20 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
     return service, held
 
 
+def prepare_sensors(session: LiveSession) -> None:
+    """The cameras must already be on before Smart Vision is asked to publish."""
+    publish_vision("camera_toggle", {"enabled": True})
+    publish_vision("set_manul_camera_check", {"state": 1, "overtime": 30})
+    session.sensors_on = True
+
+
 def arm(session: LiveSession) -> None:
     publish_vision("smart_vision_control", {"state": 1})
     session.armed = True
-    heartbeat(session)
 
 
 def heartbeat(session: LiveSession) -> None:
-    publish_vision("set_working_state", {"state": 1})
-    publish_vision("camera_toggle", {"enabled": True})
-    publish_vision("set_manul_camera_check", {"state": 1, "overtime": 30})
+    prepare_sensors(session)
 
 
 def disarm(session: LiveSession) -> None:
@@ -749,6 +774,7 @@ def finish_session(session: LiveSession) -> None:
 
 def rejoin_quiet(session: LiveSession, quiet: list[str]) -> None:
     session.rejoined = True
+    session.rejoin_at = time.time()
     for view in quiet:
         conn = session.links.get(view)
         grant = session.grants.get(view)
@@ -763,10 +789,6 @@ def rejoin_quiet(session: LiveSession, quiet: list[str]) -> None:
             session.hub.mark(view, connected=True)
         except Exception:
             print(f"[camera] {view} rejoin failed", file=sys.stderr, flush=True)
-    try:
-        publish_vision("smart_vision_control", {"state": 1})
-    except Exception as exc:  # noqa: BLE001
-        print(f"[camera] re-arm failed: {exc}", file=sys.stderr, flush=True)
 
 
 def watch_lease(session: LiveSession, armed_at: float) -> None:
@@ -783,6 +805,24 @@ def watch_lease(session: LiveSession, armed_at: float) -> None:
             ]
             if quiet:
                 rejoin_quiet(session, quiet)
+        elif (
+            session.rejoined
+            and not session.rearmed
+            and session.rejoin_at
+            and now - session.rejoin_at >= 15
+        ):
+            snap = session.hub.snapshot(session.state, session.message, session.started_at)
+            still_quiet = [
+                name
+                for name, slot in snap["views"].items()
+                if slot.get("connected") and (slot.get("frames") or 0) == 0
+            ]
+            if still_quiet:
+                session.rearmed = True
+                try:
+                    arm(session)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[camera] re-arm failed: {exc}", file=sys.stderr, flush=True)
         if now - armed_at >= LEASE_SECONDS:
             session.set_state("stopped", "Live view stopped after 30 minutes. Press Start to watch again.")
             finish_session(session)
@@ -837,6 +877,10 @@ def run(root: Path) -> int:
         grants: dict[str, dict[str, Any]] = {}
         for view in VIEWS:
             grants[view] = request_token(jwt, serial, view, uid)
+        if link_is_cellular(cached_raw()):
+            raise RuntimeError("Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.")
+        session.set_state("starting", "Turning the cameras on")
+        prepare_sensors(session)
         session.set_state("starting", "Joining the cameras")
         service, held = join_views(session, serial, uid, grants)
         connected = [
@@ -848,7 +892,7 @@ def run(root: Path) -> int:
             raise RuntimeError("None of the cameras joined. The update may still be installing the video library.")
         if link_is_cellular(cached_raw()):
             raise RuntimeError("Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.")
-        session.set_state("starting", "Turning the cameras on")
+        session.set_state("starting", "Asking the robot to publish")
         arm(session)
         port = int(os.environ.get("YARBO_CAMERA_PORT") or 8766)
         httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
@@ -860,7 +904,10 @@ def run(root: Path) -> int:
         session.set_state("error", "The live camera library is not installed yet. Use Settings → Panel updates → Update to latest, then try again.")
         return 1
     except Exception as exc:  # noqa: BLE001
-        session.set_state("error", str(exc) or "Live view failed")
+        text = str(exc) or "Live view failed"
+        if "Errno 111" in text or "Connection refused" in text:
+            text = "Live view could not reach Yarbo. Wait until the robot shows online, then press Start live view again."
+        session.set_state("error", text)
         return 1
     finally:
         session.stop.set()

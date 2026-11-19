@@ -50,8 +50,11 @@ assert_true(!str_contains($slice, 'apply_command_session'), 'vision does not use
 
 $camera = (string) file_get_contents($root . '/scripts/yarbo_camera_agent.py');
 assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Agora token');
-assert_true(!str_contains($camera, 'set_working_state", {"state": 0'), 'stop does not idle a job');
+assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');
+assert_true(!str_contains($camera, 'set_working_state'), 'live view does not change the job');
 assert_true(str_contains($camera, '"state": 0'), 'stop tells the robot to stop the cameras');
+$camerasApi = (string) file_get_contents($root . '/public/api/cameras.php');
+assert_true(!str_contains($camerasApi, 'camera-tunnel.sh'), 'the camera card does not ask for the old tunnel');
 
 $py = $root . '/.venv/bin/python3';
 if (!is_executable($py)) {

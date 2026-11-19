@@ -46,6 +46,12 @@ final class YarboCameraLive
             return ['ok' => false, 'error' => self::CELLULAR_MESSAGE];
         }
 
+        try {
+            YarboMqttAgentClient::fromEnv()->ensureStarted();
+        } catch (\Throwable) {
+            // The camera helper retries the panel connection itself.
+        }
+
         $existing = $this->status();
         if (!empty($existing['running']) && in_array((string) ($existing['state'] ?? ''), ['starting', 'live'], true)) {
             return [
@@ -72,9 +78,11 @@ final class YarboCameraLive
         @unlink($data . '/camera-live-status.json');
         $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
         $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
+        $mqttPort = (int) (getenv('YARBO_MQTT_AGENT_PORT') ?: 8765);
         $cmd = sprintf(
-            'cd %s && %s%s%s %s --root %s >> %s 2>&1 < /dev/null & echo $!',
+            'cd %s && YARBO_MQTT_AGENT_PORT=%d %s%s%s %s --root %s >> %s 2>&1 < /dev/null & echo $!',
             escapeshellarg($this->projectRoot),
+            $mqttPort,
             $nohup,
             $setsid,
             escapeshellarg($python),

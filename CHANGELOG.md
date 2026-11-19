@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.2] - 2026-11-19
+
+### Fixed
+
+- Start live view follows the sequence that works on the robot. The cameras are switched on, the panel joins Yarbo's video service in the robot's North America region, and only then asks the robot to publish. It does not send the command that changes a running job.
+- A failed start showed `[Errno 111] Connection refused` and the old SSH camera-tunnel steps. The panel now connects to the Yarbo first, and the message says to wait until the robot is online and press Start live view again. The tunnel steps are gone.
+
 ## [5.0.1] - 2026-11-19
 
 ### Fixed

@@ -7,7 +7,7 @@ require __DIR__ . '/bootstrap.php';
 use Yarbo\YarboCamera;
 
 try {
-    $enabled = (bool) ($config['cameras_enabled'] ?? true);
+    $enabled = (bool) ($config['cameras_enabled'] ?? false);
     $tiles = YarboCamera::tiles($config);
     $cameraState = null;
     $probe = ['host' => (string) ($config['broker_host'] ?? ''), 'ports' => []];
@@ -46,11 +46,7 @@ try {
         'message'  => $anyPortOpen
             ? null
             : 'Press Start live view. The pictures travel through Yarbo\'s video service, then back to this panel on your home network. Live view stays off while the robot is on 4G.',
-        'setup'    => $enabled ? [
-            'step1' => 'Get SSH access from Yarbo support (owner credentials are not published). Then: SSH_TARGET="root@192.168.1.223" ./scripts/camera-tunnel.sh',
-            'step2' => 'Click "Prepare cameras" then "Recheck streams" below',
-            'step3' => 'Test: ffplay -rtsp_transport tcp rtsp://127.0.0.1:19201/live/chn0',
-        ] : null,
+        'setup'    => null,
     ]);
 } catch (Throwable $e) {
     json_response(['ok' => false, 'error' => friendly_error($e)], 500);
