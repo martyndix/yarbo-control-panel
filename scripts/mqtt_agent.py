@@ -210,35 +210,7 @@ def job_is_latched(raw: Any) -> bool:
     return False
 
 
-def note_dock_progress(state: dict[str, Any], raw: Any) -> None:
-    """Keep camera-check off until the robot has actually started docking."""
-    if not state.get("docking"):
-        return
-    started = float(state.get("work_started_at") or 0)
-    if started and time.time() - started > 180:
-        state["docking"] = False
-        state["dock_seen_recharge"] = False
-        return
-    if not isinstance(raw, dict):
-        return
-    state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
-    try:
-        recharging = int(state_msg.get("on_going_recharging") or 0)
-    except (TypeError, ValueError):
-        recharging = 0
-    try:
-        charging = int(state_msg.get("charging_status") or 0)
-    except (TypeError, ValueError):
-        charging = 0
-    if recharging:
-        state["dock_seen_recharge"] = True
-    if charging > 0 or (state.get("dock_seen_recharge") and recharging == 0 and started and time.time() - started > 20):
-        state["docking"] = False
-        state["dock_seen_recharge"] = False
-
-
 def mark_job_from_raw(state: dict[str, Any], raw: Any) -> None:
-    note_dock_progress(state, raw)
     if not state.get("work_hold") or state.get("work_latched"):
         return
     if job_is_latched(raw):
@@ -250,9 +222,14 @@ def mark_job_from_raw(state: dict[str, Any], raw: Any) -> None:
 def wants_wakeup(state: dict[str, Any]) -> bool:
     """Soft-wake (set_working_state=1) for lights / drive / Controller On.
 
+    A dock releases this hold on purpose. Keeping it would leave the robot
+    in manual mode until the controller button is turned off.
+
     After start_plan / dock, also wake until the job actually starts, then stop
     so keepalive does not keep re-entering app-awake over a running job.
     """
+    if state.get("dock_release"):
+        return False
     if state.get("lights_on") or state.get("manual_drive") or state.get("control_session"):
         return True
     if state.get("work_latched"):
@@ -920,6 +897,7 @@ async def handle_request(
                 state["control_session"] = True
                 state["work_hold"] = False
                 state["work_latched"] = False
+                state["dock_release"] = False
                 state["manual_drive"] = False
                 state["keepalive_soon"] = False
                 state["last_keepalive"] = time.time()
@@ -1019,7 +997,7 @@ async def handle_request(
             if not getattr(client, "controller_acquired", False):
                 await ensure_controller_role(client)
             state["manual_drive"] = False
-            state["docking"] = False
+            state["dock_release"] = False
             state["work_hold"] = False
             state["work_latched"] = False
             state["keepalive_soon"] = False
@@ -1053,7 +1031,7 @@ async def handle_request(
             # Never get_controller here — that re-triggers "app controller connected".
             warning = None
             if moving:
-                state["docking"] = False
+                state["dock_release"] = False
                 raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
                 # A prior Stop/plan used work_hold; drive needs the control keepalive.
                 state["work_hold"] = False
@@ -1249,27 +1227,32 @@ async def handle_request(
             }
 
         if op == "return_to_dock":
-            # Manual camera check (live view) makes the robot ignore dock.
-            # Hold that mode off until recharging actually starts, or the
-            # camera heartbeat turns it back on and the dock never leaves.
-            state["docking"] = True
-            state["dock_seen_recharge"] = False
-            await apply_command_session(client, state, "work", ["cmd_recharge"])
+            # Send the dock while the robot is awake, then let go of the
+            # controller. Holding it keeps the robot in manual mode, so the
+            # dock used to wait until the controller button was turned off.
+            # Do not turn the cameras off; live view stays up on the way home.
             await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
-            await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
-            await publish_quick(client, "smart_vision_control", {"state": 0})
             await publish_quick(client, "set_working_state", {"state": 1, "source": "smart_home"})
             await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
             sent = await publish_quick(client, "cmd_recharge", {"cmd": 2})
-            state["last_keepalive"] = time.time()
             if not sent:
-                state["docking"] = False
                 return {
                     "ok": False,
                     "error": "Dock did not reach the robot. Press Dock again.",
                     "op": "return_to_dock",
                 }
-            log("return_to_dock: camera check off, then wireless_charging_cmd 0 + cmd_recharge cmd=2")
+            state["dock_release"] = True
+            state["hold_controller"] = False
+            state["control_session"] = False
+            state["work_hold"] = False
+            state["work_latched"] = False
+            state["manual_drive"] = False
+            state["keepalive_soon"] = False
+            try:
+                client._controller_acquired = False  # noqa: SLF001
+            except Exception:
+                pass
+            log("return_to_dock sent and controller released so the robot can leave manual mode")
             return {
                 "ok": True,
                 "op": "return_to_dock",
@@ -1420,13 +1403,13 @@ async def handle_client(
                     await asyncio.sleep(0.02)
                     waited += 0.02
             try:
-                if vision and (_drive_waiters > 0 or state.get("docking")):
+                if vision and _drive_waiters > 0:
                     resp = {
                         "ok": True,
                         "op": "publish",
                         "cmd": str(req.get("cmd") or ""),
                         "session": "vision",
-                        "skipped": "dock" if state.get("docking") else "drive",
+                        "skipped": "drive",
                     }
                 else:
                     async with lock:

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.39] - 2026-11-20
+
+### Fixed
+
+- Dock waited until the controller was disconnected, and the pictures stopped once the robot started home. Dock now lets go of the controller itself after the command, and leaves the cameras on. Refresh in Safari, press Dock, and the robot should head home while the pictures stay up. The controller button shows Off afterwards; press it again when you want to drive.
+
 ## [5.0.38] - 2026-11-20
 
 ### Fixed
