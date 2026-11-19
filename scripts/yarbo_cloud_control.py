@@ -38,7 +38,10 @@ class YarboCloudControlClient:
         self.sn = sn.strip()
         self.type_id = (type_id or DEFAULT_TYPE_ID).strip() or DEFAULT_TYPE_ID
         self._sdk: Any = None
+        self._bound: Any = None
         self._connected = False
+        self._mqtt_ready = False
+        self._robot_online = False
         self._controller_acquired = False
         self._last_raw: dict[str, Any] | None = None
         self._last_raw_at = 0.0
@@ -51,6 +54,11 @@ class YarboCloudControlClient:
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    @property
+    def robot_online(self) -> bool:
+        """True when the Yarbo cloud API lists this robot as online."""
+        return self._robot_online
 
     @property
     def controller_acquired(self) -> bool:
@@ -85,24 +93,41 @@ class YarboCloudControlClient:
         type_id = str(getattr(matched, "type_id", None) or self.type_id or DEFAULT_TYPE_ID)
         self.type_id = type_id
         self.sn = _device_serial(matched) or self.sn
+        online = _device_online(matched)
+        self._robot_online = True if online is None else bool(online)
+        # The account list is the cloud API the phone app uses. Publish that
+        # before the live snapshot arrives so the panel does not sit on Offline.
+        if self._robot_online and not _snapshot_usable(self._last_raw):
+            self._last_raw = {"StateMSG": {"working_state": 0}, "_cloud_online": True}
+            self._last_raw_at = time.time()
 
-        # Establish broker routing + DeviceMSG subscription.
-        client.mqtt_connect()
-        client.subscribe_device_message(self.sn, self.type_id, self._on_device_message)
+        self._sdk = client
         try:
-            # Must keep a real callback — plan progress arrives on data_feedback
-            # for get_plan_feedback (there is no local telemetry_stream on cloud).
+            self._bound = client.device(matched)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("cloud device bind failed: %s", exc)
+            self._bound = None
+        self._connected = True
+        _LOGGER.info("Yarbo cloud API signed in for SN=%s online=%s", self.sn, self._robot_online)
+
+        # Cloud brokers only (data-api.yarbo.ai chooses the host). Not the
+        # robot's old LAN port 1883.
+        client.mqtt_connect()
+        try:
             client.subscribe_data_feedback(self.sn, self.type_id, self._on_data_feedback)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("subscribe_data_feedback failed: %s", exc)
+        client.subscribe_device_message(self.sn, self.type_id, self._on_device_message)
+        try:
+            client.subscribe_heart_beat(self.sn, self.type_id, self._on_heart_beat)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("subscribe_heart_beat failed: %s", exc)
         try:
             self._subscribe_plan_feedback_topic(client)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("subscribe plan_feedback topic failed: %s", exc)
-
-        self._sdk = client
-        self._connected = True
-        _LOGGER.info("Cloud MQTT ready for SN=%s type_id=%s", self.sn, self.type_id)
+        self._mqtt_ready = True
+        _LOGGER.info("Yarbo cloud stream ready for SN=%s type_id=%s", self.sn, self.type_id)
 
     def cached_device_msg(self) -> dict[str, Any] | None:
         raw = self._last_raw
@@ -113,8 +138,25 @@ class YarboCloudControlClient:
 
     def _on_device_message(self, _topic: str, data: Any) -> None:
         if isinstance(data, dict) and data:
+            self._robot_online = True
             self._last_raw = data
             self._last_raw_at = time.time()
+
+    def _on_heart_beat(self, _topic: str, data: Any) -> None:
+        self._robot_online = True
+        if not isinstance(data, dict) or not data:
+            return
+        if _snapshot_usable(self._last_raw):
+            return
+        working = data.get("working_state")
+        state_msg: dict[str, Any] = {}
+        if working is not None:
+            state_msg["working_state"] = working
+        raw: dict[str, Any] = {"StateMSG": state_msg, "_cloud_online": True}
+        if isinstance(data.get("BatteryMSG"), dict):
+            raw["BatteryMSG"] = data["BatteryMSG"]
+        self._last_raw = raw
+        self._last_raw_at = time.time()
 
     def _on_data_feedback(self, _topic: str, data: Any) -> None:
         if not isinstance(data, dict) or not data:
@@ -187,7 +229,9 @@ class YarboCloudControlClient:
 
     def _disconnect_sync(self) -> None:
         self._connected = False
+        self._mqtt_ready = False
         self._controller_acquired = False
+        self._bound = None
         sdk = self._sdk
         self._sdk = None
         if sdk is None:
@@ -250,9 +294,12 @@ class YarboCloudControlClient:
         if acquire_controller and not self._controller_acquired:
             await self.get_controller()
 
-        # Prefer a fresh push; otherwise request a full snapshot.
+        # Prefer a fresh push; otherwise request a full snapshot from the cloud API.
         age = time.time() - self._last_raw_at
-        if isinstance(self._last_raw, dict) and age <= max(1.0, timeout):
+        if (
+            _snapshot_usable(self._last_raw)
+            and age <= max(1.0, timeout)
+        ):
             return SimpleNamespace(raw=self._last_raw)
 
         try:
@@ -275,7 +322,13 @@ class YarboCloudControlClient:
 
     def _get_device_msg_sync(self, timeout: float) -> Any:
         sdk = self._require_sdk()
+        if not self._mqtt_ready:
+            raise TimeoutError("Yarbo cloud stream is still connecting")
         with self._call_lock:
+            core = getattr(self._bound, "core", None)
+            getter = getattr(core, "get_device_msg", None)
+            if callable(getter):
+                return getter(timeout=timeout)
             return sdk.get_device_msg(self.sn, self.type_id, timeout=timeout)
 
     async def get_connected_wifi(self, timeout: float = 1.5) -> Any:
@@ -361,6 +414,24 @@ def _unwrap_plan_feedback(payload: Any) -> dict[str, Any] | None:
     if isinstance(data, dict) and data:
         return data
     return payload if _looks_like_plan_feedback(payload) else None
+
+
+def _snapshot_usable(raw: Any) -> bool:
+    """A real DeviceMSG. The cloud-API online placeholder is not one."""
+    if not isinstance(raw, dict) or not raw or raw.get("_cloud_online"):
+        return False
+    return any(raw.get(key) is not None for key in ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG"))
+
+
+def _device_online(device: Any) -> bool | None:
+    for attr in ("online", "is_online", "connected"):
+        if isinstance(device, dict):
+            if attr in device:
+                return bool(device.get(attr))
+            continue
+        if hasattr(device, attr):
+            return bool(getattr(device, attr))
+    return None
 
 
 def _device_serial(device: Any) -> str:

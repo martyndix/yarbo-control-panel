@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.5] - 2026-11-19
+
+### Fixed
+
+- The status card stayed **Offline** while the Yarbo phone app showed the robot online. Status now comes from the Yarbo cloud API (`data-api.yarbo.ai`), the same account login as the phone app. The panel no longer starts the old local robot connection, which current firmware does not answer. Update to latest.
+
 ## [5.0.4] - 2026-11-19
 
 ### Fixed

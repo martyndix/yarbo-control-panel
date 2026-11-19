@@ -711,8 +711,10 @@ async def handle_request(
             "ok": True,
             "controller": bool(getattr(client, "controller_acquired", False)),
             "connected": bool(getattr(client, "is_connected", False)),
+            "robot_online": bool(getattr(client, "robot_online", False)),
             "engine": "yarbo-cloud",
             "transport": "cloud",
+            "via": "yarbo-cloud-api",
             "telemetry": True,
             **state_flags(state, client),
         }
@@ -721,8 +723,8 @@ async def handle_request(
         return {
             "ok": False,
             "error": (
-                "Cloud MQTT not connected. Check Yarbo account email/password and serial "
-                "in Settings → Yarbo, then Save (that restarts the agent)."
+                "Yarbo cloud API is not connected. Check the account email, password, and serial "
+                "under Settings → Yarbo, then Save."
             ),
         }
 
@@ -1361,15 +1363,19 @@ async def telemetry_refresh_loop(client: Any, state: dict[str, Any]) -> None:
     """
     failures = 0
     while True:
-        if telemetry_raw_usable(state.get("last_raw")):
+        cached = state.get("last_raw")
+        placeholder = isinstance(cached, dict) and bool(cached.get("_cloud_online"))
+        if telemetry_raw_usable(cached) and not placeholder:
             await asyncio.sleep(12.0)
         else:
             await asyncio.sleep(2.0)
         if not getattr(client, "is_connected", False):
             continue
         pull_device_cache(client, state)
+        cached = state.get("last_raw")
+        placeholder = isinstance(cached, dict) and bool(cached.get("_cloud_online"))
         age = time.time() - float(state.get("last_raw_at") or 0.0)
-        if telemetry_raw_usable(state.get("last_raw")) and age < 20.0:
+        if telemetry_raw_usable(cached) and not placeholder and age < 20.0:
             failures = 0
             continue
         try:
