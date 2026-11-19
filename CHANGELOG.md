@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.11] - 2026-11-19
+
+### Fixed
+
+- Cloud login succeeded, but the status card said it could not connect to Yarbo cloud MQTT. The connection code had started waiting for an extra handshake flag and tearing the session down when that flag was slow. Version 4 did not do that: it subscribed and treated the session as connected, which is what filled in battery and state. That version 4 connection is restored. Update to latest and refresh the Yarbo page.
+
 ## [5.0.10] - 2026-11-19
 
 ### Fixed

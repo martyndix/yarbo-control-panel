@@ -73,9 +73,6 @@ PLAN_FEEDBACK_POLL_S = 15.0
 # Browser status polls with prefer_cache: after a cold miss, skip live get_status
 # briefly so offline robots do not burn ~2.5s on every 5s refresh.
 TELEMETRY_MISS_COOLDOWN_S = 25.0
-# Last cloud-login / snapshot failure, shown on the status card until a
-# usable DeviceMSG arrives. Empty means the session has not failed.
-_CONNECT_ERROR = ""
 
 
 def telemetry_raw_usable(raw: Any) -> bool:
@@ -104,30 +101,6 @@ def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
     state["last_raw_at"] = time.time()
     state["last_telemetry_miss_at"] = 0.0
     return True
-
-
-def adopt_cloud_snapshot(client: Any, state: dict[str, Any]) -> bool:
-    """Copy a DeviceMSG the cloud session already has into the status cache.
-
-    Version 4 only kept that message when the page asked within one second,
-    then spent 25 seconds ignoring anything that arrived during the wait.
-    """
-    take = getattr(client, "latest_device_msg", None)
-    if not callable(take):
-        return telemetry_raw_usable(state.get("last_raw"))
-    try:
-        raw = take()
-    except Exception:  # noqa: BLE001
-        return telemetry_raw_usable(state.get("last_raw"))
-    if telemetry_raw_usable(raw):
-        return store_last_raw(state, raw)
-    return telemetry_raw_usable(state.get("last_raw"))
-
-
-def connect_error_fields() -> dict[str, str]:
-    if not _CONNECT_ERROR:
-        return {}
-    return {"connect_error": _CONNECT_ERROR}
 
 
 def plan_is_active(raw: Any) -> bool:
@@ -719,7 +692,6 @@ async def handle_request(
             "engine": "yarbo-cloud",
             "transport": "cloud",
             "telemetry": True,
-            **connect_error_fields(),
             **state_flags(state, client),
         }
 
@@ -756,13 +728,9 @@ async def handle_request(
                     "transient": True,
                     **state_flags(state, client),
                 }
-            # A DeviceMSG push or the connect loop's snapshot must show up on
-            # the next poll even when it is older than this request's timeout.
-            if prefer_cache:
-                adopt_cloud_snapshot(client, state)
             # PaperMono compact polls every ~15s; serve last_raw immediately so the
             # tablet's 8s HTTP budget is not burned waiting on get_status.
-            if prefer_cache and isinstance(state.get("last_raw"), dict) and telemetry_raw_usable(state.get("last_raw")):
+            if prefer_cache and isinstance(state.get("last_raw"), dict):
                 await maybe_request_plan_feedback(client, state)
                 return {
                     "ok": True,
@@ -777,21 +745,9 @@ async def handle_request(
             if prefer_cache and telemetry_miss_cooling(state):
                 return {
                     "ok": False,
-                    "error": _CONNECT_ERROR or "telemetry timeout",
+                    "error": "telemetry timeout",
                     "transient": True,
                     "cooldown": True,
-                    **connect_error_fields(),
-                    **state_flags(state, client),
-                }
-            if prefer_cache and not telemetry_raw_usable(state.get("last_raw")):
-                # The connect loop owns get_device_msg. A 1s poll from here
-                # used to time out, start the 25s cooldown, and hide the
-                # snapshot that arrived a moment later.
-                return {
-                    "ok": False,
-                    "error": _CONNECT_ERROR or "telemetry timeout",
-                    "transient": True,
-                    **connect_error_fields(),
                     **state_flags(state, client),
                 }
 
@@ -1369,59 +1325,23 @@ async def handle_client(
             pass
 
 
-def _snapshot_wait_message(client: Any) -> str:
-    age = None
-    heartbeat_age = getattr(client, "heartbeat_age", None)
-    if callable(heartbeat_age):
-        try:
-            age = heartbeat_age()
-        except Exception:  # noqa: BLE001
-            age = None
-    if isinstance(age, (int, float)) and age < 90:
-        return "Yarbo heartbeat is arriving, but battery and state have not come through yet"
-    return "Connected to Yarbo cloud, but battery and state have not come through yet"
-
-
 async def connect_mqtt(client: Any) -> None:
-    """Keep logging in and requesting a snapshot until battery and state exist.
-
-    Version 4 tried once for 8 seconds and then stopped. A miss left the
-    status card on Offline until the whole panel was restarted.
-    """
-    global _CONNECT_ERROR
-    delay = 2.0
-    misses = 0
+    delay = 1.0
     while True:
         try:
             if not getattr(client, "is_connected", False):
                 await client.connect()
                 log("Cloud MQTT connected (controller not held until panel requests it)")
-            latest = getattr(client, "latest_device_msg", None)
-            if callable(latest) and telemetry_raw_usable(latest()):
-                _CONNECT_ERROR = ""
-                log("Cloud telemetry ready")
-                return
-            await client.get_status(timeout=12.0, acquire_controller=False)
-            if callable(latest) and telemetry_raw_usable(latest()):
-                _CONNECT_ERROR = ""
-                log("Cloud snapshot ready")
-                return
-            misses += 1
-            _CONNECT_ERROR = _snapshot_wait_message(client)
-            log(_CONNECT_ERROR)
-        except Exception as e:
-            misses += 1
-            _CONNECT_ERROR = str(e)
-            log(f"Cloud MQTT connect failed: {e} (retry in {delay:.0f}s)")
-        if misses >= 3:
-            misses = 0
-            log("Cloud session has no robot status; reconnecting")
             try:
-                await client.disconnect()
-            except Exception as e:  # noqa: BLE001
-                log(f"Cloud MQTT disconnect failed: {e}")
-        await asyncio.sleep(delay)
-        delay = min(15.0, delay * 1.5)
+                await client.start_polling(interval_seconds=15.0, acquire_controller=False)
+                log("Cloud telemetry subscription ready")
+            except Exception as e:
+                log(f"WARNING: start_polling failed: {e}")
+            return
+        except Exception as e:
+            log(f"Cloud MQTT connect failed: {e} (retry in {delay:.0f}s)")
+            await asyncio.sleep(delay)
+            delay = min(15.0, delay * 1.5)
 
 
 async def vestaboard_tick_loop() -> None:

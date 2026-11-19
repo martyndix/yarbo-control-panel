@@ -42,13 +42,10 @@ class YarboCloudControlClient:
         self._controller_acquired = False
         self._last_raw: dict[str, Any] | None = None
         self._last_raw_at = 0.0
-        self._last_heartbeat: dict[str, Any] | None = None
-        self._last_heartbeat_at = 0.0
         self._last_plan_feedback: dict[str, Any] | None = None
         self._last_plan_feedback_at = 0.0
         self._plan_feedback_event = threading.Event()
         self._lock = asyncio.Lock()
-        self._msg_lock = asyncio.Lock()
 
     @property
     def is_connected(self) -> bool:
@@ -88,75 +85,32 @@ class YarboCloudControlClient:
         self.type_id = type_id
         self.sn = _device_serial(matched) or self.sn
 
-        # mqtt_connect() is a no-op on current yarbo-data-sdk: the broker
-        # session starts on the first subscribe. data_feedback must be
-        # registered before get_device_msg, or the snapshot request times out
-        # and the status card stays empty.
+        # Establish broker routing + DeviceMSG subscription.
         client.mqtt_connect()
+        client.subscribe_device_message(self.sn, self.type_id, self._on_device_message)
         try:
+            # Must keep a real callback — plan progress arrives on data_feedback
+            # for get_plan_feedback (there is no local telemetry_stream on cloud).
             client.subscribe_data_feedback(self.sn, self.type_id, self._on_data_feedback)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("subscribe_data_feedback failed: %s", exc)
-        client.subscribe_device_message(self.sn, self.type_id, self._on_device_message)
-        try:
-            client.subscribe_heart_beat(self.sn, self.type_id, self._on_heart_beat)
-        except Exception as exc:  # noqa: BLE001
-            _LOGGER.warning("subscribe_heart_beat failed: %s", exc)
         try:
             self._subscribe_plan_feedback_topic(client)
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("subscribe plan_feedback topic failed: %s", exc)
 
-        mqtt = client._ensure_mqtt_for(self.sn)
-        deadline = time.time() + 8.0
-        while not mqtt.is_connected and time.time() < deadline:
-            time.sleep(0.1)
-        if not mqtt.is_connected:
-            raise RuntimeError(
-                "Cloud MQTT did not finish connecting. Check internet on the panel host."
-            )
-
         self._sdk = client
         self._connected = True
         _LOGGER.info("Cloud MQTT ready for SN=%s type_id=%s", self.sn, self.type_id)
 
-    def latest_device_msg(self) -> dict[str, Any] | None:
-        """Last DeviceMSG of any age, or None when it has no robot fields."""
-        raw = self._last_raw
-        if not isinstance(raw, dict) or not raw:
-            return None
-        if not any(raw.get(key) is not None for key in ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG")):
-            return None
-        return raw
-
-    def heartbeat_age(self) -> float | None:
-        if self._last_heartbeat_at <= 0:
-            return None
-        return max(0.0, time.time() - self._last_heartbeat_at)
-
-    def _remember_device_msg(self, data: Any) -> None:
-        if not isinstance(data, dict) or not data:
-            return
-        unwrapped = _unwrap_device_msg(data)
-        if not isinstance(unwrapped, dict):
-            return
-        if not any(unwrapped.get(key) is not None for key in _DEVICE_MSG_KEYS):
-            return
-        self._last_raw = unwrapped
-        self._last_raw_at = time.time()
-
     def _on_device_message(self, _topic: str, data: Any) -> None:
-        self._remember_device_msg(data)
-
-    def _on_heart_beat(self, _topic: str, data: Any) -> None:
         if isinstance(data, dict) and data:
-            self._last_heartbeat = data
-            self._last_heartbeat_at = time.time()
+            self._last_raw = data
+            self._last_raw_at = time.time()
 
     def _on_data_feedback(self, _topic: str, data: Any) -> None:
         if not isinstance(data, dict) or not data:
             return
-        self._remember_device_msg(data)
         response_topic = str(data.get("topic") or "")
         payload = data.get("data") if isinstance(data.get("data"), (dict, str)) else data
         if response_topic in ("get_plan_feedback", "plan_feedback") or _looks_like_plan_feedback(payload):
@@ -290,32 +244,26 @@ class YarboCloudControlClient:
 
         # Prefer a fresh push; otherwise request a full snapshot.
         age = time.time() - self._last_raw_at
-        if self.latest_device_msg() is not None and age <= max(1.0, timeout):
+        if isinstance(self._last_raw, dict) and age <= max(1.0, timeout):
             return SimpleNamespace(raw=self._last_raw)
 
-        async with self._msg_lock:
-            age = time.time() - self._last_raw_at
-            if self.latest_device_msg() is not None and age <= max(1.0, timeout):
-                return SimpleNamespace(raw=self._last_raw)
-            try:
-                raw = await asyncio.to_thread(self._get_device_msg_sync, timeout)
-            except TimeoutError as exc:
-                # SDK raises on missed data_feedback; keep last DeviceMSG push if any.
-                _LOGGER.debug("get_device_msg timed out: %s", exc)
-                latest = self.latest_device_msg()
-                if latest is not None:
-                    return SimpleNamespace(raw=latest, stale=True)
-                raise
-            if isinstance(raw, dict) and raw:
-                # request_with_feedback wraps the snapshot under data / DeviceMSG
-                self._remember_device_msg(raw)
-                latest = self.latest_device_msg()
-                if latest is not None:
-                    return SimpleNamespace(raw=latest)
-            latest = self.latest_device_msg()
-            if latest is not None:
-                return SimpleNamespace(raw=latest, stale=True)
-            return SimpleNamespace(raw=None)
+        try:
+            raw = await asyncio.to_thread(self._get_device_msg_sync, timeout)
+        except TimeoutError as exc:
+            # SDK raises on missed data_feedback; keep last DeviceMSG push if any.
+            _LOGGER.debug("get_device_msg timed out: %s", exc)
+            if isinstance(self._last_raw, dict) and self._last_raw:
+                return SimpleNamespace(raw=self._last_raw, stale=True)
+            raise
+        if isinstance(raw, dict) and raw:
+            # request_with_feedback sometimes wraps under data / DeviceMSG
+            unwrapped = _unwrap_device_msg(raw)
+            self._last_raw = unwrapped
+            self._last_raw_at = time.time()
+            return SimpleNamespace(raw=unwrapped)
+        if isinstance(self._last_raw, dict):
+            return SimpleNamespace(raw=self._last_raw, stale=True)
+        return SimpleNamespace(raw=None)
 
     def _get_device_msg_sync(self, timeout: float) -> Any:
         sdk = self._require_sdk()
@@ -418,32 +366,20 @@ def _device_serial(device: Any) -> str:
     return ""
 
 
-_DEVICE_MSG_KEYS = ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG")
-
-
 def _unwrap_device_msg(raw: dict[str, Any]) -> dict[str, Any]:
-    found = _find_device_msg(raw)
-    return found if isinstance(found, dict) else raw
-
-
-def _find_device_msg(raw: Any, depth: int = 0) -> dict[str, Any] | None:
-    if isinstance(raw, str):
-        text = raw.strip()
-        if not text.startswith("{") and not text.startswith("["):
-            return None
-        try:
-            raw = json.loads(text)
-        except json.JSONDecodeError:
-            return None
-    if not isinstance(raw, dict) or depth > 4:
-        return None
-    if any(raw.get(key) is not None for key in _DEVICE_MSG_KEYS):
+    if any(k in raw for k in ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG")):
         return raw
-    for value in raw.values():
-        found = _find_device_msg(value, depth + 1)
-        if found is not None:
-            return found
-    return None
+    data = raw.get("data")
+    if isinstance(data, dict):
+        if any(k in data for k in ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG")):
+            return data
+        nested = data.get("DeviceMSG") or data.get("device_msg")
+        if isinstance(nested, dict):
+            return nested
+    nested = raw.get("DeviceMSG") or raw.get("device_msg")
+    if isinstance(nested, dict):
+        return nested
+    return raw
 
 
 def load_cloud_config(root: Path | None = None) -> dict[str, Any]:
