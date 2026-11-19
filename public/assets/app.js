@@ -16986,6 +16986,7 @@ function openCameraFrames() {
     };
     cameraLiveSource.onerror = () => {
         if (cameraLiveSeen.size > 0 || !els.cameraAlert) return;
+        if (cameraLiveSource && cameraLiveSource.readyState !== EventSource.CLOSED) return;
         els.cameraAlert.textContent = 'The cameras are on, but this browser has not received a picture yet.';
         els.cameraAlert.classList.remove('hidden');
     };

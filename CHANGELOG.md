@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.27] - 2026-11-19
+
+### Fixed
+
+- Live view still showed “waiting” in Safari, with a note that no picture had arrived. The picture stream was being held until a large block built up, and wrapping that block made Safari close it. Pictures are sent again as soon as each one arrives, the same way they showed before. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.26] - 2026-11-19
 
 ### Fixed

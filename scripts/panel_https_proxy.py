@@ -44,11 +44,6 @@ def camera_agent_port() -> int:
     return port
 
 
-def http_chunk(data: bytes) -> bytes:
-    """One HTTP/1.1 chunk. Safari holds a picture stream until it is chunked."""
-    return f"{len(data):X}\r\n".encode("ascii") + data + b"\r\n"
-
-
 def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
     """Copy an upstream body as it arrives. Do not wait for the stream to end."""
     while True:
@@ -57,6 +52,32 @@ def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
             break
         wfile.write(chunk)
         wfile.flush()
+
+
+def read_http_head(sock: socket.socket) -> tuple[int, dict[str, str], bytes]:
+    """Read status and headers. Return any picture bytes already in the buffer."""
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        part = sock.recv(4096)
+        if not part:
+            break
+        buf += part
+        if len(buf) > 65536:
+            break
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    lines = head.split(b"\r\n")
+    status = 502
+    if lines and lines[0]:
+        parts = lines[0].split()
+        if len(parts) >= 2 and parts[1].isdigit():
+            status = int(parts[1])
+    headers: dict[str, str] = {}
+    for line in lines[1:]:
+        if b":" not in line:
+            continue
+        key, value = line.split(b":", 1)
+        headers[key.decode("latin-1", "replace").strip()] = value.decode("latin-1", "replace").strip()
+    return status, headers, rest
 
 
 HOP_BY_HOP = {
@@ -174,57 +195,62 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
             pass
 
     def _proxy_camera_frames(self) -> bool:
-        """Stream pictures from the camera agent. False if it is not listening."""
+        """Stream pictures from the camera agent. False if it is not listening.
+
+        A buffered read holds the first picture until 16KB arrives, then the
+        20s timeout closes the stream. Safari reports that as no picture.
+        Read whatever has already arrived and send it straight through.
+        """
         port = camera_agent_port()
-        conn = None
+        sock = None
         try:
-            conn = http.client.HTTPConnection("127.0.0.1", port, timeout=20)
-            conn.request(
-                "GET",
-                "/frames",
-                headers={"Host": f"127.0.0.1:{port}", "Connection": "close"},
+            sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.sendall(
+                f"GET /frames HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n"
+                f"Accept: text/event-stream\r\nConnection: close\r\n\r\n".encode("ascii")
             )
-            resp = conn.getresponse()
+            status, headers, pending = read_http_head(sock)
         except Exception:
-            if conn is not None:
+            if sock is not None:
                 try:
-                    conn.close()
+                    sock.close()
                 except Exception:
                     pass
             return False
 
-        self.send_response(resp.status, resp.reason)
-        for key, value in resp.getheaders():
-            lk = key.lower()
-            if lk in HOP_BY_HOP or lk == "content-length":
-                continue
-            self.send_header(key, value)
-        self.send_header("Cache-Control", "no-cache, no-store")
-        self.send_header("X-Accel-Buffering", "no")
-        # Safari does not hand EventSource any bytes of an endless response
-        # until the connection closes, unless the body is chunked. The pictures
-        # then stay black while the tiles still say Online.
-        self.send_header("Transfer-Encoding", "chunked")
-        self.send_header("Connection", "close")
-        self.end_headers()
+        # A quiet camera still sends a ping. Do not drop the stream for that.
+        try:
+            sock.settimeout(None)
+        except Exception:
+            pass
+        self.close_connection = True
         try:
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except Exception:
             pass
+        content_type = headers.get("Content-Type") or headers.get("content-type") or "text/event-stream"
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "close")
+        self.end_headers()
         try:
+            if pending:
+                self.wfile.write(pending)
+                self.wfile.flush()
             while True:
-                chunk = resp.read(16384)
+                chunk = sock.recv(16384)
                 if not chunk:
                     break
-                self.wfile.write(http_chunk(chunk))
+                self.wfile.write(chunk)
                 self.wfile.flush()
-            self.wfile.write(b"0\r\n\r\n")
-            self.wfile.flush()
         except Exception:
             pass
         finally:
             try:
-                conn.close()
+                sock.close()
             except Exception:
                 pass
         return True
