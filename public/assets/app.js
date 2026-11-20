@@ -12180,6 +12180,7 @@ function applyRobotCard(data) {
     }
     updateRainStatus(data);
     if (els.updatedAt) els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
+    if (typeof updateControllerTile === 'function') updateControllerTile();
 }
 
 function updateStatus(data) {
@@ -16857,6 +16858,7 @@ function bindCameraReorder() {
 let cameraLiveSource = null;
 let cameraFramesOpen = false;
 let picturePauseDepth = 0;
+let picturesSteppedAside = false;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
 let cameraLiveRunning = false;
@@ -16992,7 +16994,7 @@ function markCameraTileOnline(view) {
         badge.className = 'camera-status online';
     }
     if (els.cameraAlert) els.cameraAlert.classList.add('hidden');
-    if (firstPicture && typeof updateControllerGatedControls === 'function') updateControllerGatedControls();
+    if (firstPicture && typeof updateControllerTile === 'function') updateControllerTile();
 }
 
 function ensureCameraDecoder(view, sps, pps) {
@@ -17090,10 +17092,18 @@ function cameraControlsOpen() {
 }
 
 function commandTransport() {
-    // Safari keeps reading the picture connection. A press or a status card
-    // sent on the quiet one never arrives while those pictures are moving.
+    // Connect needs the answer back. Safari reads the picture connection
+    // while the cameras are moving, so the answer comes back on that one.
     if (cameraPicturesOpen()) return cameraLiveSource;
     if (cameraControlsOpen()) return cameraCommandSocket;
+    return null;
+}
+
+function driveTransport() {
+    // A direction does not have to wait for the answer. The quiet connection
+    // is not full of pictures, so the press can leave while the view stays up.
+    if (cameraControlsOpen()) return cameraCommandSocket;
+    if (cameraPicturesOpen()) return cameraLiveSource;
     return null;
 }
 
@@ -17259,10 +17269,10 @@ function attachCommandSocket(onReady) {
 
 function attachCameraStream() {
     if (!cameraFramesOpen || cameraLiveSource || picturePauseDepth > 0) return;
-    // A held direction used to keep the pictures closed. On the picture
-    // connection the direction travels with the pictures, so the view stays up.
-    if (driveActive && !(location.protocol === 'https:' && location.port)) return;
-    if (location.protocol === 'https:' && location.port && typeof WebSocket === 'function') {
+    // A held direction used to keep the pictures closed. The direction goes
+    // out on the quiet connection, so the view stays up.
+    if (driveActive && picturesSteppedAside) return;
+    if (location.protocol === 'https:' && typeof WebSocket === 'function') {
         attachCameraSocket();
         return;
     }
@@ -17310,8 +17320,32 @@ async function suspendPictures() {
 function resumePictures() {
     picturePauseDepth = Math.max(0, picturePauseDepth - 1);
     if (picturePauseDepth > 0) return;
-    if (driveActive && !(location.protocol === 'https:' && location.port)) return;
+    if (driveActive && picturesSteppedAside) return;
     attachCameraStream();
+}
+
+async function stepPicturesAside() {
+    // Safari will not finish a direction beside an open picture stream when
+    // neither socket can take it. Step the pictures aside, send, then open
+    // them again when the finger lifts.
+    if (picturesSteppedAside) return;
+    picturesSteppedAside = true;
+    const source = cameraLiveSource;
+    cameraLiveSource = null;
+    if (source) {
+        try {
+            source.close();
+        } catch {
+            /* already closed */
+        }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+}
+
+function restorePicturesAfterDrive() {
+    if (!picturesSteppedAside) return;
+    picturesSteppedAside = false;
+    if (cameraFramesOpen && !cameraLiveSource && picturePauseDepth === 0) attachCameraStream();
 }
 
 function openCameraFrames() {
@@ -17639,15 +17673,15 @@ async function fetchDrive(linear, angular, enterManual, signal) {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    // A held direction goes on the picture connection and leaves the pictures open.
+    // A held direction goes on the quiet connection and leaves the pictures open.
     // Closing the pictures for the press is what stopped the view.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
+    const done = linear === 0 && angular === 0;
     try {
-        const picturesUp = location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource || cameraControlsOpen());
-        const transport = commandTransport();
-        if (transport) {
+        const transport = driveTransport();
+        if (transport && !picturesSteppedAside) {
             cameraSocketRequest('/api/drive.php', JSON.stringify({
                 linear,
                 angular,
@@ -17655,12 +17689,15 @@ async function sendDrive(linear, angular, enterManual = false) {
             }), 8000).then((event) => {
                 noteDriveReply(event, enterManual);
             }).catch(() => {});
+            if (done) restorePicturesAfterDrive();
             return true;
         }
+        const picturesUp = location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource);
         if (picturesUp) {
-            throw Object.assign(new Error('Drive did not answer. Hold the direction again.'), { name: 'TimeoutError' });
+            await stepPicturesAside();
         }
         const data = await fetchDrive(linear, angular, enterManual, signal);
+        if (done) restorePicturesAfterDrive();
         if (!data.ok) {
             showToast(data.error || 'Drive command failed', 'error');
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
@@ -17673,6 +17710,7 @@ async function sendDrive(linear, angular, enterManual = false) {
         if (enterManual) manualModeEntered = true;
         return true;
     } catch (err) {
+        if (done) restorePicturesAfterDrive();
         const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
         showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';

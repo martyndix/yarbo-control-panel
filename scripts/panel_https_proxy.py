@@ -720,7 +720,10 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             except Exception:
                 pass
             try:
-                return client.send(memoryview(buf)[offset:])
+                # One small piece, then look for a direction. Sending a whole
+                # picture in one call left the press sitting in the browser.
+                end = min(len(buf), offset + 8192)
+                return client.send(memoryview(buf)[offset:end])
             except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantWriteError, ssl.SSLWantReadError):
                 return 0
             except Exception:

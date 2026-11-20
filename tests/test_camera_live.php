@@ -114,7 +114,9 @@ assert_true(str_contains($proxy, 'Sec-WebSocket-Accept'), 'the picture port carr
 assert_true(str_contains($appJs, 'function suspendPictures'), 'an ordinary picture stream can still step aside');
 assert_true(str_contains($appJs, 'location.host'), 'pictures and a held direction share the panel port');
 assert_true(str_contains($appJs, 'leaves the pictures open'), 'a held direction leaves the pictures open');
-assert_true(str_contains($appJs, 'function commandTransport'), 'a press uses the picture connection while it is open');
+assert_true(str_contains($appJs, 'function commandTransport'), 'Connect uses the picture connection while it is open');
+assert_true(str_contains($appJs, 'function driveTransport'), 'a direction uses the quiet connection while the pictures are open');
+assert_true(str_contains($appJs, 'function stepPicturesAside'), 'a direction can still be sent when neither socket is open');
 assert_true(str_contains($appJs, 'function drainCameraFrames'), 'picture decoding does not block a press');
 assert_true(str_contains($agent, 'drive_busy_until'), 'a held direction is not stuck behind a camera keep-alive');
 assert_true(!str_contains($appJs, 'closePicturesForDrive'), 'a press does not close the pictures');

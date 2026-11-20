@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.55] - 2026-11-20
+
+### Fixed
+
+- Holding a direction while the cameras were showing answered "Drive did not answer" and the robot stayed still. The press now goes out on the quiet connection, which is not full of pictures. The view stays up. If that connection is not open, the pictures step aside for the press and come back when the finger lifts. Live view on the normal HTTPS address uses the same picture connection as the panel port, so a direction is not left with nowhere to go. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.54] - 2026-11-20
 
 ### Fixed
