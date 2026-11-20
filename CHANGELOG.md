@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.52] - 2026-11-20
+
+### Fixed
+
+- The cameras were still in the way of everything else. A button closed the pictures for the press, the status card stopped because its update was riding on the picture connection, and that same connection kept a PHP worker busy so another device could not load the panel. Presses and the status card now use the quiet connection, opened before the pictures. The picture connection only carries pictures, so the view stays live while you press a button and the status card keeps moving. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.51] - 2026-11-20
 
 ### Fixed

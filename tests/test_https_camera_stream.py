@@ -66,11 +66,11 @@ def main() -> None:
     assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-    assert drive_on_picture_socket(proxy), "pictures keep arriving while a direction is still being handled"
-    assert drive_on_picture_socket(proxy, proxy.PanelHttpsProxyHandler), "the panel port carries a direction on the same picture connection"
+    assert pictures_ignore_press(proxy), "a press on the picture connection is not posted and the pictures keep moving"
+    assert pictures_ignore_press(proxy, proxy.PanelHttpsProxyHandler), "the panel picture connection does not post a press"
     assert pictures_stay_small(proxy), "a live view keeps the newest picture so another device can still open the panel"
     assert drive_on_quiet_socket(proxy), "a direction on the quiet connection is handled while pictures keep arriving"
-    assert status_on_picture_socket(proxy), "the status card is refreshed on the picture connection"
+    assert status_on_quiet_socket(proxy), "the status card is refreshed on the quiet connection while pictures keep moving"
     print("ok")
 
 
@@ -314,7 +314,7 @@ def _client_frame(payload: bytes) -> bytes:
     return bytes([0x81, 0x80 | len(payload)]) + mask + masked
 
 
-def drive_on_picture_socket(proxy, handler=None) -> bool:
+def pictures_ignore_press(proxy, handler=None) -> bool:
     pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
     buttons = ThreadingHTTPServer(("127.0.0.1", 0), _Drive)
     threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
@@ -387,7 +387,7 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
             if not sent and (b'"view":"middle"' in payload or b'"view": "middle"' in payload):
                 client.sendall(_client_frame(b'{"op":"drive","id":7,"json":{"linear":0.2,"angular":0,"enter_manual":true}}'))
                 sent = True
-            if sent and any(b'"reply"' in frame for frame in frames):
+            if sent and len(frames) >= 3:
                 break
     finally:
         if client is not None:
@@ -400,18 +400,9 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
             status.unlink(missing_ok=True)
         else:
             status.write_text(previous, encoding="utf-8")
-    during = [
-        stamp
-        for stamp, frame in zip(frame_at, frames)
-        if b"middle" in frame and _Drive.started and _Drive.started + 0.12 <= stamp <= _Drive.finished
-    ]
-    reply_at = next((index for index, frame in enumerate(frames) if b'"reply"' in frame), -1)
-    reply = frames[reply_at] if reply_at >= 0 else b""
-    drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
-    # The drive result is a JSON string inside the picture frame, so its quotes are escaped.
-    answered = b"picture" in reply and b"true" in reply
-    same_press = b'"id": 7' in reply or b'"id":7' in reply
-    return bool(opened and drove and answered and same_press and during)
+    saw_picture = any(b"middle" in frame for frame in frames)
+    # A press on the picture connection must not reach PHP. The quiet connection does that.
+    return bool(opened and sent and saw_picture and _Drive.seen == b"")
 
 
 class _Status(BaseHTTPRequestHandler):
@@ -693,7 +684,7 @@ def drive_on_quiet_socket(proxy) -> bool:
     return bool(saw_picture and drove and answered and b"middle" in later)
 
 
-def status_on_picture_socket(proxy) -> bool:
+def status_on_quiet_socket(proxy) -> bool:
     pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
     status = ThreadingHTTPServer(("127.0.0.1", 0), _Status)
     threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
@@ -706,23 +697,34 @@ def status_on_picture_socket(proxy) -> bool:
     proxy.PanelHttpsProxyHandler.upstream_port = status.server_address[1]
     panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
     threading.Thread(target=panel.serve_forever, daemon=True).start()
-    client = None
-    blob = b""
+    pictures = None
+    controls = None
+    card = b""
+    video = b""
     try:
-        client = _open_socket(panel.server_address[1], "/api/camera_live.php?action=frames")
-        client.settimeout(0.4)
+        pictures = _open_socket(panel.server_address[1], "/api/camera_live.php?action=frames")
+        controls = _open_socket(panel.server_address[1], "/api/camera_live.php?action=controls")
+        pictures.settimeout(0.4)
+        controls.settimeout(0.4)
         deadline = time.time() + 3.0
-        while time.time() < deadline and b'"op":"status"' not in blob:
+        while time.time() < deadline and (b'"op":"status"' not in card or b"middle" not in video):
             try:
-                part = client.recv(65536)
+                part = controls.recv(65536)
             except socket.timeout:
-                continue
-            if not part:
-                break
-            blob += part
+                part = b""
+            if part:
+                card += part
+            try:
+                part = pictures.recv(65536)
+            except socket.timeout:
+                part = b""
+            if part:
+                video += part
     finally:
-        if client is not None:
-            client.close()
+        if pictures is not None:
+            pictures.close()
+        if controls is not None:
+            controls.close()
         panel.shutdown()
         pictures_upstream.shutdown()
         status.shutdown()
@@ -731,7 +733,7 @@ def status_on_picture_socket(proxy) -> bool:
             live.unlink(missing_ok=True)
         else:
             live.write_text(previous, encoding="utf-8")
-    return b'"op":"status"' in blob and b"98" in blob and b"middle" in blob
+    return b'"op":"status"' in card and b"98" in card and b"middle" in video and b'"op":"status"' not in video
 
 
 if __name__ == "__main__":
