@@ -127,6 +127,29 @@ assert_true(YarboHome::isOpenCloseSensor($workshop) === false, 'climate row stay
 $door = $timmerById['90:3'] ?? [];
 assert_true(($door['has_open'] ?? false) === true, 'door on the same node stays');
 assert_true(($door['open'] ?? null) === false, 'door StateValue true is closed');
+$hiddenHum = [
+    'node_id' => 91,
+    'available' => true,
+    'attributes' => [
+        '0/40/1' => 'IKEA of Sweden',
+        '0/40/3' => 'TIMMERFLOTTE',
+        '1/29/0' => [['deviceType' => 0x0302, 'revision' => 1]],
+        '1/40/5' => 'Workshop Temperature',
+        '1/1026/0' => 1110,
+        '2/29/0' => [['deviceType' => 0x000E, 'revision' => 1]],
+        '2/29/3' => [1],
+        '2/1029/0' => 6400,
+    ],
+];
+$hiddenById = [];
+foreach (YarboMatterFabric::flatten([$hiddenHum]) as $row) {
+    $hiddenById[(string) ($row['id'] ?? '')] = $row;
+}
+$workshopOnly = $hiddenById['91:1'] ?? [];
+assert_true(!isset($hiddenById['91:2']), 'a hidden humidity endpoint is not its own row');
+assert_true(($workshopOnly['temperature'] ?? null) === 11.1, 'workshop temperature stays');
+assert_true(($workshopOnly['humidity'] ?? null) === 64.0, 'workshop humidity comes from the other endpoint');
+assert_true(str_contains((string) ($workshopOnly['status'] ?? ''), 'RH'), 'workshop status includes humidity');
 $overlaid = YarboHome::overlayDeviceStates([
     [
         'id' => '90:1',
@@ -272,7 +295,7 @@ assert_true(str_contains($agent, 'ELECTRICAL_POWER = 0x0090'), 'agent Electrical
 assert_true(str_contains($agent, 'BOOLEAN_STATE = 0x0045'), 'agent Boolean State cluster');
 assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'agent Occupancy Sensing cluster');
 assert_true(str_contains($agent, 'HUMIDITY_MEASUREMENT = 0x0405'), 'agent Humidity cluster');
-assert_true(str_contains($agent, 'AGENT_VERSION = 122'), 'agent v122');
+assert_true(str_contains($agent, 'AGENT_VERSION = 123'), 'agent v123');
 
 $histRoot = sys_get_temp_dir() . '/yarbo-climate-hist-' . bin2hex(random_bytes(3));
 mkdir($histRoot . '/data/sensor-history', 0775, true);

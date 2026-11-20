@@ -4697,6 +4697,13 @@ final class YarboHome
         if (array_key_exists('humidity', $live) && is_numeric($live['humidity'])) {
             $device['humidity'] = round((float) $live['humidity'], 1);
         }
+        if (isset($device['humidity']) && is_numeric($device['humidity'])) {
+            $status = (string) ($device['status'] ?? '');
+            if (!str_contains($status, 'RH')) {
+                $suffix = (string) (int) round((float) $device['humidity']) . '% RH';
+                $device['status'] = $status !== '' ? ($status . ' · ' . $suffix) : $suffix;
+            }
+        }
         foreach (['power_w' => 1, 'voltage_v' => 1, 'current_a' => 3] as $key => $precision) {
             if (!array_key_exists($key, $live) || !is_numeric($live[$key])) {
                 continue;

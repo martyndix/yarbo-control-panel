@@ -961,6 +961,66 @@ def main() -> int:
         raise SystemExit(f"combined status after update {updated}")
     if "90:3" not in live_climate:
         raise SystemExit("combined climate row dropped the door")
+    hidden_hum = {
+        "node_id": 91,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "TIMMERFLOTTE",
+            "1/29/0": [{"deviceType": 0x0302, "revision": 1}],
+            "1/40/5": "Workshop Temperature",
+            "1/1026/0": 1110,
+            "2/29/0": [{"deviceType": 0x000E, "revision": 1}],
+            "2/29/3": [1],
+            "2/1029/0": 6400,
+        },
+    }
+    hidden_rows = {d["id"]: d for d in agent.flatten_nodes({"nodes": [hidden_hum]})}
+    if "91:2" in hidden_rows:
+        raise SystemExit(f"hidden humidity endpoint became a row {hidden_rows.keys()}")
+    workshop_only = hidden_rows.get("91:1") or {}
+    if workshop_only.get("temperature") != 11.1 or workshop_only.get("humidity") != 64.0:
+        raise SystemExit(f"workshop humidity was not copied onto the temperature row {workshop_only}")
+    if "RH" not in str(workshop_only.get("status") or ""):
+        raise SystemExit(f"workshop status missing humidity {workshop_only}")
+    if 2 not in (workshop_only.get("climate_endpoints") or []):
+        raise SystemExit(f"workshop climate endpoints {workshop_only.get('climate_endpoints')}")
+    agent.remember_live_devices([
+        {
+            "id": "91:1",
+            "node_id": 91,
+            "endpoint": 1,
+            "kind": "sensor",
+            "name": "T/H Sensor",
+            "product": "TIMMERFLOTTE temp/hmd sensor",
+            "temperature": 11.1,
+            "humidity": None,
+            "status": "11.1°",
+        }
+    ])
+    targets = agent.climate_poll_targets()
+    if not any(node_id == 91 and 2 in endpoints for node_id, endpoints, _device_id in targets):
+        raise SystemExit(f"workshop sensor was not queued for a humidity read {targets}")
+    original_read = agent._poll_read
+
+    def fake_read(node_id, paths, timeout=None):
+        if list(paths) == ["2/1029/0"]:
+            return {"ok": True, "result": {"2/1029/0": 6400}}
+        return {"ok": False, "error": "unsupported cluster"}
+
+    agent._poll_read = fake_read
+    try:
+        agent.poll_climate_attributes()
+    finally:
+        agent._poll_read = original_read
+    polled = {d["id"]: d for d in agent.current_live_devices()}
+    if "91:2" in polled:
+        raise SystemExit(f"humidity read created a second workshop row {polled.keys()}")
+    showed = polled.get("91:1") or {}
+    if showed.get("temperature") != 11.1 or showed.get("humidity") != 64.0:
+        raise SystemExit(f"humidity read missed the workshop row {showed}")
+    if "11.1" not in str(showed.get("status") or "") or "RH" not in str(showed.get("status") or ""):
+        raise SystemExit(f"workshop badge after humidity read {showed}")
     cont = sensor_rows.get("81:1") or {}
     if cont.get("kind") != "sensor" or cont.get("has_open") is not True or cont.get("open") is not False:
         raise SystemExit(f"contact sensor flatten {cont}")

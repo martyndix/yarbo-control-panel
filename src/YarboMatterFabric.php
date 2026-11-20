@@ -1894,6 +1894,10 @@ final class YarboMatterFabric
         $humidity = self::matterHumidityPercent(
             self::attrRaw($attributes, $endpoint, self::HUMIDITY_MEASUREMENT, self::ATTR_MEASURED_HUMIDITY)
         );
+        $borrowed = 0;
+        if ($humidity === null && $temp !== null) {
+            [$humidity, $borrowed] = self::siblingHumidity($attributes, $endpoint);
+        }
         $hasOpen = self::endpointLooksContactSensor($attributes, $endpoint);
         $open = null;
         if ($hasOpen) {
@@ -1936,7 +1940,7 @@ final class YarboMatterFabric
             $on = false;
         }
 
-        return [
+        $payload = [
             'temperature' => $temp,
             'humidity' => $humidity,
             'has_open' => $hasOpen,
@@ -1947,6 +1951,37 @@ final class YarboMatterFabric
             'status' => $parts !== [] ? implode(' · ', $parts) : '',
             'on' => $on,
         ];
+        if ($borrowed > 0) {
+            $payload['climate_endpoints'] = [$endpoint, $borrowed];
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Humidity measured on another endpoint of the same TIMMERFLOTTE node.
+     *
+     * @param array<string, mixed> $attributes
+     * @return array{0: ?float, 1: int}
+     */
+    private static function siblingHumidity(array $attributes, int $endpoint): array
+    {
+        $ids = self::endpointIds($attributes);
+        sort($ids, SORT_NUMERIC);
+        foreach ($ids as $other) {
+            $other = (int) $other;
+            if ($other <= 0 || $other === $endpoint) {
+                continue;
+            }
+            $value = self::matterHumidityPercent(
+                self::attrRaw($attributes, $other, self::HUMIDITY_MEASUREMENT, self::ATTR_MEASURED_HUMIDITY)
+            );
+            if ($value !== null) {
+                return [$value, $other];
+            }
+        }
+
+        return [null, 0];
     }
 
     /**

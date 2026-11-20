@@ -2154,6 +2154,15 @@ function homeDeviceHasClimate(d) {
         || (hum != null && hum !== '' && Number.isFinite(Number(hum)));
 }
 
+function homeClimateStatus(d) {
+    const status = String(d?.status || '').trim();
+    const hum = d?.humidity;
+    if (hum == null || hum === '' || !Number.isFinite(Number(hum))) return status;
+    if (/%\s*RH/i.test(status)) return status;
+    const pct = `${Math.round(Number(hum))}% RH`;
+    return status ? `${status} · ${pct}` : pct;
+}
+
 function sensorHistoryRangeSeconds(key) {
     if (key === '1d') return 86400;
     if (key === '7d') return 7 * 86400;
@@ -5592,16 +5601,19 @@ function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
             if (typeof extras.has_motion === 'boolean') device.has_motion = extras.has_motion;
             if (extras.motion_at != null && Number(extras.motion_at) > 0) device.motion_at = Number(extras.motion_at);
             if (extras.status) device.status = extras.status;
+            if (extras.humidity != null && extras.humidity !== '') device.humidity = extras.humidity;
+            if (extras.temperature != null && extras.temperature !== '') device.temperature = extras.temperature;
         }
         const meta = card.querySelector('[data-home-dps], [data-home-status]');
         if (meta) {
             const isDps = meta.hasAttribute('data-home-dps');
+            const climate = !isDps && device ? homeClimateStatus(device) : '';
             const label = isDps
                 ? (dpsLabel
                     || (extras.open === true ? 'Open' : (extras.open === false && (extras.has_dps || extras.dps) ? 'Closed' : ''))
                     || extras.status
                     || (extras.dps === 'open' || extras.dps === 'opened' ? 'Open' : (extras.dps === 'close' || extras.dps === 'closed' ? 'Closed' : meta.textContent)))
-                : (extras.status || dpsLabel || meta.textContent);
+                : (climate || extras.status || dpsLabel || meta.textContent);
             meta.textContent = label;
             meta.classList.toggle(
                 'is-open',
@@ -6458,7 +6470,7 @@ function homeDeviceActionsHtml(d, bright, color) {
             const status = String(d.status || '');
             const open = d.open === true || /^Open\b/i.test(status);
             if (homeDeviceHasClimate(d)) {
-                return `<div class="home-device-actions"><button type="button" class="home-device-meta home-device-meta--history${open ? ' is-open' : ''}" data-home-status data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(d.status || '—')}</button></div>`;
+                return `<div class="home-device-actions"><button type="button" class="home-device-meta home-device-meta--history${open ? ' is-open' : ''}" data-home-status data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(homeClimateStatus(d) || '—')}</button></div>`;
             }
             return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(d.status || '—')}</span></div>`;
         }
@@ -6496,9 +6508,9 @@ function homeDeviceActionsHtml(d, bright, color) {
         const status = String(d.status || '');
         const open = d.open === true || /^Open\b/i.test(status);
         if (homeDeviceHasClimate(d)) {
-            return `<div class="home-device-actions"><button type="button" class="home-device-meta home-device-meta--history${open ? ' is-open' : ''}" data-home-status data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(status || '—')}</button></div>`;
+            return `<div class="home-device-actions"><button type="button" class="home-device-meta home-device-meta--history${open ? ' is-open' : ''}" data-home-status data-sensor-history="${escapeHtml(d.id)}" data-sensor-history-name="${escapeHtml(d.name || '')}" title="Climate history">${escapeHtml(homeClimateStatus(d) || '—')}</button></div>`;
         }
-        return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(status || '—')}</span></div>`;
+        return `<div class="home-device-actions"><span class="home-device-meta${open ? ' is-open' : ''}" data-home-status>${escapeHtml(homeClimateStatus(d) || status || '—')}</span></div>`;
     }
     if (d.available === false) {
         return `<div class="home-device-actions"><span class="home-device-meta">Unavailable</span></div>`;

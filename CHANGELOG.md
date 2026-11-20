@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.53] - 2026-11-20
+
+### Fixed
+
+- The Workshop TIMMERFLOTTE showed only the temperature. That sensor keeps humidity on a second endpoint, and the row was built from the temperature endpoint alone. The temperature row now includes the humidity reading, and the panel keeps asking the sensor for it, so the badge shows degrees and humidity the same way the Cellar sensor does. Update to latest.
+
 ## [5.0.52] - 2026-11-20
 
 ### Fixed

@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 122
+AGENT_VERSION = 123
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -250,6 +250,11 @@ LIGHT_POLL_FALLBACK_S = 8.0
 MOTION_HOLD_S = 60.0
 OCC_POLL_INTERVAL_S = 20.0
 OCC_POLL_TIMEOUT = 1.5
+# TIMMERFLOTTE keeps humidity on its own endpoint. A temperature report can
+# arrive while that endpoint was never in the node cache, so the row shows
+# only degrees. Read the humidity value on a slow timer, one sensor at a time.
+CLIMATE_POLL_INTERVAL_S = 20.0
+CLIMATE_POLL_TIMEOUT = 1.5
 # Metering plugs (INSPELNING / GRILLPLATS) do not keep pushing watts. Without a
 # read, voltage stays on the pairing sample and motor mode cannot see the load.
 # On plugs are read every poll pass. Off plugs are sampled on a slower timer
@@ -267,6 +272,8 @@ ELECTRICAL_RMS_ATTRS = (
 )
 ATTR_PIR_OCCUPIED_TO_UNOCCUPIED = 0x0010
 _occ_poll_at = 0.0
+_climate_poll_at = 0.0
+_climate_cursor = 0
 _occ_cursor = 0
 _plug_power_at = 0.0
 _plug_power_off_at = 0.0
@@ -4883,6 +4890,8 @@ def remember_live_devices(devices: list[dict[str, Any]]) -> None:
                 for key in ("power_w", "voltage_v", "current_a", "meter_endpoint", "_meter_at"):
                     if key in prev and prev.get(key) is not None:
                         item[key] = prev[key]
+            if prev is not None and prev.get("_no_humidity") and item.get("humidity") is None:
+                item["_no_humidity"] = True
             # A node list often still says On after Apple Home has turned the plug off.
             if (
                 prev is not None
@@ -6389,7 +6398,7 @@ def start_state_poll() -> None:
     _state_poll_started = True
 
     def loop() -> None:
-        global _light_poll_at, _occ_poll_at, _plug_power_at, _plug_power_off_at
+        global _light_poll_at, _occ_poll_at, _climate_poll_at, _plug_power_at, _plug_power_off_at
         while True:
             try:
                 # Listen dump can take tens of seconds on a Hue Bridge. Do not
@@ -6419,6 +6428,9 @@ def start_state_poll() -> None:
                 if now >= _occ_poll_at:
                     poll_occupancy_attributes()
                     _occ_poll_at = time.time() + OCC_POLL_INTERVAL_S
+                if now >= _climate_poll_at:
+                    poll_climate_attributes()
+                    _climate_poll_at = time.time() + CLIMATE_POLL_INTERVAL_S
                 expire_stale_motion()
                 maybe_scan_new_endpoints()
             except Exception as exc:  # noqa: BLE001
@@ -6988,7 +7000,11 @@ def apply_attribute_event(data: Any) -> None:
         fields["local_temperature"] = celsius
         fields["temperature"] = celsius
     elif cluster == HUMIDITY_MEASUREMENT and attr == ATTR_MEASURED_HUMIDITY:
-        fields["humidity"] = matter_humidity_percent(value)
+        parsed_humidity = matter_humidity_percent(value)
+        # A null reading must not wipe a humidity value already on the row.
+        if parsed_humidity is None:
+            return
+        fields["humidity"] = parsed_humidity
     elif cluster == BOOLEAN_STATE and attr == ATTR_BOOL_STATE_VALUE:
         opened = contact_state_is_open(value)
         if opened is None:
@@ -8279,6 +8295,109 @@ def poll_plug_power(live: bool) -> None:
     read_plug_meter(node_id, endpoint, plug_endpoint)
 
 
+def climate_product_combo(row: dict[str, Any]) -> bool:
+    blob = f"{row.get('product') or ''} {row.get('source') or ''}".lower()
+    return "timmerflotte" in blob or "temp/hmd" in blob or "temp/hum" in blob
+
+
+def climate_should_poll(row: dict[str, Any]) -> bool:
+    if not isinstance(row, dict) or str(row.get("kind") or "") != "sensor":
+        return False
+    if row.get("temperature") is None and row.get("humidity") is None:
+        return False
+    if row.get("has_open") and row.get("temperature") is None:
+        return False
+    combo = climate_product_combo(row)
+    if row.get("humidity") is None:
+        if row.get("_no_humidity") and not combo:
+            return False
+        return row.get("temperature") is not None
+    return combo
+
+
+def humidity_probe_endpoints(row: dict[str, Any]) -> list[int]:
+    endpoints: list[int] = []
+
+    def add(raw: Any) -> None:
+        try:
+            endpoint = int(raw or 0)
+        except (TypeError, ValueError):
+            return
+        if endpoint > 0 and endpoint not in endpoints:
+            endpoints.append(endpoint)
+
+    add(row.get("endpoint"))
+    listed = row.get("climate_endpoints")
+    if isinstance(listed, list):
+        for endpoint in listed:
+            add(endpoint)
+    if row.get("humidity") is None:
+        add(2)
+        add(3)
+        add(1)
+    return endpoints
+
+
+def climate_poll_targets() -> list[tuple[int, list[int], str]]:
+    targets: list[tuple[int, list[int], str]] = []
+    seen: set[int] = set()
+    for row in current_live_devices():
+        if not climate_should_poll(row):
+            continue
+        node_id = _climate_node_id(row)
+        if node_id <= 0 or node_id in seen:
+            continue
+        endpoints = humidity_probe_endpoints(row)
+        if not endpoints:
+            continue
+        seen.add(node_id)
+        targets.append((node_id, endpoints, str(row.get("id") or "")))
+    return targets
+
+
+def _node_has_humidity(node_id: int) -> bool:
+    for row in current_live_devices():
+        if _climate_node_id(row) == node_id and row.get("humidity") is not None:
+            return True
+    return False
+
+
+def poll_climate_attributes() -> None:
+    """Read humidity for a climate sensor whose row is still temperature only."""
+    global _climate_cursor
+    if poll_paused():
+        return
+    targets = climate_poll_targets()
+    if not targets:
+        return
+    now = time.time()
+    ready = [item for item in targets if not _poll_node_cooling(item[0], now)]
+    if not ready:
+        return
+    node_id, endpoints, device_id = ready[_climate_cursor % len(ready)]
+    _climate_cursor += 1
+    hard = 0
+    for endpoint in endpoints:
+        if poll_paused():
+            return
+        path = attr_key(endpoint, HUMIDITY_MEASUREMENT, ATTR_MEASURED_HUMIDITY)
+        rpc = _poll_read(node_id, [path], CLIMATE_POLL_TIMEOUT)
+        err = str(rpc.get("error") or "").lower()
+        if "timed" in err or "timeout" in err:
+            _poll_node_backoff[node_id] = time.time() + POLL_NODE_BACKOFF_S
+            return
+        if rpc.get("ok"):
+            _poll_note_result(node_id, rpc)
+            if _node_has_humidity(node_id):
+                return
+            continue
+        hard += 1
+    if hard >= len(endpoints) and device_id and not _node_has_humidity(node_id):
+        row = live_row(device_id) or {}
+        if not climate_product_combo(row):
+            patch_live_device(device_id, {"_no_humidity": True})
+
+
 def poll_occupancy_attributes() -> None:
     """One short occupancy read. Sleepy IKEA sensors miss subscriptions; a read can still see clear."""
     global _occ_cursor
@@ -8424,11 +8543,32 @@ def electrical_live_device_id(node_id: int, device_id: str) -> str:
     return device_id
 
 
+def sibling_humidity(attributes: dict[str, Any], endpoint: int) -> tuple[float | None, int]:
+    """Humidity measured on another endpoint of the same node.
+
+    IKEA TIMMERFLOTTE puts degrees on endpoint 1 and relative humidity on
+    endpoint 2. The humidity endpoint is sometimes not its own Home row, so
+    the temperature row has to pick the value up itself.
+    """
+    for other in sorted(endpoint_ids(attributes)):
+        if other <= 0 or other == endpoint:
+            continue
+        value = matter_humidity_percent(
+            attr_raw(attributes, other, HUMIDITY_MEASUREMENT, ATTR_MEASURED_HUMIDITY)
+        )
+        if value is not None:
+            return value, other
+    return None, 0
+
+
 def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
     temp = matter_celsius(attr_raw(attributes, endpoint, TEMP_MEASUREMENT, ATTR_MEASURED_TEMP))
     humidity = matter_humidity_percent(
         attr_raw(attributes, endpoint, HUMIDITY_MEASUREMENT, ATTR_MEASURED_HUMIDITY)
     )
+    borrowed = 0
+    if humidity is None and temp is not None:
+        humidity, borrowed = sibling_humidity(attributes, endpoint)
     has_open = endpoint_looks_contact_sensor(attributes, endpoint)
     open_val = None
     if has_open:
@@ -8460,7 +8600,7 @@ def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         on_val = bool(motion_val)
     else:
         on_val = False
-    return {
+    payload = {
         "temperature": temp,
         "humidity": humidity,
         "has_open": has_open,
@@ -8471,6 +8611,9 @@ def sensor_payload(attributes: dict[str, Any], endpoint: int) -> dict[str, Any]:
         "status": " · ".join(parts) if parts else "",
         "on": on_val,
     }
+    if borrowed:
+        payload["climate_endpoints"] = [endpoint, borrowed]
+    return payload
 
 
 def matter_celsius(raw: Any) -> float | None:
