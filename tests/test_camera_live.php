@@ -114,7 +114,7 @@ assert_true(str_contains($proxy, 'Sec-WebSocket-Accept'), 'the picture port carr
 assert_true(str_contains($appJs, 'function suspendPictures'), 'an ordinary picture stream can still step aside');
 assert_true(str_contains($appJs, 'location.host'), 'pictures and a held direction share the panel port');
 assert_true(str_contains($appJs, 'Step the pictures aside, send the press the ordinary way'), 'Connect and Dock are sent on their own, then the pictures open again');
-assert_true(str_contains($appJs, 'Leave the pictures running'), 'a direction does not close the pictures');
+assert_true(str_contains($appJs, 'the pictures open again when the finger lifts'), 'a direction that the picture connection does not carry still goes out, then the pictures return');
 assert_true(str_contains($proxy, 'Keep sending pictures while a direction is handled'), 'pictures keep moving while a direction is handled');
 assert_true(str_contains($proxy, 'websocket" in (self.headers.get("Upgrade")'), 'the panel port accepts a press on the picture connection');
 assert_true(str_contains($camera, 'session.user_stop = True'), 'only Stop turns the cameras off');

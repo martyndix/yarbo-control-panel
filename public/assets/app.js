@@ -17010,7 +17010,7 @@ function failCameraCommands(err) {
     cameraCommandWaiters.clear();
 }
 
-function cameraSocketRequest(path, body) {
+function cameraSocketRequest(path, body, timeoutMs = 12000) {
     return new Promise((resolve, reject) => {
         if (!cameraControlsOpen()) {
             reject(new Error('Picture connection closed'));
@@ -17024,7 +17024,7 @@ function cameraSocketRequest(path, body) {
         const timer = setTimeout(() => {
             cameraCommandWaiters.delete(id);
             reject(timedOut);
-        }, 12000);
+        }, timeoutMs);
         cameraCommandWaiters.set(id, {
             resolve: (event) => {
                 clearTimeout(timer);
@@ -17070,18 +17070,6 @@ async function postPanelJson(path, init) {
             return await parseJsonResponse(res);
         } finally {
             resumePictures();
-        }
-    }
-    if (path === '/api/drive.php' && cameraControlsOpen()) {
-        const event = await cameraSocketRequest(path, init && init.body);
-        const text = event.body || '';
-        if (!text) {
-            throw new Error(`Empty response from server (${event.status || 0})`);
-        }
-        try {
-            return JSON.parse(text);
-        } catch {
-            throw new Error('The string did not match the expected pattern.');
         }
     }
     const res = await fetch(path, init);
@@ -17466,19 +17454,82 @@ async function loadCameras() {
     }
 }
 
+let driveAside = false;
+let driveTriedSocketAt = 0;
+let driveAckAt = 0;
+
+async function closePicturesForDrive() {
+    if (picturePauseDepth === 0) picturePauseDepth = 1;
+    const source = cameraLiveSource;
+    if (!source) return;
+    cameraLiveSource = null;
+    try {
+        source.close();
+    } catch {
+        /* the picture connection was already closing */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+}
+
+function reopenPicturesAfterDrive() {
+    if (driveActive) return;
+    driveAside = false;
+    driveTriedSocketAt = 0;
+    driveAckAt = 0;
+    picturePauseDepth = 0;
+    if (cameraFramesOpen) attachCameraStream();
+}
+
+async function fetchDrive(linear, angular, enterManual, signal) {
+    const res = await fetch('/api/drive.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linear, angular, enter_manual: enterManual }),
+        signal,
+    });
+    return parseJsonResponse(res);
+}
+
 async function sendDrive(linear, angular, enterManual = false) {
-    // Leave the pictures running. Closing them for a direction kept the view
-    // frozen for the whole hold. The direction goes out on the picture connection.
+    // The picture connection should carry a direction. When it stays quiet the
+    // robot never moves, so the direction then goes out on its own and the pictures open again when the finger lifts.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
     try {
-        const data = await postPanelJson('/api/drive.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ linear, angular, enter_manual: enterManual }),
-            signal,
-        });
+        if (!driveAside && location.protocol === 'https:' && cameraControlsOpen()) {
+            if (!driveTriedSocketAt) driveTriedSocketAt = Date.now();
+            const quiet = Date.now() - driveTriedSocketAt > 700 && !driveAckAt;
+            if (!quiet) {
+                cameraSocketRequest('/api/drive.php', JSON.stringify({
+                    linear,
+                    angular,
+                    enter_manual: enterManual,
+                }), 8000).then((event) => {
+                    driveAckAt = Date.now();
+                    let data = null;
+                    try {
+                        data = JSON.parse(event.body || '');
+                    } catch {
+                        data = null;
+                    }
+                    if (data && !data.ok) {
+                        showToast(data.error || 'Drive command failed', 'error');
+                        if (els.driveStatus) els.driveStatus.textContent = 'Error';
+                    }
+                }).catch(() => {});
+                return true;
+            }
+            driveAside = true;
+        }
+        let data;
+        if (location.protocol === 'https:' && (driveAside || cameraFramesOpen || cameraLiveSource)) {
+            driveAside = true;
+            await closePicturesForDrive();
+            data = await fetchDrive(linear, angular, enterManual, signal);
+        } else {
+            data = await fetchDrive(linear, angular, enterManual, signal);
+        }
         if (!data.ok) {
             showToast(data.error || 'Drive command failed', 'error');
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
@@ -17495,6 +17546,8 @@ async function sendDrive(linear, angular, enterManual = false) {
         showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
+    } finally {
+        reopenPicturesAfterDrive();
     }
 }
 

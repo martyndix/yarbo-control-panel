@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.46] - 2026-11-20
+
+### Fixed
+
+- A direction while the cameras were showing answered "Drive did not answer" and the robot stayed still. The direction is sent with the pictures, and if that connection stays quiet it goes out on its own so the robot moves. The pictures open again when the finger lifts. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.45] - 2026-11-20
 
 ### Fixed
