@@ -34,6 +34,13 @@ def is_camera_frames(path: str) -> bool:
     return base.rstrip("/").endswith("camera_live.php") and "action=frames" in query
 
 
+def is_camera_controls(path: str) -> bool:
+    """True for the quiet connection that carries a direction."""
+    raw = path or "/"
+    base, _, query = raw.partition("?")
+    return base.rstrip("/").endswith("camera_live.php") and "action=controls" in query
+
+
 def camera_agent_port() -> int:
     """Port the camera agent is actually listening on. Never the Matter port."""
     fallback = int(os.environ.get("YARBO_CAMERA_PORT") or 8767)
@@ -272,6 +279,27 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         # Pictures stay on their own connection. Putting that stream through
         # a page worker, or leaving it open on HTTP/1.1, made Safari hand the
         # next drive press a body it could not read.
+        if self.command == "GET" and is_camera_controls(path):
+            # A direction on the picture connection never got an answer while
+            # frames were moving. This connection carries no pictures.
+            if "websocket" in (self.headers.get("Upgrade") or "").lower():
+                if not self._websocket_controls():
+                    self._camera_unavailable()
+                return
+            body = b'{"ok":true,"controls":true}'
+            self.close_connection = True
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
+            return
+
         if self.command == "GET" and is_camera_frames(path):
             # Safari will not open a second connection to this robot while a
             # picture stream is up, so a press on the page never arrives.
@@ -839,6 +867,106 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             json.dumps({"op": "reply", "id": request_id, "status": status, "body": text}).encode("utf-8"),
         )
 
+    def _websocket_controls(self) -> bool:
+        """Drive and other presses, with no pictures on this connection.
+
+        Sending a direction on the picture connection left Safari waiting, and
+        the page then said the drive did not answer. This connection stays
+        quiet so the press can leave the browser while the pictures keep moving.
+        """
+        key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
+        if not key:
+            return False
+        self.close_connection = True
+        try:
+            self.send_response(101, "Switching Protocols")
+            self.send_header("Upgrade", "websocket")
+            self.send_header("Connection", "Upgrade")
+            self.send_header("Sec-WebSocket-Accept", websocket_accept(key))
+            self.end_headers()
+            self.wfile.flush()
+        except Exception:
+            return True
+        self._websocket_control_session()
+        return True
+
+    def _websocket_control_session(self) -> None:
+        client = self.connection
+        try:
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except Exception:
+            pass
+        stop = threading.Event()
+        replies: queue.Queue[bytes] = queue.Queue()
+        jobs: queue.Queue[bytes | None] = queue.Queue()
+        threading.Thread(
+            target=self._websocket_jobs, args=(jobs, replies, stop), daemon=True
+        ).start()
+        incoming = bytearray()
+        reply_out = bytearray()
+        fragments = bytearray()
+        opcode = None
+        try:
+            client.settimeout(0.2)
+        except Exception:
+            pass
+        try:
+            while not stop.is_set():
+                while True:
+                    try:
+                        reply_out += replies.get_nowait()
+                    except queue.Empty:
+                        break
+                if reply_out:
+                    try:
+                        sent = client.send(reply_out)
+                    except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantWriteError, ssl.SSLWantReadError):
+                        sent = 0
+                    except Exception:
+                        break
+                    if sent:
+                        del reply_out[:sent]
+                try:
+                    data = client.recv(65536)
+                except (TimeoutError, socket.timeout, ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                    continue
+                except Exception:
+                    break
+                if not data:
+                    break
+                incoming += data
+                try:
+                    frames = pop_ws_frames(incoming)
+                except ValueError:
+                    break
+                for op, payload, fin in frames:
+                    if op == 0x8:
+                        reply_out += encode_ws_frame(0x8, payload[:125])
+                        stop.set()
+                        break
+                    if op == 0x9:
+                        reply_out += encode_ws_frame(0xA, payload[:125])
+                        continue
+                    if op == 0xA:
+                        continue
+                    if op == 0x0:
+                        fragments += payload
+                    elif op == 0x1:
+                        opcode = op
+                        fragments = bytearray(payload)
+                    else:
+                        opcode = None
+                        fragments = bytearray()
+                        continue
+                    if not fin or opcode != 0x1:
+                        continue
+                    jobs.put(bytes(fragments))
+                    fragments = bytearray()
+                    opcode = None
+        finally:
+            stop.set()
+            jobs.put(None)
+
 
 # The page talks to the panel port. The same picture socket has to live there,
 # or Safari keeps the buttons queued behind a stream they cannot share.
@@ -848,6 +976,8 @@ for _ws_name in (
     "_websocket_jobs",
     "_message_op",
     "_websocket_command",
+    "_websocket_controls",
+    "_websocket_control_session",
 ):
     setattr(PanelHttpsProxyHandler, _ws_name, getattr(PictureProxyHandler, _ws_name))
 

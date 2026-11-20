@@ -115,6 +115,8 @@ assert_true(str_contains($appJs, 'function suspendPictures'), 'an ordinary pictu
 assert_true(str_contains($appJs, 'location.host'), 'pictures and a held direction share the panel port');
 assert_true(str_contains($appJs, 'Step the pictures aside, send the press the ordinary way'), 'Connect and Dock are sent on their own, then the pictures open again');
 assert_true(str_contains($appJs, 'leaves the pictures open'), 'a held direction leaves the pictures open');
+assert_true(str_contains($appJs, 'action=controls'), 'a direction goes out on the quiet connection');
+assert_true(str_contains($proxy, 'action=controls'), 'the panel accepts a direction on the quiet connection');
 assert_true(str_contains($proxy, 'Keep sending pictures while a direction is handled'), 'pictures keep moving while a direction is handled');
 assert_true(str_contains($proxy, 'Only one picture sits on that socket'), 'a live view does not keep every picture and fill the machine');
 assert_true(str_contains($proxy, 'websocket" in (self.headers.get("Upgrade")'), 'the panel port accepts a press on the picture connection');

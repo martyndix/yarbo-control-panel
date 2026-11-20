@@ -69,6 +69,7 @@ def main() -> None:
     assert drive_on_picture_socket(proxy), "pictures keep arriving while a direction is still being handled"
     assert drive_on_picture_socket(proxy, proxy.PanelHttpsProxyHandler), "the panel port carries a direction on the same picture connection"
     assert pictures_stay_small(proxy), "a live view keeps the newest picture so another device can still open the panel"
+    assert drive_on_quiet_socket(proxy), "a direction on the quiet connection is handled while pictures keep arriving"
     print("ok")
 
 
@@ -574,6 +575,102 @@ def pictures_stay_small(proxy) -> bool:
         except (UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
             continue
     return bool(b"panel" in other_body and other_wait < 0.5 and len(numbers) >= 1)
+
+
+def _open_socket(port: int, path: str) -> socket.socket:
+    client = socket.create_connection(("127.0.0.1", port), timeout=3)
+    key = "dGhlIHNhbXBsZSBub25jZQ=="
+    client.sendall(
+        (
+            f"GET {path} HTTP/1.1\r\n"
+            "Host: panel.local:8443\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {key}\r\n"
+            "Sec-WebSocket-Version: 13\r\n\r\n"
+        ).encode("ascii")
+    )
+    client.settimeout(2.0)
+    head = b""
+    while b"\r\n\r\n" not in head:
+        part = client.recv(4096)
+        if not part:
+            break
+        head += part
+    if b"101" not in head.split(b"\r\n", 1)[0]:
+        raise RuntimeError(head[:200])
+    return client
+
+
+def drive_on_quiet_socket(proxy) -> bool:
+    """Pictures stay on one connection. The direction goes out on another."""
+    pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
+    buttons = ThreadingHTTPServer(("127.0.0.1", 0), _Drive)
+    threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
+    threading.Thread(target=buttons.serve_forever, daemon=True).start()
+    status = ROOT / "data" / "camera-live-status.json"
+    status.parent.mkdir(exist_ok=True)
+    previous = status.read_text(encoding="utf-8") if status.is_file() else None
+    status.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
+    previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = buttons.server_address[1]
+    _Drive.seen = b""
+    _Drive.started = 0.0
+    _Drive.finished = 0.0
+    panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=panel.serve_forever, daemon=True).start()
+    pictures = None
+    controls = None
+    saw_picture = False
+    try:
+        pictures = _open_socket(panel.server_address[1], "/api/camera_live.php?action=frames")
+        controls = _open_socket(panel.server_address[1], "/api/camera_live.php?action=controls")
+        pictures.settimeout(0.5)
+        deadline = time.time() + 1.5
+        blob = b""
+        while time.time() < deadline and not saw_picture:
+            try:
+                part = pictures.recv(4096)
+            except socket.timeout:
+                continue
+            if not part:
+                break
+            blob += part
+            saw_picture = b"middle" in blob
+        controls.sendall(_client_frame(b'{"op":"drive","id":9,"json":{"linear":0.2,"angular":0,"enter_manual":true}}'))
+        reply = b""
+        controls.settimeout(2.0)
+        deadline = time.time() + 2.0
+        while time.time() < deadline and b'"reply"' not in reply:
+            try:
+                part = controls.recv(4096)
+            except socket.timeout:
+                break
+            if not part:
+                break
+            reply += part
+        later = b""
+        pictures.settimeout(0.6)
+        try:
+            later = pictures.recv(65536)
+        except socket.timeout:
+            later = b""
+    finally:
+        if pictures is not None:
+            pictures.close()
+        if controls is not None:
+            controls.close()
+        panel.shutdown()
+        pictures_upstream.shutdown()
+        buttons.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
+        if previous is None:
+            status.unlink(missing_ok=True)
+        else:
+            status.write_text(previous, encoding="utf-8")
+    drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
+    answered = b"picture" in reply and b"true" in reply and (b'"id": 9' in reply or b'"id":9' in reply)
+    return bool(saw_picture and drove and answered and b"middle" in later)
 
 
 if __name__ == "__main__":
