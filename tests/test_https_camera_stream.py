@@ -68,6 +68,7 @@ def main() -> None:
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
     assert drive_on_picture_socket(proxy), "pictures keep arriving while a direction is still being handled"
     assert drive_on_picture_socket(proxy, proxy.PanelHttpsProxyHandler), "the panel port carries a direction on the same picture connection"
+    assert pictures_stay_small(proxy), "a live view keeps the newest picture so another device can still open the panel"
     print("ok")
 
 
@@ -409,6 +410,170 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
     answered = b"picture" in reply and b"true" in reply
     same_press = b'"id": 7' in reply or b'"id":7' in reply
     return bool(opened and drove and answered and same_press and during)
+
+
+class _QuietPanel(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        body = b"panel"
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+
+class _Flood(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(b": live\n\n")
+        self.wfile.flush()
+        blob = "A" * 50000
+        try:
+            for index in range(40):
+                payload = json.dumps({"view": "middle", "n": index, "d": blob}).encode()
+                self.wfile.write(b"data: " + payload + b"\n\n")
+                self.wfile.flush()
+            # Stay open. Closing here used to look like the browser had every
+            # picture, when the relay had only started the first one.
+            while True:
+                time.sleep(0.2)
+                self.wfile.write(b": ping\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, TimeoutError, OSError):
+            return
+
+
+def _read_ws_payloads(client: socket.socket, blob: bytes, deadline: float) -> list[bytes]:
+    frames: list[bytes] = []
+    while time.time() < deadline:
+        length = None
+        offset = 2
+        if len(blob) >= 2:
+            length = blob[1] & 0x7F
+            if length == 126 and len(blob) >= 4:
+                length = int.from_bytes(blob[2:4], "big")
+                offset = 4
+            elif length == 126:
+                length = None
+            elif length == 127 and len(blob) >= 10:
+                length = int.from_bytes(blob[2:10], "big")
+                offset = 10
+            elif length == 127:
+                length = None
+        if length is None or len(blob) < offset + length:
+            try:
+                part = client.recv(65536)
+            except socket.timeout:
+                break
+            if not part:
+                break
+            blob += part
+            continue
+        frames.append(blob[offset : offset + length])
+        blob = blob[offset + length :]
+    return frames
+
+
+def pictures_stay_small(proxy) -> bool:
+    """A viewer that falls behind must not keep every picture or block the panel."""
+    pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Flood)
+    panel = ThreadingHTTPServer(("127.0.0.1", 0), _QuietPanel)
+    threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
+    threading.Thread(target=panel.serve_forever, daemon=True).start()
+    status = ROOT / "data" / "camera-live-status.json"
+    status.parent.mkdir(exist_ok=True)
+    previous = status.read_text(encoding="utf-8") if status.is_file() else None
+    status.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
+    previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = panel.server_address[1]
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=pictures.serve_forever, daemon=True).start()
+    client = None
+    other = None
+    frames: list[bytes] = []
+    other_body = b""
+    other_wait = 99.0
+    raw = b""
+    try:
+        client = socket.create_connection(("127.0.0.1", pictures.server_address[1]), timeout=3)
+        key = "dGhlIHNhbXBsZSBub25jZQ=="
+        client.sendall(
+            (
+                "GET /api/camera_live.php?action=frames HTTP/1.1\r\n"
+                "Host: panel.local:8443\r\n"
+                "Upgrade: websocket\r\n"
+                "Connection: Upgrade\r\n"
+                f"Sec-WebSocket-Key: {key}\r\n"
+                "Sec-WebSocket-Version: 13\r\n\r\n"
+            ).encode("ascii")
+        )
+        client.settimeout(0.3)
+        # Leave the pictures unread so a backlog would form, then open the panel.
+        time.sleep(0.45)
+        started = time.time()
+        other = socket.create_connection(("127.0.0.1", pictures.server_address[1]), timeout=2)
+        other.settimeout(1.5)
+        other.sendall(b"GET / HTTP/1.1\r\nHost: panel.local\r\nConnection: close\r\n\r\n")
+        while time.time() < started + 1.5:
+            try:
+                part = other.recv(4096)
+            except socket.timeout:
+                break
+            if not part:
+                break
+            other_body += part
+            if b"panel" in other_body:
+                break
+        other_wait = time.time() - started
+        client.settimeout(0.2)
+        read_until = time.time() + 1.0
+        while time.time() < read_until:
+            try:
+                part = client.recv(65536)
+            except socket.timeout:
+                continue
+            if not part:
+                break
+            raw += part
+        _head, _, rest = raw.partition(b"\r\n\r\n")
+        frames = _read_ws_payloads(client, rest, time.time() + 0.4)
+    finally:
+        if client is not None:
+            client.close()
+        if other is not None:
+            other.close()
+        pictures.shutdown()
+        pictures_upstream.shutdown()
+        panel.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
+        if previous is None:
+            status.unlink(missing_ok=True)
+        else:
+            status.write_text(previous, encoding="utf-8")
+    numbers = []
+    for frame in frames:
+        if b'"n":' not in frame and b'"n": ' not in frame:
+            continue
+        try:
+            numbers.append(int(json.loads(frame.decode("utf-8"))["n"]))
+        except (UnicodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
+            continue
+    return bool(b"panel" in other_body and other_wait < 0.5 and len(numbers) >= 1)
 
 
 if __name__ == "__main__":

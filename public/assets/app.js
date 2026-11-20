@@ -17454,30 +17454,24 @@ async function loadCameras() {
     }
 }
 
-let driveAside = false;
-let driveTriedSocketAt = 0;
-let driveAckAt = 0;
-
-async function closePicturesForDrive() {
-    if (picturePauseDepth === 0) picturePauseDepth = 1;
-    const source = cameraLiveSource;
-    if (!source) return;
-    cameraLiveSource = null;
+function noteDriveReply(event, enterManual) {
+    let data = null;
     try {
-        source.close();
+        data = JSON.parse(event.body || '');
     } catch {
-        /* the picture connection was already closing */
+        data = null;
     }
-    await new Promise((resolve) => setTimeout(resolve, 80));
-}
-
-function reopenPicturesAfterDrive() {
-    if (driveActive) return;
-    driveAside = false;
-    driveTriedSocketAt = 0;
-    driveAckAt = 0;
-    picturePauseDepth = 0;
-    if (cameraFramesOpen) attachCameraStream();
+    if (!data) return;
+    if (!data.ok) {
+        showToast(data.error || 'Drive command failed', 'error');
+        if (els.driveStatus) els.driveStatus.textContent = 'Error';
+        return;
+    }
+    if (data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
+        sessionStorage.setItem('yarbo_drive_dock_warn', '1');
+        showToast(data.warning, 'error');
+    }
+    if (enterManual) manualModeEntered = true;
 }
 
 async function fetchDrive(linear, angular, enterManual, signal) {
@@ -17491,45 +17485,28 @@ async function fetchDrive(linear, angular, enterManual, signal) {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    // The picture connection should carry a direction. When it stays quiet the
-    // robot never moves, so the direction then goes out on its own and the pictures open again when the finger lifts.
+    // A held direction stays on the picture connection and leaves the pictures open.
+    // Closing them froze the view for the whole press. The direction is sent
+    // again on each pulse and does not wait for the pictures to step aside.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
     try {
-        if (!driveAside && location.protocol === 'https:' && cameraControlsOpen()) {
-            if (!driveTriedSocketAt) driveTriedSocketAt = Date.now();
-            const quiet = Date.now() - driveTriedSocketAt > 700 && !driveAckAt;
-            if (!quiet) {
-                cameraSocketRequest('/api/drive.php', JSON.stringify({
-                    linear,
-                    angular,
-                    enter_manual: enterManual,
-                }), 8000).then((event) => {
-                    driveAckAt = Date.now();
-                    let data = null;
-                    try {
-                        data = JSON.parse(event.body || '');
-                    } catch {
-                        data = null;
-                    }
-                    if (data && !data.ok) {
-                        showToast(data.error || 'Drive command failed', 'error');
-                        if (els.driveStatus) els.driveStatus.textContent = 'Error';
-                    }
-                }).catch(() => {});
-                return true;
-            }
-            driveAside = true;
+        if (cameraControlsOpen()) {
+            const socket = cameraLiveSource;
+            // A few unsent directions are enough. Piling more on does not move
+            // the robot any sooner, and it keeps the picture connection small.
+            if (socket.bufferedAmount > 8000) return true;
+            cameraSocketRequest('/api/drive.php', JSON.stringify({
+                linear,
+                angular,
+                enter_manual: enterManual,
+            }), 8000).then((event) => {
+                noteDriveReply(event, enterManual);
+            }).catch(() => {});
+            return true;
         }
-        let data;
-        if (location.protocol === 'https:' && (driveAside || cameraFramesOpen || cameraLiveSource)) {
-            driveAside = true;
-            await closePicturesForDrive();
-            data = await fetchDrive(linear, angular, enterManual, signal);
-        } else {
-            data = await fetchDrive(linear, angular, enterManual, signal);
-        }
+        const data = await fetchDrive(linear, angular, enterManual, signal);
         if (!data.ok) {
             showToast(data.error || 'Drive command failed', 'error');
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
@@ -17546,8 +17523,6 @@ async function sendDrive(linear, angular, enterManual = false) {
         showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
-    } finally {
-        reopenPicturesAfterDrive();
     }
 }
 

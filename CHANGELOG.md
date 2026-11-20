@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.47] - 2026-11-20
+
+### Fixed
+
+- Holding a direction froze the live pictures, and with the cameras on another device could not open the panel. A direction now stays on the picture connection, so the pictures keep moving for the whole press. The panel also keeps only the newest picture on that connection, so it no longer fills the machine and another device can open the panel while the cameras are on. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.46] - 2026-11-20
 
 ### Fixed

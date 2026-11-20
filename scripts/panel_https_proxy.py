@@ -558,9 +558,11 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
     def _websocket_session(self, camera: socket.socket, pending: bytes) -> None:
         """Keep sending pictures while a direction is handled.
 
-        Reading the browser and writing pictures from two threads on the same
-        TLS socket stalled the pictures for the whole time a direction was held.
-        One thread owns that socket. The direction is forwarded on another.
+        One thread owns the browser socket. The direction is forwarded on
+        another. Only one picture sits on that socket at a time. Holding every
+        picture and copying the whole pile on each send filled the machine, so
+        another device could not open the panel and a direction could not get
+        out while the pictures were moving.
         """
         client = self.connection
         stop = threading.Event()
@@ -607,44 +609,97 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         ).start()
 
         incoming = bytearray()
-        pending_out = bytearray()
+        reply_out = bytearray()
+        picture: bytes | None = None
+        picture_off = 0
         fragments = bytearray()
         opcode = None
-        try:
-            client.settimeout(0.05)
-        except Exception:
-            pass
+
+        def send_ready(buf: bytes | bytearray, offset: int) -> int:
+            """Bytes the browser accepted. 0 means it would block. -1 means it closed."""
+            if offset >= len(buf):
+                return 0
+            try:
+                return client.send(memoryview(buf)[offset:])
+            except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantWriteError, ssl.SSLWantReadError):
+                return 0
+            except Exception:
+                return -1
+
+        def newest_picture() -> bytes | None:
+            """The latest picture. Older ones are dropped so the socket stays small."""
+            newest = None
+            while True:
+                try:
+                    newest = pictures.get_nowait()
+                except queue.Empty:
+                    return newest
+
+        def pull_client(wait: bool) -> bytes | None:
+            """Bytes from the browser. None means the browser hung up.
+
+            Waiting here between pictures would hold the next frame for the
+            whole timeout, so a direction is read without pausing the view
+            when another picture is ready.
+            """
+            try:
+                client.settimeout(0.05 if wait else 0)
+            except Exception:
+                pass
+            try:
+                return client.recv(65536)
+            except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantReadError, ssl.SSLWantWriteError):
+                return b""
+            except Exception:
+                return None
+
         try:
             while not stop.is_set():
                 while True:
                     try:
-                        pending_out += replies.get_nowait()
+                        reply_out += replies.get_nowait()
                     except queue.Empty:
                         break
-                while True:
-                    try:
-                        pending_out += pictures.get_nowait()
-                    except queue.Empty:
-                        break
-                if pending_out:
-                    try:
-                        sent = client.send(pending_out)
-                    except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantWriteError, ssl.SSLWantReadError):
-                        sent = 0
-                    except Exception:
+                sent = 0
+                # A picture already partly on the wire has to finish. A reply
+                # goes out before the next picture, so a direction is not stuck
+                # behind a pile of frames.
+                if picture is not None and picture_off > 0:
+                    sent = send_ready(picture, picture_off)
+                    if sent < 0:
                         break
                     if sent:
-                        del pending_out[:sent]
-                try:
-                    data = client.recv(65536)
-                except (TimeoutError, socket.timeout, ssl.SSLWantReadError):
-                    continue
-                except ssl.SSLWantWriteError:
-                    continue
-                except Exception:
+                        picture_off += sent
+                        if picture_off >= len(picture):
+                            picture = None
+                            picture_off = 0
+                elif reply_out:
+                    sent = send_ready(reply_out, 0)
+                    if sent < 0:
+                        break
+                    if sent:
+                        del reply_out[:sent]
+                else:
+                    if picture is None:
+                        picture = newest_picture()
+                        picture_off = 0
+                    if picture is not None:
+                        sent = send_ready(picture, picture_off)
+                        if sent < 0:
+                            break
+                        if sent:
+                            picture_off += sent
+                            if picture_off >= len(picture):
+                                picture = None
+                                picture_off = 0
+                more = bool(reply_out) or picture is not None or not pictures.empty()
+                data = pull_client(wait=sent == 0 or not more)
+                if data is None:
                     break
                 if not data:
-                    break
+                    if sent == 0:
+                        time.sleep(0.01)
+                    continue
                 incoming += data
                 try:
                     frames = pop_ws_frames(incoming)
@@ -652,11 +707,11 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                     break
                 for op, payload, fin in frames:
                     if op == 0x8:
-                        pending_out += encode_ws_frame(0x8, payload[:125])
+                        reply_out += encode_ws_frame(0x8, payload[:125])
                         stop.set()
                         break
                     if op == 0x9:
-                        pending_out += encode_ws_frame(0xA, payload[:125])
+                        reply_out += encode_ws_frame(0xA, payload[:125])
                         continue
                     if op == 0xA:
                         continue
