@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.57] - 2026-11-20
+
+### Fixed
+
+- Connect said the robot did not answer while the cameras were showing. Safari does not bring that answer back on the picture connection. The pictures step aside for the Connect press, the controller command is sent, and the pictures open again. Update to latest, refresh Safari, press Stop view, then Start live view, then Connect.
+
 ## [5.0.56] - 2026-11-20
 
 ### Fixed

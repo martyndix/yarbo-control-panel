@@ -117,6 +117,7 @@ assert_true(str_contains($appJs, 'leaves the pictures open'), 'a held direction 
 assert_true(str_contains($appJs, 'function commandTransport'), 'Connect uses the picture connection while it is open');
 assert_true(str_contains($appJs, 'function driveTransport'), 'a direction uses the quiet connection while the pictures are open');
 assert_true(str_contains($appJs, 'function stepPicturesAside'), 'a direction can still be sent when neither socket is open');
+assert_true(str_contains($appJs, 'Step the pictures aside for this one press'), 'Connect steps the pictures aside so Safari can finish it');
 assert_true(str_contains($appJs, 'function drainCameraFrames'), 'picture decoding does not block a press');
 assert_true(str_contains($agent, 'drive_busy_until'), 'a held direction is not stuck behind a camera keep-alive');
 assert_true(!str_contains($appJs, 'closePicturesForDrive'), 'a press does not close the pictures');

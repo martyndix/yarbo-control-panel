@@ -17152,29 +17152,19 @@ function cameraSocketRequest(path, body, timeoutMs = 12000) {
 }
 
 async function postPanelJson(path, init) {
-    // Connect, Dock and the other presses go on the picture connection while
-    // it is open. That is the connection Safari is reading. The pictures stay
-    // open. Fetching beside them never leaves Safari.
-    if (path === '/api/command.php' && location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource || cameraControlsOpen())) {
-        if (!commandTransport() && !cameraPicturesOpen()) {
-            attachCommandSocket();
-            const start = Date.now();
-            while (!commandTransport() && Date.now() - start < 8000) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-            }
-        }
-        if (!commandTransport()) {
-            throw new Error('The robot did not answer. Press it again.');
-        }
-        const event = await cameraSocketRequest(path, (init && init.body) || '', 20000);
-        const data = JSON.parse(event.body || '');
-        if (!data || typeof data !== 'object') {
-            throw new Error('The robot did not answer. Press it again.');
-        }
-        return data;
+    // Safari does not bring an answer back on the picture connection.
+    // Step the pictures aside for this one press, send it, then open them again.
+    const holdPictures = path === '/api/command.php'
+        && location.protocol === 'https:'
+        && !picturesSteppedAside
+        && (cameraPicturesOpen() || !!cameraLiveSource || cameraFramesOpen);
+    if (holdPictures) await stepPicturesAside();
+    try {
+        const res = await fetch(path, init);
+        return parseJsonResponse(res);
+    } finally {
+        if (holdPictures) restorePicturesAfterDrive();
     }
-    const res = await fetch(path, init);
-    return parseJsonResponse(res);
 }
 
 function attachCameraSocket() {
