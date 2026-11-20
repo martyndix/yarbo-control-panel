@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.54] - 2026-11-20
+
+### Fixed
+
+- Connect said the robot did not answer once the cameras were showing, and the status card stayed on the old time. Safari keeps reading the picture connection and does not deliver a press or a status card that arrives on the other one. Connect, Dock, lights and the status card now travel on the picture connection, ahead of the next frame, and the view stays open. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.53] - 2026-11-20
 
 ### Fixed

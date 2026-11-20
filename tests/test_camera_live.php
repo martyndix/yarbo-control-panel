@@ -114,7 +114,7 @@ assert_true(str_contains($proxy, 'Sec-WebSocket-Accept'), 'the picture port carr
 assert_true(str_contains($appJs, 'function suspendPictures'), 'an ordinary picture stream can still step aside');
 assert_true(str_contains($appJs, 'location.host'), 'pictures and a held direction share the panel port');
 assert_true(str_contains($appJs, 'leaves the pictures open'), 'a held direction leaves the pictures open');
-assert_true(str_contains($appJs, 'function commandTransport'), 'a press uses the quiet connection');
+assert_true(str_contains($appJs, 'function commandTransport'), 'a press uses the picture connection while it is open');
 assert_true(str_contains($appJs, 'function drainCameraFrames'), 'picture decoding does not block a press');
 assert_true(str_contains($agent, 'drive_busy_until'), 'a held direction is not stuck behind a camera keep-alive');
 assert_true(!str_contains($appJs, 'closePicturesForDrive'), 'a press does not close the pictures');
@@ -123,11 +123,9 @@ assert_true(str_contains($appJs, "event.op === 'status'"), 'the status card keep
 $pictureAt = strpos($proxy, 'def _websocket_session');
 $jobsAt = strpos($proxy, 'def _websocket_jobs');
 $pictureFn = substr($proxy, (int) $pictureAt, (int) $jobsAt - (int) $pictureAt);
-assert_true(!str_contains($pictureFn, 'status.php'), 'the picture connection does not ask PHP for status');
-assert_true(!str_contains($pictureFn, '_websocket_jobs'), 'the picture connection does not post a press');
-$controlAt = strpos($proxy, 'def _websocket_control_session');
-assert_true($controlAt !== false && str_contains(substr($proxy, (int) $controlAt), 'status.php?card=1'), 'the quiet connection asks for the robot card');
-assert_true(str_contains($proxy, '{"op": "status"'), 'the quiet connection carries a fresh status');
+assert_true(str_contains($pictureFn, 'status.php?card=1'), 'the picture connection asks for the robot card');
+assert_true(str_contains($pictureFn, '_websocket_jobs'), 'the picture connection posts a press');
+assert_true(str_contains($proxy, '{"op": "status"'), 'the picture connection carries a fresh status');
 assert_true(str_contains($proxy, 'One status request at a time'), 'camera status does not pile up PHP workers');
 $statusPhp = (string) file_get_contents($root . '/public/api/status.php');
 assert_true(str_contains($statusPhp, 'function status_card_only'), 'status can answer the robot card without the whole dashboard');

@@ -604,6 +604,7 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         stop = threading.Event()
         pictures: queue.Queue[bytes] = queue.Queue(maxsize=4)
         replies: queue.Queue[bytes] = queue.Queue()
+        jobs: queue.Queue[bytes | None] = queue.Queue()
 
         def pump() -> None:
             buf = bytearray(pending)
@@ -643,7 +644,63 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             finally:
                 stop.set()
 
+        def push_status() -> None:
+            """One status request at a time.
+
+            Safari reads this picture connection and does not deliver a status
+            card that arrives on the quiet one. A full status page holds a PHP
+            worker for the whole dashboard, so this asks only for the robot
+            card, and only one of those requests runs at a time.
+            """
+            first = True
+            while not stop.is_set():
+                if not first and stop.wait(5):
+                    return
+                first = False
+                conn = None
+                body = b""
+                try:
+                    conn = http.client.HTTPConnection(
+                        self.upstream_host, self.upstream_port, timeout=8
+                    )
+                    conn.request(
+                        "GET",
+                        "/api/status.php?card=1",
+                        headers={
+                            "Host": self.headers.get("Host")
+                            or f"{self.upstream_host}:{self.upstream_port}",
+                            "Connection": "close",
+                            "X-Forwarded-Proto": "https",
+                        },
+                    )
+                    resp = conn.getresponse()
+                    body = resp.read(262144)
+                except Exception:
+                    body = b""
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                if not body.startswith(b"{"):
+                    continue
+                try:
+                    text = body.decode("utf-8")
+                except UnicodeError:
+                    continue
+                replies.put(
+                    encode_ws_frame(
+                        0x1,
+                        json.dumps({"op": "status", "body": text}, separators=(",", ":")).encode("utf-8"),
+                    )
+                )
+
         threading.Thread(target=pump, daemon=True).start()
+        threading.Thread(
+            target=self._websocket_jobs, args=(jobs, replies, stop), daemon=True
+        ).start()
+        threading.Thread(target=push_status, daemon=True).start()
 
         incoming = bytearray()
         reply_out = bytearray()
@@ -656,6 +713,12 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             """Bytes the browser accepted. 0 means it would block. -1 means it closed."""
             if offset >= len(buf):
                 return 0
+            # A blocking send of one picture held this thread until the browser
+            # caught up, so a press and the status card never left the queue.
+            try:
+                client.settimeout(0)
+            except Exception:
+                pass
             try:
                 return client.send(memoryview(buf)[offset:])
             except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantWriteError, ssl.SSLWantReadError):
@@ -765,12 +828,12 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                         continue
                     if not fin or opcode != 0x1:
                         continue
-                    # Presses and the status card use the quiet connection.
-                    # This socket only carries pictures.
+                    jobs.put(bytes(fragments))
                     fragments = bytearray()
                     opcode = None
         finally:
             stop.set()
+            jobs.put(None)
             try:
                 camera.close()
             except Exception:
@@ -913,61 +976,6 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         threading.Thread(
             target=self._websocket_jobs, args=(jobs, replies, stop), daemon=True
         ).start()
-
-        def push_status() -> None:
-            """One status request at a time.
-
-            Safari will not finish the status card's own request while pictures
-            are open, so this quiet connection carries a fresh card. A full
-            status page holds a PHP worker for the whole dashboard. Starting
-            another before the first finished used every worker, so another
-            device could not load the panel.
-            """
-            first = True
-            while not stop.is_set():
-                if not first and stop.wait(5):
-                    return
-                first = False
-                conn = None
-                body = b""
-                try:
-                    conn = http.client.HTTPConnection(
-                        self.upstream_host, self.upstream_port, timeout=8
-                    )
-                    conn.request(
-                        "GET",
-                        "/api/status.php?card=1",
-                        headers={
-                            "Host": self.headers.get("Host")
-                            or f"{self.upstream_host}:{self.upstream_port}",
-                            "Connection": "close",
-                            "X-Forwarded-Proto": "https",
-                        },
-                    )
-                    resp = conn.getresponse()
-                    body = resp.read(262144)
-                except Exception:
-                    body = b""
-                finally:
-                    if conn is not None:
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
-                if not body.startswith(b"{"):
-                    continue
-                try:
-                    text = body.decode("utf-8")
-                except UnicodeError:
-                    continue
-                replies.put(
-                    encode_ws_frame(
-                        0x1,
-                        json.dumps({"op": "status", "body": text}, separators=(",", ":")).encode("utf-8"),
-                    )
-                )
-
-        threading.Thread(target=push_status, daemon=True).start()
         incoming = bytearray()
         reply_out = bytearray()
         fragments = bytearray()

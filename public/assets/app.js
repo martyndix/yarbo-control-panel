@@ -17090,9 +17090,11 @@ function cameraControlsOpen() {
 }
 
 function commandTransport() {
-    // Presses stay on the quiet connection. The picture connection only
-    // carries pictures, so a button does not freeze the view.
-    return cameraControlsOpen() ? cameraCommandSocket : null;
+    // Safari keeps reading the picture connection. A press or a status card
+    // sent on the quiet one never arrives while those pictures are moving.
+    if (cameraPicturesOpen()) return cameraLiveSource;
+    if (cameraControlsOpen()) return cameraCommandSocket;
+    return null;
 }
 
 function failCameraCommands(err) {
@@ -17140,17 +17142,18 @@ function cameraSocketRequest(path, body, timeoutMs = 12000) {
 }
 
 async function postPanelJson(path, init) {
-    // Connect, Dock and the other presses go on the quiet connection. The
-    // pictures stay open. Fetching beside them never leaves Safari.
+    // Connect, Dock and the other presses go on the picture connection while
+    // it is open. That is the connection Safari is reading. The pictures stay
+    // open. Fetching beside them never leaves Safari.
     if (path === '/api/command.php' && location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource || cameraControlsOpen())) {
-        if (!cameraControlsOpen()) {
+        if (!commandTransport() && !cameraPicturesOpen()) {
             attachCommandSocket();
             const start = Date.now();
-            while (!cameraControlsOpen() && Date.now() - start < 8000) {
+            while (!commandTransport() && Date.now() - start < 8000) {
                 await new Promise((resolve) => setTimeout(resolve, 40));
             }
         }
-        if (!cameraControlsOpen()) {
+        if (!commandTransport()) {
             throw new Error('The robot did not answer. Press it again.');
         }
         const event = await cameraSocketRequest(path, (init && init.body) || '', 20000);
@@ -17182,6 +17185,10 @@ function attachCameraSocket() {
             if (!waiter) return;
             cameraCommandWaiters.delete(event.id);
             waiter.resolve(event);
+            return;
+        }
+        if (event && event.op === 'status') {
+            applyLiveStatus(event.body);
             return;
         }
         enqueueCameraFrame(event);
@@ -17632,22 +17639,15 @@ async function fetchDrive(linear, angular, enterManual, signal) {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    // A held direction goes on the quiet connection and leaves the pictures open.
+    // A held direction goes on the picture connection and leaves the pictures open.
     // Closing the pictures for the press is what stopped the view.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
     try {
         const picturesUp = location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource || cameraControlsOpen());
-        if (picturesUp && !cameraControlsOpen()) {
-            attachCommandSocket();
-            const start = Date.now();
-            while (!cameraControlsOpen() && Date.now() - start < 1500) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-            }
-        }
         const transport = commandTransport();
-        if (transport && transport.bufferedAmount <= 64000) {
+        if (transport) {
             cameraSocketRequest('/api/drive.php', JSON.stringify({
                 linear,
                 angular,
