@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.49] - 2026-11-20
+
+### Fixed
+
+- The status card stopped on the last time once the cameras were showing, because Safari will not finish that request while the pictures are open. The picture connection now brings a fresh status, so battery, heading and the updated time keep moving. Pressing Connect, Dock or a direction no longer closes the pictures for the press. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.48] - 2026-11-20
 
 ### Fixed

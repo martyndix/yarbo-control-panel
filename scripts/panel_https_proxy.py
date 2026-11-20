@@ -631,10 +631,61 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             finally:
                 stop.set()
 
+        def push_status() -> None:
+            """The status card cannot use its own request while pictures are open.
+
+            Safari does not finish that request, so the card keeps the old time.
+            The same picture connection carries a fresh status instead.
+            """
+            first = True
+            while not stop.is_set():
+                if not first and stop.wait(5):
+                    return
+                first = False
+                conn = None
+                body = b""
+                try:
+                    conn = http.client.HTTPConnection(
+                        self.upstream_host, self.upstream_port, timeout=4
+                    )
+                    conn.request(
+                        "GET",
+                        "/api/status.php",
+                        headers={
+                            "Host": self.headers.get("Host")
+                            or f"{self.upstream_host}:{self.upstream_port}",
+                            "Connection": "close",
+                            "X-Forwarded-Proto": "https",
+                        },
+                    )
+                    resp = conn.getresponse()
+                    body = resp.read(262144)
+                except Exception:
+                    body = b""
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:
+                            pass
+                if not body.startswith(b"{"):
+                    continue
+                try:
+                    text = body.decode("utf-8")
+                except UnicodeError:
+                    continue
+                replies.put(
+                    encode_ws_frame(
+                        0x1,
+                        json.dumps({"op": "status", "body": text}, separators=(",", ":")).encode("utf-8"),
+                    )
+                )
+
         threading.Thread(target=pump, daemon=True).start()
         threading.Thread(
             target=self._websocket_jobs, args=(jobs, replies, stop), daemon=True
         ).start()
+        threading.Thread(target=push_status, daemon=True).start()
 
         incoming = bytearray()
         reply_out = bytearray()

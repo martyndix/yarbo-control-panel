@@ -113,8 +113,10 @@ assert_true(str_contains($appJs, 'new WebSocket(url)'), 'Safari can drive withou
 assert_true(str_contains($proxy, 'Sec-WebSocket-Accept'), 'the picture port carries presses back up the picture connection');
 assert_true(str_contains($appJs, 'function suspendPictures'), 'an ordinary picture stream can still step aside');
 assert_true(str_contains($appJs, 'location.host'), 'pictures and a held direction share the panel port');
-assert_true(str_contains($appJs, 'Step the pictures aside, send the press the ordinary way'), 'Connect and Dock are sent on their own, then the pictures open again');
 assert_true(str_contains($appJs, 'leaves the pictures open'), 'a held direction leaves the pictures open');
+assert_true(!str_contains($appJs, 'closePicturesForDrive'), 'a press does not close the pictures');
+assert_true(str_contains($appJs, "event.op === 'status'"), 'the status card keeps updating while the pictures are open');
+assert_true(str_contains($proxy, '{"op": "status"'), 'the picture connection carries a fresh status');
 assert_true(str_contains($appJs, 'action=controls'), 'a direction goes out on the quiet connection');
 assert_true(str_contains($proxy, 'action=controls'), 'the panel accepts a direction on the quiet connection');
 assert_true(str_contains($proxy, 'Keep sending pictures while a direction is handled'), 'pictures keep moving while a direction is handled');

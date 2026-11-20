@@ -70,6 +70,7 @@ def main() -> None:
     assert drive_on_picture_socket(proxy, proxy.PanelHttpsProxyHandler), "the panel port carries a direction on the same picture connection"
     assert pictures_stay_small(proxy), "a live view keeps the newest picture so another device can still open the panel"
     assert drive_on_quiet_socket(proxy), "a direction on the quiet connection is handled while pictures keep arriving"
+    assert status_on_picture_socket(proxy), "the status card is refreshed on the picture connection"
     print("ok")
 
 
@@ -413,6 +414,25 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
     return bool(opened and drove and answered and same_press and during)
 
 
+class _Status(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        if not self.path.startswith("/api/status.php"):
+            self.send_error(404)
+            return
+        body = b'{"ok":true,"battery":98,"state":"active","updated_at":"2026-11-20T01:54:02Z"}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(body)
+
+
 class _QuietPanel(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -671,6 +691,47 @@ def drive_on_quiet_socket(proxy) -> bool:
     drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
     answered = b"picture" in reply and b"true" in reply and (b'"id": 9' in reply or b'"id":9' in reply)
     return bool(saw_picture and drove and answered and b"middle" in later)
+
+
+def status_on_picture_socket(proxy) -> bool:
+    pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
+    status = ThreadingHTTPServer(("127.0.0.1", 0), _Status)
+    threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
+    threading.Thread(target=status.serve_forever, daemon=True).start()
+    live = ROOT / "data" / "camera-live-status.json"
+    live.parent.mkdir(exist_ok=True)
+    previous = live.read_text(encoding="utf-8") if live.is_file() else None
+    live.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
+    previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = status.server_address[1]
+    panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=panel.serve_forever, daemon=True).start()
+    client = None
+    blob = b""
+    try:
+        client = _open_socket(panel.server_address[1], "/api/camera_live.php?action=frames")
+        client.settimeout(0.4)
+        deadline = time.time() + 3.0
+        while time.time() < deadline and b'"op":"status"' not in blob:
+            try:
+                part = client.recv(65536)
+            except socket.timeout:
+                continue
+            if not part:
+                break
+            blob += part
+    finally:
+        if client is not None:
+            client.close()
+        panel.shutdown()
+        pictures_upstream.shutdown()
+        status.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
+        if previous is None:
+            live.unlink(missing_ok=True)
+        else:
+            live.write_text(previous, encoding="utf-8")
+    return b'"op":"status"' in blob and b"98" in blob and b"middle" in blob
 
 
 if __name__ == "__main__":
