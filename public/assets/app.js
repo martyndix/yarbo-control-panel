@@ -17001,9 +17001,8 @@ let cameraCommandSeq = 0;
 const cameraCommandWaiters = new Map();
 
 function cameraControlsOpen() {
-    return typeof WebSocket === 'function'
-        && cameraLiveSource instanceof WebSocket
-        && cameraLiveSource.readyState === WebSocket.OPEN;
+    const source = cameraLiveSource;
+    return !!source && typeof source.send === 'function' && source.readyState === 1;
 }
 
 function failCameraCommands(err) {
@@ -17468,8 +17467,8 @@ async function loadCameras() {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    const viaSocket = cameraControlsOpen();
-    if (!viaSocket) await suspendPictures();
+    // Leave the pictures running. Closing them for a direction kept the view
+    // frozen for the whole hold. The direction goes out on the picture connection.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
@@ -17496,8 +17495,6 @@ async function sendDrive(linear, angular, enterManual = false) {
         showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
-    } finally {
-        if (!viaSocket) resumePictures();
     }
 }
 

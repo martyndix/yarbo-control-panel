@@ -13,6 +13,7 @@ import hashlib
 import http.client
 import json
 import os
+import queue
 import socket
 import ssl
 import struct
@@ -96,6 +97,46 @@ WS_MAX_FRAME = 2_000_000
 def websocket_accept(key: str) -> str:
     digest = hashlib.sha1((key.strip() + WS_GUID).encode("ascii")).digest()
     return base64.b64encode(digest).decode("ascii")
+
+
+def pop_ws_frames(buf: bytearray) -> list[tuple[int, bytes, bool]]:
+    """Take complete client frames out of buf, leaving any partial frame."""
+    frames: list[tuple[int, bytes, bool]] = []
+    while True:
+        if len(buf) < 2:
+            return frames
+        first, second = buf[0], buf[1]
+        masked = (second & 0x80) != 0
+        length = second & 0x7F
+        offset = 2
+        if length == 126:
+            if len(buf) < offset + 2:
+                return frames
+            length = struct.unpack("!H", bytes(buf[offset : offset + 2]))[0]
+            offset += 2
+        elif length == 127:
+            if len(buf) < offset + 8:
+                return frames
+            length = struct.unpack("!Q", bytes(buf[offset : offset + 8]))[0]
+            offset += 8
+        if length > WS_MAX_FRAME:
+            raise ValueError("picture frame too large")
+        mask_len = 4 if masked else 0
+        if len(buf) < offset + mask_len + length:
+            return frames
+        mask = bytes(buf[offset : offset + mask_len]) if masked else b""
+        offset += mask_len
+        payload = bytes(buf[offset : offset + length])
+        del buf[: offset + length]
+        if masked:
+            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
+        frames.append((first & 0x0F, payload, (first & 0x80) != 0))
+
+
+def sse_payload(block: bytes) -> bytes:
+    return b"\n".join(
+        line[5:].lstrip() for line in block.split(b"\n") if line.startswith(b"data:")
+    )
 
 
 def encode_ws_frame(opcode: int, payload: bytes) -> bytes:
@@ -507,36 +548,49 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 pass
             return True
 
-        stop = threading.Event()
-        write_lock = threading.Lock()
+        try:
+            self.wfile.flush()
+        except Exception:
+            pass
+        self._websocket_session(sock, pending)
+        return True
 
-        def send_frame(opcode: int, payload: bytes) -> None:
-            if stop.is_set():
-                return
-            try:
-                with write_lock:
-                    self.wfile.write(encode_ws_frame(opcode, payload))
-                    self.wfile.flush()
-            except Exception:
-                stop.set()
+    def _websocket_session(self, camera: socket.socket, pending: bytes) -> None:
+        """Keep sending pictures while a direction is handled.
+
+        Reading the browser and writing pictures from two threads on the same
+        TLS socket stalled the pictures for the whole time a direction was held.
+        One thread owns that socket. The direction is forwarded on another.
+        """
+        client = self.connection
+        stop = threading.Event()
+        pictures: queue.Queue[bytes] = queue.Queue(maxsize=4)
+        replies: queue.Queue[bytes] = queue.Queue()
+        jobs: queue.Queue[bytes | None] = queue.Queue()
 
         def pump() -> None:
             buf = bytearray(pending)
             try:
-                sock.settimeout(0.5)
+                camera.settimeout(0.5)
                 while not stop.is_set():
                     while b"\n\n" in buf:
-                        block, _, rest = bytes(buf).partition(b"\n\n")
+                        block, _, _rest = bytes(buf).partition(b"\n\n")
                         del buf[: len(block) + 2]
-                        payload = b"\n".join(
-                            line[5:].lstrip()
-                            for line in block.split(b"\n")
-                            if line.startswith(b"data:")
-                        )
-                        if payload:
-                            send_frame(0x1, payload)
+                        payload = sse_payload(block)
+                        if not payload:
+                            continue
+                        frame = encode_ws_frame(0x1, payload)
+                        while not stop.is_set():
+                            try:
+                                pictures.put(frame, timeout=0.2)
+                                break
+                            except queue.Full:
+                                try:
+                                    pictures.get_nowait()
+                                except queue.Empty:
+                                    pass
                     try:
-                        chunk = sock.recv(16384)
+                        chunk = camera.recv(16384)
                     except (TimeoutError, socket.timeout):
                         continue
                     if not chunk:
@@ -546,58 +600,130 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 pass
             finally:
                 stop.set()
-                try:
-                    self.connection.shutdown(socket.SHUT_RDWR)
-                except Exception:
-                    pass
 
         threading.Thread(target=pump, daemon=True).start()
-        try:
-            self._websocket_commands(stop, send_frame)
-        finally:
-            stop.set()
-            try:
-                sock.close()
-            except Exception:
-                pass
-        return True
+        threading.Thread(
+            target=self._websocket_jobs, args=(jobs, replies, stop), daemon=True
+        ).start()
 
-    def _websocket_commands(self, stop: threading.Event, send_frame) -> None:
+        incoming = bytearray()
+        pending_out = bytearray()
         fragments = bytearray()
         opcode = None
+        try:
+            client.settimeout(0.05)
+        except Exception:
+            pass
+        try:
+            while not stop.is_set():
+                while True:
+                    try:
+                        pending_out += replies.get_nowait()
+                    except queue.Empty:
+                        break
+                while True:
+                    try:
+                        pending_out += pictures.get_nowait()
+                    except queue.Empty:
+                        break
+                if pending_out:
+                    try:
+                        sent = client.send(pending_out)
+                    except (TimeoutError, socket.timeout, BlockingIOError, ssl.SSLWantWriteError, ssl.SSLWantReadError):
+                        sent = 0
+                    except Exception:
+                        break
+                    if sent:
+                        del pending_out[:sent]
+                try:
+                    data = client.recv(65536)
+                except (TimeoutError, socket.timeout, ssl.SSLWantReadError):
+                    continue
+                except ssl.SSLWantWriteError:
+                    continue
+                except Exception:
+                    break
+                if not data:
+                    break
+                incoming += data
+                try:
+                    frames = pop_ws_frames(incoming)
+                except ValueError:
+                    break
+                for op, payload, fin in frames:
+                    if op == 0x8:
+                        pending_out += encode_ws_frame(0x8, payload[:125])
+                        stop.set()
+                        break
+                    if op == 0x9:
+                        pending_out += encode_ws_frame(0xA, payload[:125])
+                        continue
+                    if op == 0xA:
+                        continue
+                    if op == 0x0:
+                        fragments += payload
+                    elif op == 0x1:
+                        opcode = op
+                        fragments = bytearray(payload)
+                    else:
+                        opcode = None
+                        fragments = bytearray()
+                        continue
+                    if not fin or opcode != 0x1:
+                        continue
+                    jobs.put(bytes(fragments))
+                    fragments = bytearray()
+                    opcode = None
+        finally:
+            stop.set()
+            jobs.put(None)
+            try:
+                camera.close()
+            except Exception:
+                pass
+
+    def _websocket_jobs(self, jobs: "queue.Queue[bytes | None]", replies: "queue.Queue[bytes]", stop: threading.Event) -> None:
         while not stop.is_set():
             try:
-                frame = self._read_ws_frame()
-            except Exception:
-                break
-            if frame is None:
-                break
-            op, payload, fin = frame
-            if op == 0x8:
-                send_frame(0x8, payload[:125])
-                break
-            if op == 0x9:
-                send_frame(0xA, payload[:125])
+                message = jobs.get(timeout=0.2)
+            except queue.Empty:
                 continue
-            if op == 0xA:
-                continue
-            if op == 0x0:
-                fragments += payload
-            elif op == 0x1:
-                opcode = op
-                fragments = bytearray(payload)
-            else:
-                opcode = None
-                fragments = bytearray()
-                continue
-            if not fin or opcode != 0x1:
-                continue
-            message = bytes(fragments)
-            fragments = bytearray()
-            opcode = None
-            self._websocket_command(message, send_frame)
+            if message is None:
+                return
+            if self._message_op(message) == "drive":
+                while True:
+                    try:
+                        nxt = jobs.get_nowait()
+                    except queue.Empty:
+                        break
+                    if nxt is None:
+                        message = None
+                        break
+                    if self._message_op(nxt) == "drive":
+                        message = nxt
+                        continue
+                    frame = self._websocket_command(message)
+                    if frame:
+                        replies.put(frame)
+                    message = nxt
+                    break
+                if message is None:
+                    return
+            frame = self._websocket_command(message)
+            if frame:
+                replies.put(frame)
 
-    def _websocket_command(self, message: bytes, send_frame) -> None:
+    def _message_op(self, message: bytes) -> str:
+        try:
+            incoming = json.loads(message.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError, TypeError):
+            return ""
+        if not isinstance(incoming, dict):
+            return ""
+        op = incoming.get("op")
+        return op if isinstance(op, str) else ""
+
+    def _websocket_command(self, message: bytes) -> bytes | None:
         if len(message) > 65536:
             return
         try:
@@ -653,58 +779,20 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             text = reply.decode("utf-8")
         except UnicodeError:
             text = ""
-        send_frame(
+        return encode_ws_frame(
             0x1,
             json.dumps({"op": "reply", "id": request_id, "status": status, "body": text}).encode("utf-8"),
         )
-
-    def _read_exact(self, size: int) -> bytes:
-        buf = bytearray()
-        while len(buf) < size:
-            part = self.rfile.read(size - len(buf))
-            if not part:
-                break
-            buf += part
-        return bytes(buf)
-
-    def _read_ws_frame(self):
-        head = self._read_exact(2)
-        if len(head) < 2:
-            return None
-        first, second = head[0], head[1]
-        masked = (second & 0x80) != 0
-        length = second & 0x7F
-        if length == 126:
-            extra = self._read_exact(2)
-            if len(extra) < 2:
-                return None
-            length = struct.unpack("!H", extra)[0]
-        elif length == 127:
-            extra = self._read_exact(8)
-            if len(extra) < 8:
-                return None
-            length = struct.unpack("!Q", extra)[0]
-        if length > WS_MAX_FRAME:
-            raise ValueError("picture frame too large")
-        mask = self._read_exact(4) if masked else b""
-        if masked and len(mask) < 4:
-            return None
-        payload = self._read_exact(length) if length else b""
-        if len(payload) < length:
-            return None
-        if masked:
-            payload = bytes(byte ^ mask[index % 4] for index, byte in enumerate(payload))
-        return first & 0x0F, payload, (first & 0x80) != 0
 
 
 # The page talks to the panel port. The same picture socket has to live there,
 # or Safari keeps the buttons queued behind a stream they cannot share.
 for _ws_name in (
     "_websocket_pictures",
-    "_websocket_commands",
+    "_websocket_session",
+    "_websocket_jobs",
+    "_message_op",
     "_websocket_command",
-    "_read_exact",
-    "_read_ws_frame",
 ):
     setattr(PanelHttpsProxyHandler, _ws_name, getattr(PictureProxyHandler, _ws_name))
 

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.45] - 2026-11-20
+
+### Fixed
+
+- Holding a direction froze the cameras for the whole press. The pictures now keep moving while the direction is sent, the same way they stay up for Dock. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.44] - 2026-11-20
 
 ### Fixed

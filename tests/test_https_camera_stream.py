@@ -66,7 +66,7 @@ def main() -> None:
     assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-    assert drive_on_picture_socket(proxy), "a direction is answered on the picture connection while pictures keep arriving"
+    assert drive_on_picture_socket(proxy), "pictures keep arriving while a direction is still being handled"
     assert drive_on_picture_socket(proxy, proxy.PanelHttpsProxyHandler), "the panel port carries a direction on the same picture connection"
     print("ok")
 
@@ -282,6 +282,8 @@ class _Pictures(BaseHTTPRequestHandler):
 class _Drive(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     seen = b""
+    started = 0.0
+    finished = 0.0
 
     def log_message(self, fmt: str, *args) -> None:
         return
@@ -289,6 +291,11 @@ class _Drive(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         length = int(self.headers.get("Content-Length", "0") or "0")
         _Drive.seen = self.rfile.read(length)
+        _Drive.started = time.time()
+        # A real direction takes long enough that the pictures used to freeze
+        # until it returned. They have to keep arriving during this wait.
+        time.sleep(0.45)
+        _Drive.finished = time.time()
         body = b'{"ok":true,"via":"picture"}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -316,10 +323,13 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
     previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
     proxy.PanelHttpsProxyHandler.upstream_port = buttons.server_address[1]
     _Drive.seen = b""
+    _Drive.started = 0.0
+    _Drive.finished = 0.0
     pictures = ThreadingHTTPServer(("127.0.0.1", 0), handler or proxy.PictureProxyHandler)
     threading.Thread(target=pictures.serve_forever, daemon=True).start()
     client = None
     frames = []
+    frame_at = []
     opened = False
     try:
         client = socket.create_connection(("127.0.0.1", pictures.server_address[1]), timeout=3)
@@ -370,11 +380,11 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
             payload = blob[offset : offset + length]
             blob = blob[offset + length :]
             frames.append(payload)
+            frame_at.append(time.time())
             if not sent and (b'"view":"middle"' in payload or b'"view": "middle"' in payload):
                 client.sendall(_client_frame(b'{"op":"drive","id":7,"json":{"linear":0.2,"angular":0,"enter_manual":true}}'))
                 sent = True
-            pictures_so_far = sum(1 for frame in frames if b"middle" in frame)
-            if sent and pictures_so_far >= 2 and any(b'"reply"' in frame for frame in frames):
+            if sent and any(b'"reply"' in frame for frame in frames):
                 break
     finally:
         if client is not None:
@@ -387,14 +397,18 @@ def drive_on_picture_socket(proxy, handler=None) -> bool:
             status.unlink(missing_ok=True)
         else:
             status.write_text(previous, encoding="utf-8")
+    during = [
+        stamp
+        for stamp, frame in zip(frame_at, frames)
+        if b"middle" in frame and _Drive.started and _Drive.started + 0.12 <= stamp <= _Drive.finished
+    ]
     reply_at = next((index for index, frame in enumerate(frames) if b'"reply"' in frame), -1)
     reply = frames[reply_at] if reply_at >= 0 else b""
-    pictures_after = any(b"middle" in frame for frame in frames[reply_at + 1 :]) if reply_at >= 0 else False
     drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
     # The drive result is a JSON string inside the picture frame, so its quotes are escaped.
     answered = b"picture" in reply and b"true" in reply
     same_press = b'"id": 7' in reply or b'"id":7' in reply
-    return bool(opened and drove and pictures_after and answered and same_press)
+    return bool(opened and drove and answered and same_press and during)
 
 
 if __name__ == "__main__":
