@@ -1394,6 +1394,8 @@ async def handle_client(
                 _drive_waiters += 1
                 _control_waiters += 1
                 counted = True
+                # Camera keep-alives must not sit in front of a held direction.
+                state["drive_busy_until"] = time.time() + 1.0
             elif control and not (vision and _drive_waiters > 0):
                 _control_waiters += 1
                 counted = True
@@ -1403,7 +1405,9 @@ async def handle_client(
                     await asyncio.sleep(0.02)
                     waited += 0.02
             try:
-                if vision and _drive_waiters > 0:
+                if vision and (
+                    _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0)
+                ):
                     resp = {
                         "ok": True,
                         "op": "publish",

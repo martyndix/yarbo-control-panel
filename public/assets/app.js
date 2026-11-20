@@ -16681,7 +16681,7 @@ async function fetchStatus() {
     // gateway banner can clear. Skip only for mail/drive focus.
     // While the pictures are open, Safari will not finish this request, so the
     // card would keep the old time. The picture connection brings a fresh status.
-    if (cameraPicturesOpen()) return;
+    if (cameraPicturesOpen() || pictureSocketPaused) return;
     if (polling || mailPageOpen || driveActive) return;
     if (Date.now() < commandQuietUntil) return;
     polling = true;
@@ -16844,6 +16844,7 @@ function bindCameraReorder() {
 }
 let cameraLiveSource = null;
 let cameraFramesOpen = false;
+let pictureSocketPaused = false;
 let picturePauseDepth = 0;
 let cameraLiveDecoders = {};
 let cameraLiveCodec = {};
@@ -17001,7 +17002,36 @@ function ensureCameraDecoder(view, sps, pps) {
     return decoder;
 }
 
-function handleCameraFrame(event) {
+const cameraFrameQueue = [];
+let cameraFrameDrain = false;
+
+function enqueueCameraFrame(event) {
+    if (!event || !event.view) return;
+    cameraFrameQueue.push(event);
+    // Decoding every picture inside the socket callback blocked presses.
+    // Keep a short queue and decode between turns so a direction can be sent.
+    if (cameraFrameQueue.length > 16) {
+        cameraFrameQueue.splice(0, cameraFrameQueue.length - 8);
+    }
+    if (!cameraFrameDrain) drainCameraFrames();
+}
+
+function drainCameraFrames() {
+    const event = cameraFrameQueue.shift();
+    if (!event) {
+        cameraFrameDrain = false;
+        return;
+    }
+    cameraFrameDrain = true;
+    try {
+        decodeCameraFrame(event);
+    } catch {
+        /* one bad picture must not swallow the next press */
+    }
+    setTimeout(drainCameraFrames, 0);
+}
+
+function decodeCameraFrame(event) {
     if (!event || !event.view || !event.d) return;
     const binary = Uint8Array.from(atob(event.d), (char) => char.charCodeAt(0));
     const nals = annexBNals(binary);
@@ -17048,6 +17078,33 @@ function cameraControlsOpen() {
     return !!source && typeof source.send === 'function' && source.readyState === 1;
 }
 
+function commandTransport() {
+    // The quiet connection is preferred. When it never finished opening, the
+    // picture connection can still carry a press. Leaving that press unsent
+    // is what showed "the robot did not answer" after the cameras were on.
+    if (cameraControlsOpen()) return cameraCommandSocket;
+    if (cameraPicturesOpen()) return cameraLiveSource;
+    return null;
+}
+
+function pausePictureSocket() {
+    const source = cameraLiveSource;
+    if (!source || pictureSocketPaused) return;
+    pictureSocketPaused = true;
+    cameraLiveSource = null;
+    try {
+        source.close();
+    } catch {
+        /* the picture connection was already closing */
+    }
+}
+
+function resumePictureSocket() {
+    if (!pictureSocketPaused) return;
+    pictureSocketPaused = false;
+    if (cameraFramesOpen && !cameraLiveSource) attachCameraStream();
+}
+
 function failCameraCommands(err) {
     cameraCommandWaiters.forEach((waiter) => waiter.reject(err));
     cameraCommandWaiters.clear();
@@ -17055,7 +17112,8 @@ function failCameraCommands(err) {
 
 function cameraSocketRequest(path, body, timeoutMs = 12000) {
     return new Promise((resolve, reject) => {
-        if (!cameraControlsOpen()) {
+        const socket = commandTransport();
+        if (!socket) {
             reject(new Error('Picture connection closed'));
             return;
         }
@@ -17082,7 +17140,7 @@ function cameraSocketRequest(path, body, timeoutMs = 12000) {
         try {
             if (message.op === 'drive') message.json = JSON.parse(body || '{}');
             else message.body = body || '';
-            cameraCommandSocket.send(JSON.stringify(message));
+            socket.send(JSON.stringify(message));
         } catch (err) {
             cameraCommandWaiters.delete(id);
             clearTimeout(timer);
@@ -17092,26 +17150,18 @@ function cameraSocketRequest(path, body, timeoutMs = 12000) {
 }
 
 async function postPanelJson(path, init) {
-    // Connect, Dock and the other presses go on the quiet connection. Closing
-    // the pictures for the press is what made the view stop while the button
-    // was down. Fetching beside the pictures never leaves Safari.
-    if (path === '/api/command.php' && location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource || cameraControlsOpen())) {
-        if (!cameraControlsOpen()) {
-            attachCommandSocket();
-            const start = Date.now();
-            while (!cameraControlsOpen() && Date.now() - start < 8000) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-            }
+    // Dock, lights and the controller. Safari will not finish this press while
+    // the pictures are moving, and the live connection was answering that the
+    // robot did not answer. Step the pictures aside for this one press, send
+    // it, then open the pictures again. A held direction does not use this path.
+    if (path === '/api/command.php' && location.protocol === 'https:' && (cameraPicturesOpen() || pictureSocketPaused)) {
+        pausePictureSocket();
+        try {
+            const res = await fetch(path, init);
+            return await parseJsonResponse(res);
+        } finally {
+            resumePictureSocket();
         }
-        if (!cameraControlsOpen()) {
-            throw new Error('The robot did not answer. Press it again.');
-        }
-        const event = await cameraSocketRequest(path, (init && init.body) || '', 20000);
-        const data = JSON.parse(event.body || '');
-        if (!data || typeof data !== 'object') {
-            throw new Error('The robot did not answer. Press it again.');
-        }
-        return data;
     }
     const res = await fetch(path, init);
     return parseJsonResponse(res);
@@ -17141,7 +17191,7 @@ function attachCameraSocket() {
             applyLiveStatus(event.body);
             return;
         }
-        handleCameraFrame(event);
+        enqueueCameraFrame(event);
     };
     socket.onclose = () => {
         if (cameraLiveSource !== socket) return;
@@ -17217,7 +17267,7 @@ function attachCameraStream() {
     cameraLiveSource = source;
     source.onmessage = (message) => {
         try {
-            handleCameraFrame(JSON.parse(message.data));
+            enqueueCameraFrame(JSON.parse(message.data));
         } catch {
             /* ignore a bad picture packet */
         }
@@ -17585,23 +17635,14 @@ async function fetchDrive(linear, angular, enterManual, signal) {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    // A held direction goes on the quiet connection and leaves the pictures open.
-    // Closing the pictures for the press is what stopped the view.
+    // A held direction goes out on the live connection and leaves the pictures open.
+    // Closing the pictures for the whole press is what stopped the view.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
     try {
-        const picturesUp = location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource || cameraControlsOpen());
-        if (picturesUp && !cameraControlsOpen()) {
-            attachCommandSocket();
-            const start = Date.now();
-            while (!cameraControlsOpen() && Date.now() - start < 8000) {
-                await new Promise((resolve) => setTimeout(resolve, 40));
-            }
-        }
-        if (cameraControlsOpen()) {
-            const socket = cameraCommandSocket;
-            if (socket.bufferedAmount > 8000) return true;
+        const transport = commandTransport();
+        if (transport && transport.bufferedAmount <= 64000) {
             cameraSocketRequest('/api/drive.php', JSON.stringify({
                 linear,
                 angular,
@@ -17611,8 +17652,27 @@ async function sendDrive(linear, angular, enterManual = false) {
             }).catch(() => {});
             return true;
         }
-        if (picturesUp) {
-            throw Object.assign(new Error('Drive did not answer. Hold the direction again.'), { name: 'TimeoutError' });
+        if (location.protocol === 'https:' && (cameraFramesOpen || pictureSocketPaused)) {
+            // Safari will not finish a direction while the pictures are moving
+            // and neither live connection could take it. Step them aside for
+            // this hold, then open them again when the finger lifts.
+            pausePictureSocket();
+            try {
+                const data = await fetchDrive(linear, angular, enterManual, signal);
+                if (!data.ok) {
+                    showToast(data.error || 'Drive command failed', 'error');
+                    if (els.driveStatus) els.driveStatus.textContent = 'Error';
+                    return false;
+                }
+                if (data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
+                    sessionStorage.setItem('yarbo_drive_dock_warn', '1');
+                    showToast(data.warning, 'error');
+                }
+                if (enterManual) manualModeEntered = true;
+                return true;
+            } finally {
+                if (!driveActive) resumePictureSocket();
+            }
         }
         const data = await fetchDrive(linear, angular, enterManual, signal);
         if (!data.ok) {
@@ -17681,6 +17741,7 @@ function stopDriveLoop() {
     driveInterval = null;
     driveActive = false;
     document.querySelectorAll('.btn-drive.active').forEach((btn) => btn.classList.remove('active'));
+    if (pictureSocketPaused) resumePictureSocket();
 }
 
 async function stopDriveIfHeld() {

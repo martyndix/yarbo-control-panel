@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.51] - 2026-11-20
+
+### Fixed
+
+- Connecting the controller and then starting the cameras still answered with an error when you tried to move the robot. A direction now goes out on the live connection while the pictures stay up. Dock, lights and Connect step the pictures aside for that one press and open them again. Picture decoding no longer blocks the press, and a camera keep-alive no longer sits in front of a direction you are holding. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.50] - 2026-11-20
 
 ### Fixed
