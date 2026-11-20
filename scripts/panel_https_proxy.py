@@ -593,6 +593,14 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         out while the pictures were moving.
         """
         client = self.connection
+        try:
+            client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            # A few pictures of room. A multi-megabyte buffer let this loop
+            # accept frames the browser had not read, and that work crowded
+            # out every other request.
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+        except Exception:
+            pass
         stop = threading.Event()
         pictures: queue.Queue[bytes] = queue.Queue(maxsize=4)
         replies: queue.Queue[bytes] = queue.Queue()
@@ -603,10 +611,12 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             try:
                 camera.settimeout(0.5)
                 while not stop.is_set():
-                    while b"\n\n" in buf:
-                        block, _, _rest = bytes(buf).partition(b"\n\n")
-                        del buf[: len(block) + 2]
+                    split = buf.find(b"\n\n")
+                    while split >= 0:
+                        block = bytes(buf[:split])
+                        del buf[: split + 2]
                         payload = sse_payload(block)
+                        split = buf.find(b"\n\n")
                         if not payload:
                             continue
                         frame = encode_ws_frame(0x1, payload)
@@ -619,6 +629,9 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                                     pictures.get_nowait()
                                 except queue.Empty:
                                     pass
+                        # Parsing a burst of pictures must not keep the whole
+                        # panel from accepting another browser.
+                        time.sleep(0)
                     try:
                         chunk = camera.recv(16384)
                     except (TimeoutError, socket.timeout):
@@ -632,10 +645,13 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 stop.set()
 
         def push_status() -> None:
-            """The status card cannot use its own request while pictures are open.
+            """One status request at a time.
 
-            Safari does not finish that request, so the card keeps the old time.
-            The same picture connection carries a fresh status instead.
+            Safari will not finish the status card's own request while pictures
+            are open, so this connection carries a fresh card. A full status
+            page holds a PHP worker for the whole dashboard. Starting another
+            before the first finished used every worker, Connect got no answer,
+            and another device could not load the panel.
             """
             first = True
             while not stop.is_set():
@@ -646,11 +662,11 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 body = b""
                 try:
                     conn = http.client.HTTPConnection(
-                        self.upstream_host, self.upstream_port, timeout=4
+                        self.upstream_host, self.upstream_port, timeout=8
                     )
                     conn.request(
                         "GET",
-                        "/api/status.php",
+                        "/api/status.php?card=1",
                         headers={
                             "Host": self.headers.get("Host")
                             or f"{self.upstream_host}:{self.upstream_port}",
@@ -776,8 +792,10 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 if data is None:
                     break
                 if not data:
-                    if sent == 0:
-                        time.sleep(0.01)
+                    # A successful send used to spin straight into the next
+                    # picture. That held the panel, so another device hung
+                    # while the cameras were on.
+                    time.sleep(0.001 if sent else 0.01)
                     continue
                 incoming += data
                 try:

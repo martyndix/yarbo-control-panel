@@ -12140,9 +12140,8 @@ function onModuleCheckboxChange(event) {
     });
 }
 
-function updateStatus(data) {
-    applyRobotNameSubtitle(typeof data.robot_name === 'string' ? data.robot_name : '');
-    applyHubFromStatus(data);
+function applyRobotCard(data) {
+    if (!els.battery || !els.state || !els.charging || !els.heading || !els.headType || !els.errorCode) return;
     els.battery.textContent = data.battery != null ? `${data.battery}%` : '—';
     applyBatteryLevel(els.battery, data.battery, data.charging_label);
     {
@@ -12168,7 +12167,13 @@ function updateStatus(data) {
         els.errorCode.className = hasError ? 'value is-error' : 'value';
     }
     updateRainStatus(data);
-    els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
+    if (els.updatedAt) els.updatedAt.textContent = formatUpdatedAt(data.updated_at);
+}
+
+function updateStatus(data) {
+    applyRobotNameSubtitle(typeof data.robot_name === 'string' ? data.robot_name : '');
+    applyHubFromStatus(data);
+    applyRobotCard(data);
     updateRobotOnMap(data);
     renderDiagnostics(data);
     updatePlanActivity(data);
@@ -16662,6 +16667,10 @@ function applyLiveStatus(body) {
     if (!data || !data.ok) return;
     hasStatusSnapshot = true;
     setError(null);
+    if (data.card) {
+        applyRobotCard(data);
+        return;
+    }
     updateStatus(data);
     applyPanelHealth(data, 0);
     updateCameraStatus(data.camera_state);
@@ -17032,6 +17041,7 @@ function handleCameraFrame(event) {
 let cameraCommandSeq = 0;
 const cameraCommandWaiters = new Map();
 let cameraCommandSocket = null;
+let commandSocketMisses = 0;
 
 function cameraControlsOpen() {
     const source = cameraCommandSocket;
@@ -17089,7 +17099,7 @@ async function postPanelJson(path, init) {
         if (!cameraControlsOpen()) {
             attachCommandSocket();
             const start = Date.now();
-            while (!cameraControlsOpen() && Date.now() - start < 1500) {
+            while (!cameraControlsOpen() && Date.now() - start < 8000) {
                 await new Promise((resolve) => setTimeout(resolve, 40));
             }
         }
@@ -17147,25 +17157,20 @@ function commandSocketUrl() {
 }
 
 function attachCommandSocket(onReady) {
-    // Open this before the pictures. A direction on the picture connection
-    // never got an answer while frames were moving, and a fetch beside those
-    // pictures is what showed "drive did not answer".
+    // Pictures wait until this connection is open. Starting the pictures on a
+    // timer left this socket unfinished, and Connect then said the robot did
+    // not answer. A fetch beside the pictures never leaves Safari.
     if (cameraCommandSocket && (cameraCommandSocket.readyState === 0 || cameraCommandSocket.readyState === 1)) {
         if (typeof onReady === 'function' && cameraCommandSocket.readyState === 1) onReady();
         return cameraCommandSocket;
     }
     const socket = new WebSocket(commandSocketUrl());
     cameraCommandSocket = socket;
-    let ready = false;
     let opened = false;
-    const done = () => {
-        if (ready) return;
-        ready = true;
-        if (typeof onReady === 'function') onReady();
-    };
     socket.onopen = () => {
         opened = true;
-        done();
+        commandSocketMisses = 0;
+        if (typeof onReady === 'function') onReady();
     };
     socket.onmessage = (message) => {
         let event;
@@ -17185,14 +17190,16 @@ function attachCommandSocket(onReady) {
         if (cameraCommandSocket !== socket) return;
         cameraCommandSocket = null;
         if (!cameraFramesOpen) return;
-        if (!opened && typeof onReady === 'function' && !cameraLiveSource) onReady();
-        setTimeout(() => attachCommandSocket(), 400);
-    };
-    if (typeof onReady === 'function') {
+        if (!opened) {
+            commandSocketMisses += 1;
+            if (commandSocketMisses >= 3 && typeof onReady === 'function' && !cameraLiveSource) onReady();
+        }
+        const again = cameraLiveSource ? undefined : onReady;
         setTimeout(() => {
-            if (!cameraLiveSource && cameraFramesOpen) onReady();
-        }, 2000);
-    }
+            if (!cameraFramesOpen || cameraCommandSocket) return;
+            attachCommandSocket(again);
+        }, 400);
+    };
     return socket;
 }
 
@@ -17256,6 +17263,7 @@ function resumePictures() {
 function openCameraFrames() {
     closeCameraFrames();
     cameraFramesOpen = true;
+    commandSocketMisses = 0;
     // The quiet connection has to be up before the pictures, or Safari will
     // not finish opening it once frames are moving.
     attachCommandSocket(() => attachCameraStream());
@@ -17587,7 +17595,7 @@ async function sendDrive(linear, angular, enterManual = false) {
         if (picturesUp && !cameraControlsOpen()) {
             attachCommandSocket();
             const start = Date.now();
-            while (!cameraControlsOpen() && Date.now() - start < 1500) {
+            while (!cameraControlsOpen() && Date.now() - start < 8000) {
                 await new Promise((resolve) => setTimeout(resolve, 40));
             }
         }

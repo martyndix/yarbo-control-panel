@@ -436,12 +436,6 @@ class Hub:
 
     def push(self, view: str, key: bool, pts: int, data: bytes, uid: int) -> None:
         now = time.time()
-        event = {
-            "view": view,
-            "k": 1 if key else 0,
-            "t": pts,
-            "d": base64.b64encode(data).decode("ascii"),
-        }
         with self.lock:
             slot = self.views[view]
             slot["frames"] = int(slot["frames"]) + 1
@@ -452,6 +446,20 @@ class Hub:
             times.append(now)
             slot["_times"] = [stamp for stamp in times if now - stamp <= 2.0]
             slot["fps"] = round(len(slot["_times"]) / 2.0, 1)
+            # Nobody is watching, or every watcher is already behind. Encoding
+            # the frame first filled the machine even though it was then dropped.
+            if not key and not self.subs:
+                return
+            if not key and all(sub.full() for sub in self.subs):
+                self.drops += 1
+                return
+        event = {
+            "view": view,
+            "k": 1 if key else 0,
+            "t": pts,
+            "d": base64.b64encode(data).decode("ascii"),
+        }
+        with self.lock:
             if key:
                 self.last_key[view] = event
             stale: list[queue.Queue[dict[str, Any] | None]] = []
@@ -697,8 +705,9 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
             self.view = view
 
         def on_encoded_video_frame(self, frame_uid, image_buffer, length, info):  # type: ignore[no-untyped-def]
-            # Every encoded frame has to be forwarded. Dropping some of them
-            # removes the keyframe the browser needs, and the tiles stay black.
+            # Every encoded frame is handed on. The hub only skips the copy
+            # when nobody can take it. Dropping a keyframe here leaves the
+            # tiles black.
             data = copy_frame(image_buffer, length)
             if not data:
                 return 1

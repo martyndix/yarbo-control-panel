@@ -45,6 +45,11 @@ function status_ms_since(float $started): int
     return (int) max(0, round((microtime(true) - $started) * 1000));
 }
 
+function status_card_only(): bool
+{
+    return isset($_GET['card']);
+}
+
 /**
  * @param array<string, mixed> $payload
  * @return array<string, mixed>
@@ -172,6 +177,17 @@ function hub_status_extras(bool $allowPowerwallRefresh = true, bool $includeVest
  */
 function status_failure(string $error, string $stage, int $http = 500, array $extra = []): never
 {
+    if (status_card_only()) {
+        json_response(status_with_timing(array_merge(
+            [
+                'ok' => false,
+                'card' => true,
+                'stage' => $stage,
+                'error' => $error,
+            ],
+            $extra,
+        )), $http);
+    }
     json_response(status_with_timing(array_merge(
         [
             'ok' => false,
@@ -247,13 +263,21 @@ function status_from_agent(array $result): void
         $parsed['controller_acquired'] = (bool) $result['controller_acquired'];
     }
 
+    $payload = [
+        'ok' => true,
+        'via' => 'agent',
+        'cached' => (bool) ($result['cached'] ?? false),
+        'cache_age_s' => isset($result['cache_age_s']) ? (int) $result['cache_age_s'] : null,
+    ];
+    if (status_card_only()) {
+        // The picture connection asks for the robot card only. The full page
+        // walks Powerwall, Lymow, UniFi and the weather, and doing that on
+        // every camera tick used up every PHP worker.
+        $payload['card'] = true;
+        json_response(status_with_timing(array_merge($payload, attach_robot_name($parsed))));
+    }
     json_response(status_with_timing(array_merge(
-        [
-            'ok' => true,
-            'via' => 'agent',
-            'cached' => (bool) ($result['cached'] ?? false),
-            'cache_age_s' => isset($result['cache_age_s']) ? (int) $result['cache_age_s'] : null,
-        ],
+        $payload,
         attach_robot_name($parsed),
         [
             'wifi' => YarboWifi::parse($wifiEnvelope),
@@ -267,6 +291,14 @@ function status_from_agent(array $result): void
 $projectRoot = dirname(__DIR__, 2);
 $hub = new YarboHub($projectRoot);
 if (!$hub->enabled(YarboHub::MODULE_YARBO)) {
+    if (status_card_only()) {
+        json_response(status_with_timing([
+            'ok' => true,
+            'card' => true,
+            'via' => 'modules',
+            'yarbo_enabled' => false,
+        ]));
+    }
     json_response(status_with_timing(array_merge(
         ['ok' => true, 'via' => 'modules', 'yarbo_enabled' => false],
         hub_status_extras(true, true),

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.50] - 2026-11-20
+
+### Fixed
+
+- Live cameras were taking the whole panel. The status card stayed on the old time, Connect answered that the robot did not answer, and another device could not load the site. The pictures now leave room for the rest of the panel: the status card comes through on a light request, one at a time, Connect uses the quiet connection that opens before the pictures, and a picture the browser is already behind is not encoded again. Update to latest, refresh in Safari, press Stop view, then Start live view.
+
 ## [5.0.49] - 2026-11-20
 
 ### Fixed
