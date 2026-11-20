@@ -66,11 +66,11 @@ def main() -> None:
     assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
-    assert pictures_carry_press(proxy), "a press on the picture connection is answered and the pictures keep moving"
-    assert pictures_carry_press(proxy, proxy.PanelHttpsProxyHandler), "the panel picture connection answers a press"
-    assert pictures_stay_small(proxy), "a live view keeps the newest picture so another device can still open the panel"
-    assert drive_on_quiet_socket(proxy), "a direction on the quiet connection is handled while pictures keep arriving"
-    assert status_on_picture_socket(proxy), "the status card is refreshed on the picture connection while pictures keep moving"
+    assert pictures_ignore_press(proxy), "a press on the picture connection is ignored and the pictures keep moving"
+    assert panel_does_not_stream(proxy), "the panel port does not hold a picture stream"
+    assert pictures_stay_small(proxy), "a panel page still answers while pictures are streaming"
+    assert drive_on_panel(proxy), "a direction is a normal panel request and the pictures stay open"
+    assert pictures_skip_php(proxy), "a picture stream does not request PHP"
     print("ok")
 
 
@@ -122,8 +122,10 @@ def stream_reaches_client(proxy) -> bool:
     status.write_text(json.dumps({"port": port, "state": "live"}), encoding="utf-8")
     previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
     proxy.PanelHttpsProxyHandler.upstream_port = upstream.server_address[1]
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
+    buttons = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    threading.Thread(target=buttons.serve_forever, daemon=True).start()
     buf = b""
     other_buf = b""
     client = None
@@ -150,7 +152,7 @@ def stream_reaches_client(proxy) -> bool:
             if not part:
                 break
             buf += part
-        other = socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=3)
+        other = socket.create_connection(("127.0.0.1", buttons.server_address[1]), timeout=3)
         other.sendall(b"GET /api/drive.php HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         other.settimeout(1.0)
         deadline = time.time() + 1.0
@@ -167,6 +169,7 @@ def stream_reaches_client(proxy) -> bool:
         if client is not None:
             client.close()
         httpd.shutdown()
+        buttons.shutdown()
         agent.shutdown()
         upstream.shutdown()
         proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
@@ -176,11 +179,8 @@ def stream_reaches_client(proxy) -> bool:
             status.write_text(previous, encoding="utf-8")
     pictures = (
         b"HTTP/1.1 200" in buf
-        and b"Content-Length:" in buf
         and b"middle" in buf
-        and b"retry: 40" in buf
         and b"text/event-stream" in buf
-        and b"Transfer-Encoding:" not in buf
     )
     return pictures and b'"ok":true' in other_buf and b"moved" in other_buf
 
@@ -387,7 +387,7 @@ def pictures_carry_press(proxy, handler=None) -> bool:
             if not sent and (b'"view":"middle"' in payload or b'"view": "middle"' in payload):
                 client.sendall(_client_frame(b'{"op":"drive","id":7,"json":{"linear":0.2,"angular":0,"enter_manual":true}}'))
                 sent = True
-            if sent and any(b'"reply"' in frame for frame in frames):
+            if sent and len(frames) >= 3:
                 break
     finally:
         if client is not None:
@@ -401,11 +401,11 @@ def pictures_carry_press(proxy, handler=None) -> bool:
         else:
             status.write_text(previous, encoding="utf-8")
     saw_picture = any(b"middle" in frame for frame in frames)
-    reply = next((frame for frame in frames if b'"reply"' in frame), b"")
-    drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
-    answered = b"picture" in reply and b"true" in reply
-    same_press = b'"id": 7' in reply or b'"id":7' in reply
-    return bool(opened and sent and saw_picture and drove and answered and same_press)
+    return bool(opened and sent and saw_picture and _Drive.seen == b"" and not any(b'"reply"' in frame for frame in frames))
+
+
+def pictures_ignore_press(proxy) -> bool:
+    return pictures_carry_press(proxy, proxy.PictureProxyHandler)
 
 
 class _Status(BaseHTTPRequestHandler):
@@ -414,7 +414,10 @@ class _Status(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
         return
 
+    hits = 0
+
     def do_GET(self) -> None:  # noqa: N802
+        _Status.hits += 1
         if not self.path.startswith("/api/status.php"):
             self.send_error(404)
             return
@@ -516,8 +519,10 @@ def pictures_stay_small(proxy) -> bool:
     status.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
     previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
     proxy.PanelHttpsProxyHandler.upstream_port = panel.server_address[1]
-    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
+    panel_proxy = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
     threading.Thread(target=pictures.serve_forever, daemon=True).start()
+    threading.Thread(target=panel_proxy.serve_forever, daemon=True).start()
     client = None
     other = None
     frames: list[bytes] = []
@@ -541,7 +546,7 @@ def pictures_stay_small(proxy) -> bool:
         # Leave the pictures unread so a backlog would form, then open the panel.
         time.sleep(0.45)
         started = time.time()
-        other = socket.create_connection(("127.0.0.1", pictures.server_address[1]), timeout=2)
+        other = socket.create_connection(("127.0.0.1", panel_proxy.server_address[1]), timeout=2)
         other.settimeout(1.5)
         other.sendall(b"GET / HTTP/1.1\r\nHost: panel.local\r\nConnection: close\r\n\r\n")
         while time.time() < started + 1.5:
@@ -573,6 +578,7 @@ def pictures_stay_small(proxy) -> bool:
         if other is not None:
             other.close()
         pictures.shutdown()
+        panel_proxy.shutdown()
         pictures_upstream.shutdown()
         panel.shutdown()
         proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
@@ -616,8 +622,37 @@ def _open_socket(port: int, path: str) -> socket.socket:
     return client
 
 
-def drive_on_quiet_socket(proxy) -> bool:
-    """Pictures stay on one connection. The direction goes out on another."""
+def panel_does_not_stream(proxy) -> bool:
+    panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=panel.serve_forever, daemon=True).start()
+    body = b""
+    client = None
+    try:
+        client = socket.create_connection(("127.0.0.1", panel.server_address[1]), timeout=2)
+        client.sendall(
+            b"GET /api/camera_live.php?action=frames HTTP/1.1\r\n"
+            b"Host: panel.local:8443\r\n"
+            b"Upgrade: websocket\r\n"
+            b"Connection: Upgrade\r\n"
+            b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+            b"Sec-WebSocket-Version: 13\r\n\r\n"
+        )
+        client.settimeout(1.0)
+        while b"picture port" not in body:
+            part = client.recv(4096)
+            if not part:
+                break
+            body += part
+    finally:
+        if client is not None:
+            client.close()
+        panel.shutdown()
+    first = body.split(b"\r\n", 1)[0]
+    return b"101" not in first and b"200" in first and b"picture port" in body
+
+
+def drive_on_panel(proxy) -> bool:
+    """Pictures stay on their port. A direction is an ordinary panel request."""
     pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
     buttons = ThreadingHTTPServer(("127.0.0.1", 0), _Drive)
     threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
@@ -629,51 +664,54 @@ def drive_on_quiet_socket(proxy) -> bool:
     previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
     proxy.PanelHttpsProxyHandler.upstream_port = buttons.server_address[1]
     _Drive.seen = b""
-    _Drive.started = 0.0
-    _Drive.finished = 0.0
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
     panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=pictures.serve_forever, daemon=True).start()
     threading.Thread(target=panel.serve_forever, daemon=True).start()
-    pictures = None
-    controls = None
+    client = None
     saw_picture = False
+    later = b""
+    answer = b""
     try:
-        pictures = _open_socket(panel.server_address[1], "/api/camera_live.php?action=frames")
-        controls = _open_socket(panel.server_address[1], "/api/camera_live.php?action=controls")
-        pictures.settimeout(0.5)
-        deadline = time.time() + 1.5
+        client = _open_socket(pictures.server_address[1], "/api/camera_live.php?action=frames")
+        client.settimeout(0.5)
         blob = b""
+        deadline = time.time() + 1.5
         while time.time() < deadline and not saw_picture:
             try:
-                part = pictures.recv(4096)
+                part = client.recv(4096)
             except socket.timeout:
                 continue
             if not part:
                 break
             blob += part
             saw_picture = b"middle" in blob
-        controls.sendall(_client_frame(b'{"op":"drive","id":9,"json":{"linear":0.2,"angular":0,"enter_manual":true}}'))
-        reply = b""
-        controls.settimeout(2.0)
-        deadline = time.time() + 2.0
-        while time.time() < deadline and b'"reply"' not in reply:
-            try:
-                part = controls.recv(4096)
-            except socket.timeout:
-                break
+        drive = socket.create_connection(("127.0.0.1", panel.server_address[1]), timeout=3)
+        payload = b'{"linear":0.2,"angular":0,"enter_manual":true}'
+        drive.sendall(
+            b"POST /api/drive.php HTTP/1.1\r\n"
+            b"Host: panel.local\r\n"
+            b"Content-Type: application/json\r\n"
+            + f"Content-Length: {len(payload)}\r\n".encode("ascii")
+            + b"Connection: close\r\n\r\n"
+            + payload
+        )
+        drive.settimeout(2.0)
+        while b"picture" not in answer:
+            part = drive.recv(4096)
             if not part:
                 break
-            reply += part
-        later = b""
-        pictures.settimeout(0.6)
+            answer += part
+        drive.close()
+        client.settimeout(0.6)
         try:
-            later = pictures.recv(65536)
+            later = client.recv(65536)
         except socket.timeout:
             later = b""
     finally:
-        if pictures is not None:
-            pictures.close()
-        if controls is not None:
-            controls.close()
+        if client is not None:
+            client.close()
+        pictures.shutdown()
         panel.shutdown()
         pictures_upstream.shutdown()
         buttons.shutdown()
@@ -683,11 +721,10 @@ def drive_on_quiet_socket(proxy) -> bool:
         else:
             status.write_text(previous, encoding="utf-8")
     drove = b"linear" in _Drive.seen and b"0.2" in _Drive.seen
-    answered = b"picture" in reply and b"true" in reply and (b'"id": 9' in reply or b'"id":9' in reply)
-    return bool(saw_picture and drove and answered and b"middle" in later)
+    return bool(saw_picture and drove and b"true" in answer and b"middle" in later)
 
 
-def status_on_picture_socket(proxy) -> bool:
+def pictures_skip_php(proxy) -> bool:
     pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
     status = ThreadingHTTPServer(("127.0.0.1", 0), _Status)
     threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
@@ -698,25 +735,26 @@ def status_on_picture_socket(proxy) -> bool:
     live.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
     previous_upstream = proxy.PanelHttpsProxyHandler.upstream_port
     proxy.PanelHttpsProxyHandler.upstream_port = status.server_address[1]
-    panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
-    threading.Thread(target=panel.serve_forever, daemon=True).start()
-    pictures = None
+    _Status.hits = 0
+    pictures = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PictureProxyHandler)
+    threading.Thread(target=pictures.serve_forever, daemon=True).start()
+    client = None
     video = b""
     try:
-        pictures = _open_socket(panel.server_address[1], "/api/camera_live.php?action=frames")
-        pictures.settimeout(0.4)
-        deadline = time.time() + 3.0
-        while time.time() < deadline and (b'"op":"status"' not in video or b"middle" not in video):
+        client = _open_socket(pictures.server_address[1], "/api/camera_live.php?action=frames")
+        client.settimeout(0.4)
+        deadline = time.time() + 1.2
+        while time.time() < deadline:
             try:
-                part = pictures.recv(65536)
+                part = client.recv(65536)
             except socket.timeout:
                 part = b""
             if part:
                 video += part
     finally:
-        if pictures is not None:
-            pictures.close()
-        panel.shutdown()
+        if client is not None:
+            client.close()
+        pictures.shutdown()
         pictures_upstream.shutdown()
         status.shutdown()
         proxy.PanelHttpsProxyHandler.upstream_port = previous_upstream
@@ -724,7 +762,7 @@ def status_on_picture_socket(proxy) -> bool:
             live.unlink(missing_ok=True)
         else:
             live.write_text(previous, encoding="utf-8")
-    return b'"op":"status"' in video and b"98" in video and b"middle" in video
+    return b"middle" in video and b'"op":"status"' not in video and _Status.hits == 0
 
 
 if __name__ == "__main__":

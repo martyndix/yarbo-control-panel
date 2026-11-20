@@ -301,15 +301,20 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
             return
 
         if self.command == "GET" and is_camera_frames(path):
-            # Safari will not open a second connection to this robot while a
-            # picture stream is up, so a press on the page never arrives.
-            # The picture socket on this same port carries the press as well.
-            if "websocket" in (self.headers.get("Upgrade") or "").lower():
-                if not self._websocket_pictures():
-                    self._camera_unavailable()
-                return
-            if not self._proxy_camera_frames():
-                self._camera_unavailable()
+            # Pictures are on their own port and their own process. A stream
+            # on this port held the panel, so another device could not load it.
+            body = b'{"ok":false,"error":"Pictures are on the picture port."}'
+            self.close_connection = True
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception:
+                pass
             return
 
         headers = {}
@@ -519,13 +524,7 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         return True
 
     def _websocket_pictures(self) -> bool:
-        """Pictures down, drive and other presses back up, on one connection.
-
-        Safari will not open a second connection to this robot while a picture
-        stream is up, even on another port. Closing the pictures for a press
-        made the view drop for the whole time a direction was held. A two-way
-        picture connection carries the press itself, so the view stays up.
-        """
+        """Relay pictures on this port. Presses stay on the panel port."""
         key = (self.headers.get("Sec-WebSocket-Key") or "").strip()
         if not key:
             return False
@@ -584,13 +583,11 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         return True
 
     def _websocket_session(self, camera: socket.socket, pending: bytes) -> None:
-        """Keep sending pictures while a direction is handled.
+        """Pictures only. This connection does not call PHP.
 
-        One thread owns the browser socket. The direction is forwarded on
-        another. Only one picture sits on that socket at a time. Holding every
-        picture and copying the whole pile on each send filled the machine, so
-        another device could not open the panel and a direction could not get
-        out while the pictures were moving.
+        Connect, a direction and the status card stay on the panel port, so
+        another device can still load the page while the cameras are showing.
+        Only one picture sits on this socket at a time.
         """
         client = self.connection
         try:
@@ -604,7 +601,6 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         stop = threading.Event()
         pictures: queue.Queue[bytes] = queue.Queue(maxsize=4)
         replies: queue.Queue[bytes] = queue.Queue()
-        jobs: queue.Queue[bytes | None] = queue.Queue()
 
         def pump() -> None:
             buf = bytearray(pending)
@@ -644,63 +640,7 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             finally:
                 stop.set()
 
-        def push_status() -> None:
-            """One status request at a time.
-
-            Safari reads this picture connection and does not deliver a status
-            card that arrives on the quiet one. A full status page holds a PHP
-            worker for the whole dashboard, so this asks only for the robot
-            card, and only one of those requests runs at a time.
-            """
-            first = True
-            while not stop.is_set():
-                if not first and stop.wait(5):
-                    return
-                first = False
-                conn = None
-                body = b""
-                try:
-                    conn = http.client.HTTPConnection(
-                        self.upstream_host, self.upstream_port, timeout=8
-                    )
-                    conn.request(
-                        "GET",
-                        "/api/status.php?card=1",
-                        headers={
-                            "Host": self.headers.get("Host")
-                            or f"{self.upstream_host}:{self.upstream_port}",
-                            "Connection": "close",
-                            "X-Forwarded-Proto": "https",
-                        },
-                    )
-                    resp = conn.getresponse()
-                    body = resp.read(262144)
-                except Exception:
-                    body = b""
-                finally:
-                    if conn is not None:
-                        try:
-                            conn.close()
-                        except Exception:
-                            pass
-                if not body.startswith(b"{"):
-                    continue
-                try:
-                    text = body.decode("utf-8")
-                except UnicodeError:
-                    continue
-                replies.put(
-                    encode_ws_frame(
-                        0x1,
-                        json.dumps({"op": "status", "body": text}, separators=(",", ":")).encode("utf-8"),
-                    )
-                )
-
         threading.Thread(target=pump, daemon=True).start()
-        threading.Thread(
-            target=self._websocket_jobs, args=(jobs, replies, stop), daemon=True
-        ).start()
-        threading.Thread(target=push_status, daemon=True).start()
 
         incoming = bytearray()
         reply_out = bytearray()
@@ -828,12 +768,11 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                         continue
                     if not fin or opcode != 0x1:
                         continue
-                    jobs.put(bytes(fragments))
+                    # Presses are not on this connection. They use the panel port.
                     fragments = bytearray()
                     opcode = None
         finally:
             stop.set()
-            jobs.put(None)
             try:
                 camera.close()
             except Exception:
@@ -1042,8 +981,7 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             jobs.put(None)
 
 
-# The page talks to the panel port. The same picture socket has to live there,
-# or Safari keeps the buttons queued behind a stream they cannot share.
+# Picture methods stay on the picture handler. The panel port does not stream them.
 for _ws_name in (
     "_websocket_pictures",
     "_websocket_session",
@@ -1077,6 +1015,7 @@ def main() -> int:
     parser.add_argument("--listen-host", default="0.0.0.0")
     parser.add_argument("--listen-port", type=int, default=8443)
     parser.add_argument("--frames-port", type=int, default=0)
+    parser.add_argument("--pictures-only", action="store_true")
     parser.add_argument("--upstream-host", default="127.0.0.1")
     parser.add_argument("--upstream-port", type=int, default=8080)
     parser.add_argument("--cert", required=True)
@@ -1088,7 +1027,7 @@ def main() -> int:
     PanelHttpsProxyHandler.upstream_host = args.upstream_host
     PanelHttpsProxyHandler.upstream_port = args.upstream_port
 
-    if args.wait_upstream:
+    if args.wait_upstream and not args.pictures_only:
         print(
             f"panel_https_proxy: waiting for upstream http://{args.upstream_host}:{args.upstream_port}",
             flush=True,
@@ -1118,45 +1057,31 @@ def main() -> int:
         )
         return 1
 
+    handler = PictureProxyHandler if args.pictures_only else PanelHttpsProxyHandler
     try:
-        httpd = DualStackServer((args.listen_host, args.listen_port), PanelHttpsProxyHandler)
+        httpd = DualStackServer((args.listen_host, args.listen_port), handler)
     except OSError as exc:
         print(f"panel_https_proxy: bind failed on {args.listen_host}:{args.listen_port}: {exc}", file=sys.stderr, flush=True)
         return 1
 
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
-    frames_port = args.frames_port or (args.listen_port + 1)
-    frames = None
-    try:
-        frames = DualStackServer((args.listen_host, frames_port), PictureProxyHandler)
-        frames.socket = context.wrap_socket(frames.socket, server_side=True)
-    except OSError as exc:
+    if args.pictures_only:
         print(
-            f"panel_https_proxy: picture port bind failed on {args.listen_host}:{frames_port}: {exc}",
-            file=sys.stderr,
+            f"panel_https_proxy: pictures on https://{args.listen_host}:{args.listen_port}",
             flush=True,
         )
-        frames = None
-    print(
-        f"panel_https_proxy: https://{args.listen_host}:{args.listen_port} → "
-        f"http://{args.upstream_host}:{args.upstream_port}",
-        flush=True,
-    )
-    if frames is not None:
+    else:
         print(
-            f"panel_https_proxy: pictures on https://{args.listen_host}:{frames_port}",
+            f"panel_https_proxy: https://{args.listen_host}:{args.listen_port} → "
+            f"http://{args.upstream_host}:{args.upstream_port}",
             flush=True,
         )
-        threading.Thread(target=frames.serve_forever, kwargs={"poll_interval": 0.5}, daemon=True).start()
     try:
         httpd.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
         pass
     finally:
         httpd.server_close()
-        if frames is not None:
-            frames.shutdown()
-            frames.server_close()
     return 0
 
 

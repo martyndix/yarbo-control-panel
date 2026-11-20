@@ -144,6 +144,15 @@ yarbo_panel_start_https_proxy() {
     --key "$key" \
     --no-wait-upstream >>"${root}/data/panel-https.log" 2>&1 &
   HTTPS_PROXY_PID=$!
+  # Pictures are their own process, so a busy video send cannot stall the panel.
+  "$py" "${root}/scripts/panel_https_proxy.py" \
+    --pictures-only \
+    --listen-host "$listen_host" \
+    --listen-port "$frames_port" \
+    --cert "$crt" \
+    --key "$key" \
+    --no-wait-upstream >>"${root}/data/panel-https.log" 2>&1 &
+  HTTPS_PICTURES_PID=$!
   sleep 0.5
   if ! kill -0 "${HTTPS_PROXY_PID}" 2>/dev/null; then
     echo "WARNING: HTTPS proxy failed to start — see data/panel-https.log" >&2

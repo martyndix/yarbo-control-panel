@@ -16692,9 +16692,7 @@ function applyLiveStatus(body) {
 async function fetchStatus() {
     // Keep polling while Settings is open so Panel health updates and a stale
     // gateway banner can clear. Skip only for mail/drive focus.
-    // While the pictures are open, Safari will not finish this request, so the
-    // card would keep the old time. The picture connection brings a fresh status.
-    if (cameraPicturesOpen()) return;
+    // The pictures are on their own port, so this poll can finish while they are open.
     if (polling || mailPageOpen || driveActive) return;
     if (Date.now() < commandQuietUntil) return;
     polling = true;
@@ -17152,25 +17150,23 @@ function cameraSocketRequest(path, body, timeoutMs = 12000) {
 }
 
 async function postPanelJson(path, init) {
-    // Safari does not bring an answer back on the picture connection.
-    // Step the pictures aside for this one press, send it, then open them again.
-    const holdPictures = path === '/api/command.php'
-        && location.protocol === 'https:'
-        && !picturesSteppedAside
-        && (cameraPicturesOpen() || !!cameraLiveSource || cameraFramesOpen);
-    if (holdPictures) await stepPicturesAside();
-    try {
-        const res = await fetch(path, init);
-        return parseJsonResponse(res);
-    } finally {
-        if (holdPictures) restorePicturesAfterDrive();
-    }
+    // Connect, Dock and the lights are ordinary requests on the panel port.
+    // The pictures are on their own port, so this does not close them.
+    const res = await fetch(path, init);
+    return parseJsonResponse(res);
+}
+
+function pictureSocketUrl() {
+    const page = cameraPictureUrl();
+    if (page.startsWith('https://')) return `wss://${page.slice('https://'.length)}`;
+    if (page.startsWith('http://')) return `ws://${page.slice('http://'.length)}`;
+    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${scheme}//${location.host}${page}`;
 }
 
 function attachCameraSocket() {
-    // Same port as the page. A picture stream on another port still counts as
-    // this robot, and Safari will not send Dock or a direction beside it.
-    const url = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/camera_live.php?action=frames`;
+    // Pictures use the next port, so Connect and a direction can finish on this one.
+    const url = pictureSocketUrl();
     const socket = new WebSocket(url);
     cameraLiveSource = socket;
     socket.onmessage = (message) => {
@@ -17197,6 +17193,13 @@ function attachCameraSocket() {
         if (cameraLiveSource !== socket) return;
         cameraLiveSource = null;
         if (!cameraFramesOpen || picturePauseDepth > 0) return;
+        if (cameraLiveSeen.size === 0 && url.startsWith('wss://') && !url.includes(`//${location.host}/`)) {
+            if (els.cameraAlert) {
+                const origin = url.slice(0, url.indexOf('/api')).replace(/^wss:/, 'https:');
+                els.cameraAlert.textContent = `Open ${origin} once, allow the certificate, then press Start live view again.`;
+                els.cameraAlert.classList.remove('hidden');
+            }
+        }
         setTimeout(() => attachCameraStream(), 300);
     };
 }
@@ -17341,10 +17344,8 @@ function openCameraFrames() {
     closeCameraFrames();
     cameraFramesOpen = true;
     commandSocketMisses = 0;
-    // Pictures open on their own. Waiting for the quiet connection left every
-    // tile on "waiting" when that socket did not finish.
+    // Pictures open on their own port. They do not share the panel connection.
     attachCameraStream();
-    attachCommandSocket();
 }
 
 function setCameraLiveButtons(running) {
@@ -17663,29 +17664,12 @@ async function fetchDrive(linear, angular, enterManual, signal) {
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
-    // A held direction goes on the quiet connection and leaves the pictures open.
-    // Closing the pictures for the press is what stopped the view.
+    // A held direction is an ordinary request and leaves the pictures open.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
         ? AbortSignal.timeout(12000)
         : undefined;
     const done = linear === 0 && angular === 0;
     try {
-        const transport = driveTransport();
-        if (transport && !picturesSteppedAside) {
-            cameraSocketRequest('/api/drive.php', JSON.stringify({
-                linear,
-                angular,
-                enter_manual: enterManual,
-            }), 8000).then((event) => {
-                noteDriveReply(event, enterManual);
-            }).catch(() => {});
-            if (done) restorePicturesAfterDrive();
-            return true;
-        }
-        const picturesUp = location.protocol === 'https:' && (cameraFramesOpen || cameraLiveSource);
-        if (picturesUp) {
-            await stepPicturesAside();
-        }
         const data = await fetchDrive(linear, angular, enterManual, signal);
         if (done) restorePicturesAfterDrive();
         if (!data.ok) {

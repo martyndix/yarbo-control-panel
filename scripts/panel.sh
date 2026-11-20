@@ -47,6 +47,9 @@ cleanup() {
   if [[ -n "${HTTPS_PROXY_PID:-}" ]]; then
     kill "${HTTPS_PROXY_PID}" 2>/dev/null || true
   fi
+  if [[ -n "${HTTPS_PICTURES_PID:-}" ]]; then
+    kill "${HTTPS_PICTURES_PID}" 2>/dev/null || true
+  fi
   if [[ -n "${PHP_PID:-}" ]]; then
     pkill -P "${PHP_PID}" 2>/dev/null || true
     kill "${PHP_PID}" 2>/dev/null || true

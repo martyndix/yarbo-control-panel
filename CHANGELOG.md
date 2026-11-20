@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.58] - 2026-11-20
+
+### Fixed
+
+- The cameras blocked the rest of the panel. The pictures now open on their own port, one above the panel (usually 8444), in their own process, and that connection only carries pictures. Connect, a direction, the status card and another device use the panel port and are not held up by the stream. Update to latest, refresh Safari, press Stop view, then Start live view. If the tiles stay blank, open the picture address once (the port one above the panel) and allow the certificate, then press Start live view again.
+
 ## [5.0.57] - 2026-11-20
 
 ### Fixed

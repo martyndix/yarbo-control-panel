@@ -46,12 +46,31 @@ proxy_pid() {
   pgrep -f '[s]cripts/panel_https_proxy.py' 2>/dev/null | head -n1 || true
 }
 
+FRAMES_PORT=$((PORT_HTTPS + 1))
+
 open_firewall() {
   if command -v ufw >/dev/null 2>&1; then
     if sudo -n ufw status 2>/dev/null | grep -qi 'Status: active'; then
       sudo -n ufw allow "${PORT_HTTPS}/tcp" comment 'Yarbo panel HTTPS' >/dev/null 2>&1 || true
+      sudo -n ufw allow "${FRAMES_PORT}/tcp" comment 'Yarbo camera pictures' >/dev/null 2>&1 || true
     fi
   fi
+}
+
+pictures_listening() {
+  php -r 'exit(@fsockopen("127.0.0.1", (int)$argv[1], $e, $s, 0.4) ? 0 : 1);' "$FRAMES_PORT" 2>/dev/null
+}
+
+start_pictures() {
+  echo "==> panel_https_ensure $(date -u +%Y-%m-%dT%H:%M:%SZ) starting pictures on ${FRAMES_PORT}" >>"$LOG"
+  nohup "$py" "${ROOT}/scripts/panel_https_proxy.py" \
+    --pictures-only \
+    --listen-host "${YARBO_PANEL_HTTPS_HOST:-0.0.0.0}" \
+    --listen-port "$FRAMES_PORT" \
+    --cert "$crt" \
+    --key "$key" \
+    --no-wait-upstream >>"$LOG" 2>&1 &
+  disown "$!" 2>/dev/null || true
 }
 
 ENABLED=1
@@ -63,20 +82,17 @@ fi
 
 open_firewall
 
-if https_listening; then
+py="${ROOT}/.venv/bin/python"
+if [[ ! -x "$py" ]]; then
+  py="$(command -v python3 || true)"
+fi
+
+if https_listening && pictures_listening; then
   pid="$(proxy_pid)"
   json_out 1 1 1 "$PORT_HTTPS" "$PORT_HTTP" "$pid" "HTTPS is listening on port ${PORT_HTTPS}" "" "$(log_tail)"
   exit 0
 fi
 
-# Not listening — (re)start proxy.
-pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
-sleep 0.2
-
-py="${ROOT}/.venv/bin/python"
-if [[ ! -x "$py" ]]; then
-  py="$(command -v python3 || true)"
-fi
 if [[ -z "$py" ]]; then
   json_out 0 0 1 "$PORT_HTTPS" "$PORT_HTTP" "" "" "python3 not found" "$(log_tail)"
   exit 0
@@ -90,6 +106,18 @@ fi
 crt="${pair%%|*}"
 key="${pair##*|}"
 
+if https_listening; then
+  start_pictures
+  sleep 0.4
+  pid="$(proxy_pid)"
+  json_out 1 1 1 "$PORT_HTTPS" "$PORT_HTTP" "$pid" "HTTPS is listening on port ${PORT_HTTPS}" "" "$(log_tail)"
+  exit 0
+fi
+
+# Not listening — (re)start proxy. This also stops a picture process so both come back together.
+pkill -f '[s]cripts/panel_https_proxy.py' 2>/dev/null || true
+sleep 0.2
+
 : >>"$LOG"
 echo "==> panel_https_ensure $(date -u +%Y-%m-%dT%H:%M:%SZ) starting proxy" >>"$LOG"
 nohup "$py" "${ROOT}/scripts/panel_https_proxy.py" \
@@ -102,6 +130,7 @@ nohup "$py" "${ROOT}/scripts/panel_https_proxy.py" \
   --no-wait-upstream >>"$LOG" 2>&1 &
 pid=$!
 disown "$pid" 2>/dev/null || true
+start_pictures
 sleep 0.8
 
 if https_listening; then
