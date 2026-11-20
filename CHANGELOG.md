@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.56] - 2026-11-20
+
+### Fixed
+
+- Live view stayed on "waiting" and never showed a picture. The tiles were waiting for the quiet connection before opening the pictures, and a picture was being split before it had all been sent. The pictures open on their own again, and each picture is sent whole. Update to latest, refresh Safari, press Stop view, then Start live view.
+
 ## [5.0.55] - 2026-11-20
 
 ### Fixed

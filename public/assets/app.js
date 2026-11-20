@@ -17217,9 +17217,8 @@ function commandSocketUrl() {
 }
 
 function attachCommandSocket(onReady) {
-    // Pictures wait until this connection is open. Starting the pictures on a
-    // timer left this socket unfinished, and Connect then said the robot did
-    // not answer. A fetch beside the pictures never leaves Safari.
+    // This connection carries a direction. The pictures open on their own.
+    // Waiting for this socket left the tiles on "waiting" when it did not finish.
     if (cameraCommandSocket && (cameraCommandSocket.readyState === 0 || cameraCommandSocket.readyState === 1)) {
         if (typeof onReady === 'function' && cameraCommandSocket.readyState === 1) onReady();
         return cameraCommandSocket;
@@ -17272,7 +17271,7 @@ function attachCameraStream() {
     // A held direction used to keep the pictures closed. The direction goes
     // out on the quiet connection, so the view stays up.
     if (driveActive && picturesSteppedAside) return;
-    if (location.protocol === 'https:' && typeof WebSocket === 'function') {
+    if (location.protocol === 'https:' && location.port && typeof WebSocket === 'function') {
         attachCameraSocket();
         return;
     }
@@ -17352,9 +17351,10 @@ function openCameraFrames() {
     closeCameraFrames();
     cameraFramesOpen = true;
     commandSocketMisses = 0;
-    // The quiet connection has to be up before the pictures, or Safari will
-    // not finish opening it once frames are moving.
-    attachCommandSocket(() => attachCameraStream());
+    // Pictures open on their own. Waiting for the quiet connection left every
+    // tile on "waiting" when that socket did not finish.
+    attachCameraStream();
+    attachCommandSocket();
 }
 
 function setCameraLiveButtons(running) {
