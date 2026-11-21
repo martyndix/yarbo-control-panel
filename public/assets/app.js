@@ -5947,6 +5947,7 @@ function homeReorderHandleHtml() {
 }
 
 function homeDoorSectionReorderHtml() {
+    if (!homeManageOpen) return '';
     return homeReorderControlsHtml();
 }
 
@@ -6260,7 +6261,7 @@ function bindHomeReorder() {
         if (card.dataset.homeReorderBound === '1') return;
         card.dataset.homeReorderBound = '1';
         card.addEventListener('pointerdown', (event) => {
-            if (!homeManageOpen && card.id !== 'home-doors-card') return;
+            if (!homeManageOpen) return;
             const handle = event.target.closest?.('.home-drag-handle');
             if (!handle || event.button) return;
             const item = homeReorderItemFromHandle(handle);

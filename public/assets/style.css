@@ -4698,15 +4698,19 @@ button.home-device-meta--history:hover {
 }
 
 .home-card--manage .home-reorder-controls,
-.home-door-section .home-reorder-controls {
+.home-doors-card--manage .home-door-section .home-reorder-controls {
     display: inline-flex;
 }
 
 .home-card--manage .home-drag-handle,
-.home-door-section .home-drag-handle {
+.home-doors-card--manage .home-door-section .home-drag-handle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+}
+
+.home-doors-card--manage .home-door-section .home-room {
+    grid-template-columns: auto auto minmax(0, 1fr);
 }
 
 .home-move-btn {

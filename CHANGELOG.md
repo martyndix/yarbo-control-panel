@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.66] - 2026-11-21
+
+### Changed
+
+- The drag handle and arrows on Doors, Windows, and Controllable doors appear only while the Home gear is open. The order is still remembered.
+
 ## [5.0.65] - 2026-11-21
 
 ### Fixed
