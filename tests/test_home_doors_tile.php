@@ -254,6 +254,26 @@ assert_true(in_array('27:1', $homeIds, true), 'Matter contact still shows in its
 assert_true(!in_array('unifi:door:garage', $homeIds, true), 'unticked door stays off the room grid');
 assert_true(in_array('unifi:sensor:s1', $homeIds, true), 'ticked sensor still on the room grid');
 
+$hiddenOverview = $home->setDoorOverview('27:1', false);
+assert_true(($hiddenOverview['ok'] ?? false) === true, 'overview choice saves');
+assert_true(($hiddenOverview['doors_overview_off'] ?? []) === ['27:1'], 'unticked window leaves the overview list');
+$dashHidden = $home->dashboard();
+$hiddenWindow = null;
+foreach ($dashHidden['unifi_doors'] ?? [] as $row) {
+    if (($row['id'] ?? '') === '27:1') {
+        $hiddenWindow = $row;
+    }
+}
+assert_true(is_array($hiddenWindow) && ($hiddenWindow['overview'] ?? true) === false, 'unticked window is marked off the overview');
+assert_true(in_array('27:1', array_column($dashHidden['unifi_doors'] ?? [], 'id'), true), 'unticked window stays in the settings list');
+assert_true(in_array('27:1', array_column($dashHidden['devices'] ?? [], 'id'), true), 'unticked window still shows in its room');
+$sectionOrder = $home->reorder(['kind' => 'door_sections', 'ids' => ['windows', 'control', 'doors']]);
+assert_true(($sectionOrder['ok'] ?? false) === true, 'section order saves');
+$dashOrdered = $home->dashboard();
+assert_true(($dashOrdered['doors_section_order'] ?? null) === ['windows', 'control', 'doors'], 'saved section order comes back');
+$shownAgain = $home->setDoorOverview('27:1', true);
+assert_true(($shownAgain['ok'] ?? false) === true && ($shownAgain['doors_overview_off'] ?? null) === [], 'ticking the window puts it back on the overview');
+
 $byTile = [];
 foreach ($dash['unifi_doors'] as $row) {
     $byTile[$row['id']] = $row;
@@ -263,6 +283,17 @@ assert_true(($byTile['unifi:door:garage']['dps_label'] ?? '') === 'Open', 'tile 
 assert_true(($byTile['unifi:door:garage']['open'] ?? null) === true, 'tile keeps open boolean');
 assert_true(($byTile['unifi:door:side']['dps_label'] ?? '') === 'Closed', 'tile keeps live Closed');
 assert_true(($byTile['unifi:hub:h-gate']['gate'] ?? false) === true, 'gate hub keeps gate controls');
+assert_true(($dash['doors_section_order'] ?? null) === ['doors', 'windows', 'control'], 'section order defaults to doors, windows, controllable doors');
+assert_true(($dash['doors_overview_off'] ?? null) === [], 'every entry point starts on the overview');
+assert_true(($byTile['27:1']['section'] ?? '') === 'windows', 'a window stays in Windows');
+assert_true(($byTile['27:1']['overview'] ?? false) === true, 'a window starts on the overview');
+assert_true(($byTile['unifi:door:garage']['section'] ?? '') === 'control', 'a lockable door is a controllable door');
+assert_true(($byTile['unifi:hub:h-gate']['section'] ?? '') === 'control', 'a gate is a controllable door');
+assert_true(($byTile['31:1']['section'] ?? '') === 'doors', 'an open/close sensor is a door');
+assert_true(
+    YarboHome::normalizeDoorSectionOrder(['control', 'nope', 'doors', 'control']) === ['control', 'doors', 'windows'],
+    'section order drops junk and keeps all three'
+);
 assert_true(empty($byTile['unifi:door:garage']['open_changed_text'] ?? null), 'first sight has no last-changed caption yet');
 
 $tz = 'Europe/Zurich';
@@ -486,6 +517,16 @@ assert_true(str_contains($change, '## [4.0.248]'), 'changelog 4.0.248');
 assert_true(str_contains($js, 'data-home-open-changed'), 'JS marks Last change element');
 assert_true(str_contains($js, "action: 'doors_tile'"), 'JS saves the optional tick without Settings → Save');
 assert_true(str_contains($js, "action: 'doors_tile_sensors'"), 'JS saves the door-sensors tick without Settings → Save');
+assert_true(str_contains($html, 'id="home-doors-overview-picks"'), 'Home settings lists which doors and windows stay on the overview');
+assert_true(str_contains($js, 'function homeDoorSectionOf'), 'JS splits doors, windows, and controllable doors');
+assert_true(str_contains($js, 'Controllable doors'), 'controllable doors section is labelled');
+assert_true(str_contains($js, "action: 'doors_overview'"), 'JS saves which entries stay on the overview');
+assert_true(str_contains($js, "kind === 'door_sections'"), 'JS can reorder the three sections');
+assert_true(str_contains($js, 'data-home-door-section'), 'sections are collapsible blocks');
+assert_true(str_contains($js, "home-room\${anyOpen ? ' is-on' : ''}"), 'an open entry marks its section the same way a room does');
+assert_true(str_contains($css, '.home-door-section'), 'door sections have CSS');
+assert_true(str_contains($css, '.home-room.is-on .home-room-title'), 'section titles reuse the green room-name colour');
+assert_true(str_contains($change, '## [5.0.64]'), 'changelog 5.0.64');
 assert_true(str_contains($js, "const sensor = String(d.kind || '') === 'sensor'"), 'sensor rows on the tile have no Unlock/Lock');
 assert_true(str_contains($js, 'homeUnifiDoorClick'), 'Unlock/Lock on the tile uses the Home UniFi command');
 assert_true(str_contains($css, '.home-doors-card'), 'compact doors tile has CSS');

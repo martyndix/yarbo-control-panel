@@ -110,6 +110,8 @@ final class YarboHome
             'open_changed' => [],
             'open_changed_dps_v' => 0,
             'contact_kind' => [],
+            'doors_overview_off' => [],
+            'doors_section_order' => ['doors', 'windows', 'control'],
             'adaptive' => ['extra' => [], 'paused' => [], 'last' => []],
             'auto_off_sec' => [],
             'motor_mode_w' => [],
@@ -250,6 +252,8 @@ final class YarboHome
             'open_changed' => $this->normalizeOpenChanged($decoded['open_changed'] ?? null),
             'open_changed_dps_v' => max(0, (int) ($decoded['open_changed_dps_v'] ?? 0)),
             'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
+            'doors_overview_off' => $this->normalizeIdList(is_array($decoded['doors_overview_off'] ?? null) ? $decoded['doors_overview_off'] : []),
+            'doors_section_order' => self::normalizeDoorSectionOrder($decoded['doors_section_order'] ?? null),
             'adaptive' => $this->normalizeAdaptiveState($decoded['adaptive'] ?? null),
             'auto_off_sec' => $this->normalizeAutoOffMap($decoded['auto_off_sec'] ?? null),
             'motor_mode_w' => $this->normalizeMotorModeMap($decoded['motor_mode_w'] ?? null),
@@ -363,6 +367,8 @@ final class YarboHome
                 'device_order' => $store['device_order'],
                 'last_devices' => $store['last_devices'],
                 'contact_kind' => $store['contact_kind'] ?? [],
+                'doors_overview_off' => $store['doors_overview_off'] ?? [],
+                'doors_section_order' => $store['doors_section_order'] ?? ['doors', 'windows', 'control'],
                 'auto_off_sec' => $store['auto_off_sec'] ?? [],
                 'motor_mode_w' => $store['motor_mode_w'] ?? [],
             ],
@@ -403,11 +409,13 @@ final class YarboHome
         $current = $this->load();
         if ($homeIn !== null) {
             $this->snapshotStore($current);
-            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind', 'auto_off_sec', 'motor_mode_w'] as $key) {
+            foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind', 'doors_overview_off', 'doors_section_order', 'auto_off_sec', 'motor_mode_w'] as $key) {
                 if (isset($homeIn[$key]) && is_array($homeIn[$key])) {
                     $current[$key] = match ($key) {
                         'auto_off_sec' => $this->normalizeAutoOffMap($homeIn[$key]),
                         'motor_mode_w' => $this->normalizeMotorModeMap($homeIn[$key]),
+                        'doors_overview_off' => $this->normalizeIdList($homeIn[$key]),
+                        'doors_section_order' => self::normalizeDoorSectionOrder($homeIn[$key]),
                         default => $homeIn[$key],
                     };
                 }
@@ -837,6 +845,8 @@ final class YarboHome
             'restored_home' => $this->restoredHomeFrom,
             'doors_tile' => $this->unifiDoorsTileConfigured(),
             'doors_tile_sensors' => $this->unifiDoorSensorsTileConfigured(),
+            'doors_overview_off' => $store['doors_overview_off'] ?? [],
+            'doors_section_order' => self::normalizeDoorSectionOrder($store['doors_section_order'] ?? null),
             'unifi_doors' => $this->unifiDoorsPayload($store, $devices),
         ];
     }
@@ -3873,6 +3883,8 @@ final class YarboHome
             $store['device_order'] = $ids;
         } elseif ($kind === 'paper') {
             return $this->assignPaper((string) ($input['tablet_id'] ?? ''), $ids);
+        } elseif ($kind === 'door_sections') {
+            $store['doors_section_order'] = self::normalizeDoorSectionOrder($ids);
         } else {
             return ['ok' => false, 'error' => 'Unknown reorder'];
         }
@@ -4118,7 +4130,95 @@ final class YarboHome
             $seen[$id] = true;
         }
 
-        return $this->applyOpenChanged($out, $store);
+        return $this->markDoorOverview($this->applyOpenChanged($out, $store), $store);
+    }
+
+    /**
+     * Overview membership is separate from the room a contact is assigned to.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param array<string, mixed> $store
+     * @return list<array<string, mixed>>
+     */
+    private function markDoorOverview(array $rows, array $store): array
+    {
+        $off = array_fill_keys(
+            $this->normalizeIdList(is_array($store['doors_overview_off'] ?? null) ? $store['doors_overview_off'] : []),
+            true
+        );
+        foreach ($rows as $index => $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = (string) ($row['id'] ?? '');
+            $row['overview'] = $id === '' || !isset($off[$id]);
+            $row['section'] = self::doorSectionFor($row);
+            $rows[$index] = $row;
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     */
+    public static function doorSectionFor(array $row): string
+    {
+        $kind = strtolower((string) ($row['kind'] ?? ''));
+        if ($kind === 'door' || $kind === 'hub' || !empty($row['gate'])) {
+            return 'control';
+        }
+        $role = strtolower(trim((string) ($row['contact_kind'] ?? '')));
+        if ($role === self::CONTACT_WINDOW) {
+            return 'windows';
+        }
+
+        return 'doors';
+    }
+
+    /**
+     * @return list<string>
+     */
+    public static function normalizeDoorSectionOrder(mixed $value): array
+    {
+        $known = ['doors', 'windows', 'control'];
+        $out = [];
+        foreach (is_array($value) ? $value : [] as $id) {
+            $id = strtolower(trim((string) $id));
+            if (in_array($id, $known, true) && !in_array($id, $out, true)) {
+                $out[] = $id;
+            }
+        }
+        foreach ($known as $id) {
+            if (!in_array($id, $out, true)) {
+                $out[] = $id;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function setDoorOverview(string $id, bool $show): array
+    {
+        $id = trim($id);
+        if ($id === '') {
+            return ['ok' => false, 'error' => 'Pick a door or window'];
+        }
+        $store = $this->load();
+        $off = $this->normalizeIdList(is_array($store['doors_overview_off'] ?? null) ? $store['doors_overview_off'] : []);
+        $off = array_values(array_filter($off, static fn (string $item): bool => $item !== $id));
+        if (!$show) {
+            $off[] = $id;
+        }
+        $store['doors_overview_off'] = $off;
+        if (!$this->write($store)) {
+            return ['ok' => false, 'error' => 'Could not save'];
+        }
+
+        return ['ok' => true, 'id' => $id, 'show' => $show, 'doors_overview_off' => $off];
     }
 
     /**
@@ -7977,7 +8077,7 @@ final class YarboHome
         if (!$incomingEmpty || !$existingRich) {
             return $incoming;
         }
-        foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind'] as $key) {
+        foreach (['names', 'room_defs', 'rooms', 'group_defs', 'groups', 'scenes', 'paper', 'hidden', 'device_order', 'contact_kind', 'doors_overview_off', 'doors_section_order'] as $key) {
             if (($existing[$key] ?? []) !== []) {
                 $incoming[$key] = $existing[$key];
             }

@@ -3943,27 +3943,192 @@ function homeDoorsTileSensorsEnabled(data) {
     return false;
 }
 
+const HOME_DOOR_SECTION_DEFS = {
+    doors: 'Doors',
+    windows: 'Windows',
+    control: 'Controllable doors',
+};
+
+function homeDoorSectionOrder(data) {
+    const known = Object.keys(HOME_DOOR_SECTION_DEFS);
+    const raw = Array.isArray(data?.doors_section_order) ? data.doors_section_order : [];
+    const out = [];
+    raw.forEach((id) => {
+        const key = String(id || '');
+        if (HOME_DOOR_SECTION_DEFS[key] && !out.includes(key)) out.push(key);
+    });
+    known.forEach((id) => {
+        if (!out.includes(id)) out.push(id);
+    });
+    return out;
+}
+
+function homeDoorSectionOf(d) {
+    const given = String(d?.section || '');
+    if (HOME_DOOR_SECTION_DEFS[given]) return given;
+    const kind = String(d?.kind || '');
+    if (kind === 'door' || kind === 'hub' || d?.gate) return 'control';
+    return homeContactRole(d) === 'window' ? 'windows' : 'doors';
+}
+
+function homeDoorSectionsOpenSet() {
+    if (homeDoorSectionsOpen) return homeDoorSectionsOpen;
+    homeDoorSectionsOpen = new Set(Object.keys(HOME_DOOR_SECTION_DEFS));
+    try {
+        const raw = JSON.parse(localStorage.getItem('yarbo-door-sections-open') || 'null');
+        if (Array.isArray(raw)) {
+            homeDoorSectionsOpen = new Set(raw.filter((id) => HOME_DOOR_SECTION_DEFS[id]));
+        }
+    } catch {
+        /* keep every section open until the user collapses one */
+    }
+    return homeDoorSectionsOpen;
+}
+
+function saveDoorSectionsOpen() {
+    try {
+        localStorage.setItem('yarbo-door-sections-open', JSON.stringify([...homeDoorSectionsOpenSet()]));
+    } catch {
+        /* this browser may block storage */
+    }
+}
+
+function homeDoorTileSignature(data, doors) {
+    const open = homeDoorSectionsOpenSet();
+    return homeDoorSectionOrder(data).map((section) => {
+        const ids = doors
+            .filter((d) => d.overview !== false && homeDoorSectionOf(d) === section)
+            .map((d) => String(d.id || ''))
+            .filter(Boolean)
+            .join(',');
+        return `${section}:${ids}:${open.has(section) ? 1 : 0}:${homeManageOpen ? 'm' : ''}`;
+    }).join('|');
+}
+
+function homeDoorSectionHtml(section, rows) {
+    const title = HOME_DOOR_SECTION_DEFS[section] || section;
+    const open = homeDoorSectionsOpenSet().has(section);
+    const anyOpen = rows.some(homeMemberIsOpen);
+    return `<section class="home-door-section" data-home-door-section="${escapeHtml(section)}">
+        <div class="home-room${anyOpen ? ' is-on' : ''}">
+            ${homeReorderHandleHtml()}
+            <button type="button" class="home-room-expand" data-home-door-expand="${escapeHtml(section)}" aria-expanded="${open ? 'true' : 'false'}" title="${open ? `Hide ${title}` : `Show ${title}`}" aria-label="${open ? `Hide ${title}` : `Show ${title}`}">${open ? '−' : '+'}</button>
+            <div class="home-device-label">
+                <span class="home-device-dot" aria-hidden="true"></span>
+                <h3 class="home-room-title">${escapeHtml(title)}</h3>
+                <span class="home-room-count">${rows.length}</span>
+            </div>
+        </div>
+        <div class="home-door-section-devices"${open ? '' : ' hidden'}>${rows.map((d) => homeDoorsTileCardHtml(d)).join('')}</div>
+    </section>`;
+}
+
+function renderHomeDoorOverviewPicks(data, doors) {
+    const box = document.getElementById('home-doors-overview-picks');
+    if (!box) return;
+    const rows = Array.isArray(doors) ? doors : [];
+    const parts = [];
+    homeDoorSectionOrder(data).forEach((section) => {
+        const group = rows.filter((d) => homeDoorSectionOf(d) === section);
+        if (!group.length) return;
+        parts.push(`<h4 class="home-doors-picks-title">${escapeHtml(HOME_DOOR_SECTION_DEFS[section])}</h4>`);
+        group.forEach((d) => {
+            const id = String(d.id || '');
+            if (!id) return;
+            parts.push(`<label class="settings-field settings-checkbox home-doors-pick">
+                <input type="checkbox" data-door-overview="${escapeHtml(id)}"${d.overview !== false ? ' checked' : ''}>
+                <span>${escapeHtml(d.name || id)}</span>
+            </label>`);
+        });
+    });
+    const html = parts.join('') || '<p class="hint">No doors or windows yet.</p>';
+    if (box.dataset.sig === html) return;
+    box.dataset.sig = html;
+    box.innerHTML = html;
+}
+
+function toggleHomeDoorSection(id) {
+    const set = homeDoorSectionsOpenSet();
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    saveDoorSectionsOpen();
+    const section = document.querySelector(`#home-doors-grid [data-home-door-section="${CSS.escape(id)}"]`);
+    const open = set.has(id);
+    const devices = section?.querySelector(':scope > .home-door-section-devices');
+    if (devices) devices.hidden = !open;
+    const btn = section?.querySelector('[data-home-door-expand]');
+    const title = HOME_DOOR_SECTION_DEFS[id] || 'this list';
+    if (btn) {
+        btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        btn.textContent = open ? '−' : '+';
+        btn.title = open ? `Hide ${title}` : `Show ${title}`;
+        btn.setAttribute('aria-label', btn.title);
+    }
+    const grid = document.getElementById('home-doors-grid');
+    if (grid && homeDash) {
+        const doors = Array.isArray(homeDash.unifi_doors) ? homeDash.unifi_doors : [];
+        grid.dataset.sig = homeDoorTileSignature(homeDash, doors);
+    }
+}
+
+async function saveDoorOverview(id, show) {
+    const door = (homeDash?.unifi_doors || []).find((d) => String(d.id || '') === id);
+    const previous = door ? door.overview !== false : true;
+    if (door) door.overview = Boolean(show);
+    const off = new Set(homeDash?.doors_overview_off || []);
+    if (show) off.delete(id);
+    else off.add(id);
+    if (homeDash) homeDash.doors_overview_off = [...off];
+    renderHomeDoorsTile(homeDash);
+    try {
+        const data = await homeApi({ action: 'doors_overview', id, show: Boolean(show) });
+        if (!data?.ok) throw new Error(data?.error || 'Could not update the list');
+        if (Array.isArray(data.doors_overview_off) && homeDash) homeDash.doors_overview_off = data.doors_overview_off;
+    } catch (err) {
+        showToast(err.message || 'Could not update the list', 'error');
+        if (door) door.overview = previous;
+        if (homeDash) {
+            const back = new Set(homeDash.doors_overview_off || []);
+            if (previous) back.delete(id);
+            else back.add(id);
+            homeDash.doors_overview_off = [...back];
+        }
+        renderHomeDoorsTile(homeDash);
+    }
+}
+
 function renderHomeDoorsTile(data) {
     const card = els.homeDoorsCard || document.getElementById('home-doors-card');
     const grid = document.getElementById('home-doors-grid');
     if (!card || !grid) return;
     pinHomeDoorsAfterVestaboard();
     const enabled = homeDoorsTileEnabled(data);
-    const doors = enabled && Array.isArray(data?.unifi_doors) ? data.unifi_doors : [];
-    const show = enabled && doors.length > 0;
+    const doors = Array.isArray(data?.unifi_doors) ? data.unifi_doors : [];
+    renderHomeDoorOverviewPicks(data, doors);
+    const visible = enabled ? doors.filter((d) => d.overview !== false) : [];
+    const show = visible.length > 0;
     card.classList.toggle('hidden', !show);
+    card.classList.toggle('home-doors-card--manage', homeManageOpen);
     syncHomeDoorsTileChecks(enabled, homeDoorsTileSensorsEnabled(data));
     if (!show) {
         if (grid.children.length) grid.innerHTML = '';
+        grid.dataset.sig = '';
         return;
     }
-    const shown = [...grid.querySelectorAll('[data-home-id]')].map((el) => el.getAttribute('data-home-id') || '');
-    const nextIds = doors.map((d) => String(d.id || '')).filter(Boolean);
-    if (shown.join('\n') !== nextIds.join('\n')) {
-        grid.innerHTML = doors.map((d) => homeDoorsTileCardHtml(d)).join('');
+    const groups = homeDoorSectionOrder(data)
+        .map((section) => ({ section, rows: visible.filter((d) => homeDoorSectionOf(d) === section) }))
+        .filter((group) => group.rows.length);
+    const sig = homeDoorTileSignature(data, doors);
+    if (grid.dataset.sig !== sig) {
+        grid.dataset.sig = sig;
+        grid.innerHTML = groups.map((group) => homeDoorSectionHtml(group.section, group.rows)).join('');
         return;
     }
-    doors.forEach((d) => {
+    groups.forEach((group) => {
+        const heading = grid.querySelector(`[data-home-door-section="${CSS.escape(group.section)}"] .home-room`);
+        heading?.classList.toggle('is-on', group.rows.some(homeMemberIsOpen));
+    });
+    visible.forEach((d) => {
         const id = String(d.id || '');
         if (id === '') return;
         const el = grid.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
@@ -4714,6 +4879,7 @@ let homeLoadAborts = 0;
 let homeStateTimer = 0;
 let homeSetupPollTimer = 0;
 let homeManageOpen = false;
+let homeDoorSectionsOpen = null;
 let homeDrag = null;
 const homeExpandedRooms = new Set();
 const homeExpandedGroups = new Set();
@@ -5785,12 +5951,15 @@ function homeReorderHandleHtml() {
 }
 
 function homeReorderItemFromHandle(handle) {
-    return handle.closest('[data-paper-item], [data-home-scene-card], [data-home-id], [data-home-group], [data-home-room-group]');
+    return handle.closest('[data-home-door-section], [data-paper-item], [data-home-scene-card], [data-home-id], [data-home-group], [data-home-room-group]');
 }
 
 function homeReorderSiblings(item) {
     const parent = item.parentElement;
     if (!parent) return [];
+    if (item.hasAttribute('data-home-door-section')) {
+        return [...parent.querySelectorAll(':scope > [data-home-door-section]')];
+    }
     if (item.hasAttribute('data-home-room-group')) {
         return [...parent.querySelectorAll(':scope > [data-home-room-group]')];
     }
@@ -5810,6 +5979,7 @@ function homeReorderSiblings(item) {
 }
 
 function homeReorderKind(item) {
+    if (item.hasAttribute('data-home-door-section')) return 'door_sections';
     if (item.hasAttribute('data-paper-item')) return 'paper';
     if (item.hasAttribute('data-home-scene-card')) return 'scenes';
     if (item.hasAttribute('data-home-id')) return 'devices';
@@ -5979,11 +6149,19 @@ async function homeCommitReorder(kind, ids, extra = {}) {
         const tabletId = extra.tablet_id || homePaperTabletId;
         const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
         if (paper) paper.assigned = ids;
+    } else if (kind === 'door_sections') {
+        if (homeDash) homeDash.doors_section_order = ids;
     }
 }
 
 async function homeCommitItemOrder(item) {
     const kind = homeReorderKind(item);
+    if (kind === 'door_sections') {
+        const ids = [...document.querySelectorAll('#home-doors-grid [data-home-door-section]')]
+            .map((el) => el.getAttribute('data-home-door-section')).filter(Boolean);
+        await homeCommitReorder('door_sections', ids);
+        return;
+    }
     if (kind === 'rooms') {
         const ids = [...document.querySelectorAll('#home-devices [data-home-room-group]')]
             .map((el) => el.getAttribute('data-home-room-group')).filter(Boolean);
@@ -6016,9 +6194,10 @@ async function homeCommitItemOrder(item) {
 }
 
 function bindHomeReorder() {
-    const card = document.getElementById('home-card');
-    if (!card || card.dataset.homeReorderBound === '1') return;
-    card.dataset.homeReorderBound = '1';
+    const cards = ['home-card', 'home-doors-card']
+        .map((id) => document.getElementById(id))
+        .filter(Boolean);
+    if (!cards.length || cards.every((card) => card.dataset.homeReorderBound === '1')) return;
 
     const onMove = (event) => {
         if (!homeDrag) return;
@@ -6061,20 +6240,24 @@ function bindHomeReorder() {
         }
     };
 
-    card.addEventListener('pointerdown', (event) => {
-        if (!homeManageOpen) return;
-        const handle = event.target.closest?.('.home-drag-handle');
-        if (!handle || event.button) return;
-        const item = homeReorderItemFromHandle(handle);
-        if (!item) return;
-        event.preventDefault();
-        homeDrag = { item, moved: false };
-        item.classList.add('home-item--dragging');
-        document.body.classList.add('home-is-reordering');
-        handle.setPointerCapture?.(event.pointerId);
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
-        window.addEventListener('pointercancel', onUp);
+    cards.forEach((card) => {
+        if (card.dataset.homeReorderBound === '1') return;
+        card.dataset.homeReorderBound = '1';
+        card.addEventListener('pointerdown', (event) => {
+            if (!homeManageOpen) return;
+            const handle = event.target.closest?.('.home-drag-handle');
+            if (!handle || event.button) return;
+            const item = homeReorderItemFromHandle(handle);
+            if (!item) return;
+            event.preventDefault();
+            homeDrag = { item, moved: false };
+            item.classList.add('home-item--dragging');
+            document.body.classList.add('home-is-reordering');
+            handle.setPointerCapture?.(event.pointerId);
+            window.addEventListener('pointermove', onMove);
+            window.addEventListener('pointerup', onUp);
+            window.addEventListener('pointercancel', onUp);
+        });
     });
 }
 
@@ -7554,6 +7737,32 @@ async function homeUnifiDoorClick(event) {
 function bindHomeDashboard() {
     bindHomeReorder();
     document.getElementById('home-doors-card')?.addEventListener('click', async (event) => {
+        if (event.target.closest('.home-drag-handle')) return;
+        const moveBtn = event.target.closest('[data-home-move]');
+        if (moveBtn) {
+            const item = homeReorderItemFromHandle(moveBtn);
+            if (!item) return;
+            const dir = Number(moveBtn.getAttribute('data-home-move') || 0);
+            const siblings = homeReorderSiblings(item);
+            const index = siblings.indexOf(item);
+            const next = index + dir;
+            if (index < 0 || next < 0 || next >= siblings.length) return;
+            if (dir < 0) siblings[next].before(item);
+            else siblings[next].after(item);
+            try {
+                await homeCommitItemOrder(item);
+                showToast('Order saved', 'success');
+            } catch (err) {
+                showToast(err.message || 'Could not save order', 'error');
+                await loadHomeDashboard();
+            }
+            return;
+        }
+        const sectionExpand = event.target.closest('[data-home-door-expand]');
+        if (sectionExpand) {
+            toggleHomeDoorSection(sectionExpand.getAttribute('data-home-door-expand') || '');
+            return;
+        }
         const historyBtn = event.target.closest('[data-sensor-history]');
         if (historyBtn) {
             event.preventDefault();
@@ -7570,6 +7779,11 @@ function bindHomeDashboard() {
     });
     document.getElementById('home-doors-tile-sensors')?.addEventListener('change', (event) => {
         saveHomeDoorsTileSensors(Boolean(event.currentTarget?.checked));
+    });
+    document.getElementById('home-doors-overview-picks')?.addEventListener('change', (event) => {
+        const box = event.target.closest?.('[data-door-overview]');
+        if (!box) return;
+        saveDoorOverview(box.getAttribute('data-door-overview') || '', box.checked);
     });
     els.settingsUnifiDoorsTile?.addEventListener('change', (event) => {
         saveHomeDoorsTile(Boolean(event.currentTarget?.checked));

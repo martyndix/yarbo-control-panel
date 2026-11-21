@@ -3205,6 +3205,38 @@ html[data-theme="light"] .plan-activity {
     gap: 0.35rem;
 }
 
+.home-door-section {
+    grid-column: 1 / -1;
+    display: grid;
+    gap: 0.3rem;
+}
+
+.home-door-section-devices {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(13.5rem, 1fr));
+    gap: 0.35rem;
+}
+
+.home-door-section-devices[hidden] {
+    display: none;
+}
+
+.home-doors-picks {
+    display: grid;
+    gap: 0.15rem;
+    margin: 0 0 0.85rem;
+}
+
+.home-doors-picks-title {
+    margin: 0.45rem 0 0.05rem;
+    font-size: 0.82rem;
+    font-weight: 650;
+}
+
+.home-doors-pick {
+    margin: 0;
+}
+
 .home-doors-card .home-device {
     padding: 0.2rem 0.4rem;
     gap: 0.25rem 0.4rem;

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.64] - 2026-11-21
+
+### Added
+
+- Home settings can choose which doors and windows appear on DOORS / WINDOWS. They still show in the room they are assigned to. The list is split into Doors, Windows, and Controllable doors. Those sections collapse and can be reordered. A section name turns green when something in it is open.
+
 ## [5.0.63] - 2026-11-21
 
 ### Fixed
