@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.60] - 2026-11-21
+
+### Fixed
+
+- Another device still could not load the panel while the cameras were streaming. The pictures were the large video stream, and that filled the network. Live view now uses the small stream, keeps the pictures to about 60 KB a second, and only asks for the large stream if the small one stays quiet. Update to latest, refresh Safari, press Stop view, then Start live view.
+
 ## [5.0.59] - 2026-11-21
 
 ### Fixed

@@ -62,6 +62,8 @@ assert_true($subscribe !== false && $connect !== false && $subscribe < $connect,
 $listen = strpos($camera, 'register_video_encoded_frame_observer');
 assert_true($listen !== false && $connect !== false && $listen < $connect, 'picture listener is registered before connect');
 assert_true(!str_contains($camera, 'def rejoin_quiet'), 'live view does not leave the channel to rejoin');
+assert_true(str_contains($camera, 'VIDEO_STREAM_LOW'), 'live view uses the small stream so another device can load');
+assert_true(str_contains($camera, 'BYTE_BUDGET_PER_S'), 'pictures stay inside a small share of the network');
 assert_true(str_contains($camera, 'annexb_has_idr'), 'keyframes are detected from the IDR NAL');
 assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Agora token');
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');

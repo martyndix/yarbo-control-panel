@@ -29,9 +29,10 @@ from pathlib import Path
 from typing import Any
 
 VIEWS = ("middle", "left", "right", "back")
-# About five pictures a second from each camera. Sending every encoded frame
-# filled the machine, so the panel and a second device could not get a turn.
+# About five pictures a second from each camera, and about 60 KB/s altogether.
+# The high stream filled the network, so another device could not load the panel.
 FRAME_GAP_S = 0.2
+BYTE_BUDGET_PER_S = 60_000
 SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/prod"
 TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
 # The robot's video service is the Yarbo app region, North America (2),
@@ -400,6 +401,8 @@ class Hub:
         self.subs: list[queue.Queue[dict[str, Any] | None]] = []
         self.ever_subscribed = False
         self.drops = 0
+        self._sent_bytes: list[tuple[float, int]] = []
+        self._last_over_budget_key = 0.0
         self.last_key: dict[str, dict[str, Any]] = {}
         self.views: dict[str, dict[str, Any]] = {
             view: {
@@ -460,6 +463,19 @@ class Hub:
             if not key and (now - last_sent) < FRAME_GAP_S:
                 self.drops += 1
                 return
+            size = len(data)
+            self._sent_bytes = [(stamp, n) for stamp, n in self._sent_bytes if now - stamp < 1.0]
+            used = sum(n for _, n in self._sent_bytes)
+            if used + size > BYTE_BUDGET_PER_S:
+                # One oversized keyframe a second keeps the tiles from going black.
+                # Everything else waits, so the panel still has the network.
+                if not key or (
+                    self._last_over_budget_key > 0 and now - self._last_over_budget_key < 1.0
+                ):
+                    self.drops += 1
+                    return
+                self._last_over_budget_key = now
+            self._sent_bytes.append((now, size))
             slot["_sent_at"] = now
         event = {
             "view": view,
@@ -535,6 +551,7 @@ class LiveSession:
         self.rejoin_at = 0.0
         self.sensors_on = False
         self.user_stop = False
+        self.tried_high = False
         self._status_lock = threading.Lock()
 
     def write_status(self) -> None:
@@ -713,9 +730,8 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
             self.view = view
 
         def on_encoded_video_frame(self, frame_uid, image_buffer, length, info):  # type: ignore[no-untyped-def]
-            # Every encoded frame is handed on. The hub only skips the copy
-            # when nobody can take it. Dropping a keyframe here leaves the
-            # tiles black.
+            # The hub keeps a small share of the frames. Sending all of them
+            # filled the network, so another device could not load the panel.
             data = copy_frame(image_buffer, length)
             if not data:
                 return 1
@@ -729,8 +745,10 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
             session.hub.push(self.view, key, pts, data, uid_num)
             return 1
 
+    # The small stream. The large one filled the link and the other device
+    # could not load the panel. A quiet small stream steps up later.
     options = VideoSubscriptionOptions(
-        type=VideoStreamType.VIDEO_STREAM_HIGH,
+        type=VideoStreamType.VIDEO_STREAM_LOW,
         encodedFrameOnly=True,
     )
     session.video_options = options
@@ -931,6 +949,20 @@ def finish_session(session: LiveSession) -> None:
         shutdown()
 
 
+def prefer_high_stream(session: LiveSession) -> None:
+    """The small stream stayed quiet. Ask for the large one."""
+    try:
+        from agora.rtc.agora_base import VideoStreamType, VideoSubscriptionOptions
+    except Exception:
+        return
+    session.video_options = VideoSubscriptionOptions(
+        type=VideoStreamType.VIDEO_STREAM_HIGH,
+        encodedFrameOnly=True,
+    )
+    print("[camera] small stream was quiet; asking for the large one", file=sys.stderr, flush=True)
+    subscribe_again(session)
+
+
 def subscribe_again(session: LiveSession) -> None:
     """Ask for pictures again without leaving the channel.
 
@@ -960,6 +992,9 @@ def watch_lease(session: LiveSession, armed_at: float) -> None:
         frames = sum(int(slot.get("frames") or 0) for slot in snap["views"].values())
         robots = sum(1 for slot in snap["views"].values() if slot.get("robotSeen"))
         if frames == 0 and session.state == "live":
+            if not session.tried_high and now - armed_at >= 8:
+                session.tried_high = True
+                prefer_high_stream(session)
             if not resubscribed and now - armed_at >= 12:
                 resubscribed = True
                 subscribe_again(session)
@@ -1156,6 +1191,18 @@ def self_test() -> int:
         except queue.Empty:
             break
     assert sent_pts == [1, 3], sent_pts
+    limited = Hub()
+    limited_sub = limited.subscribe()
+    blob = b"k" * 80000
+    limited.push("middle", True, 1, blob, 1)
+    limited.push("left", True, 2, blob, 1)
+    limited_pts = []
+    while True:
+        try:
+            limited_pts.append(limited_sub.get_nowait()["t"])
+        except queue.Empty:
+            break
+    assert limited_pts == [1], limited_pts
     print("ok")
     return 0
 
