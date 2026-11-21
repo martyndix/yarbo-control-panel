@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.65] - 2026-11-21
+
+### Fixed
+
+- Doors, Windows, and Controllable doors can be reordered from the list itself. Drag a heading or use its arrows. That order is saved and comes back after a refresh.
+
 ## [5.0.64] - 2026-11-21
 
 ### Added

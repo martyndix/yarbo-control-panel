@@ -4011,7 +4011,7 @@ function homeDoorSectionHtml(section, rows) {
     const anyOpen = rows.some(homeMemberIsOpen);
     return `<section class="home-door-section" data-home-door-section="${escapeHtml(section)}">
         <div class="home-room${anyOpen ? ' is-on' : ''}">
-            ${homeReorderHandleHtml()}
+            ${homeDoorSectionReorderHtml()}
             <button type="button" class="home-room-expand" data-home-door-expand="${escapeHtml(section)}" aria-expanded="${open ? 'true' : 'false'}" title="${open ? `Hide ${title}` : `Show ${title}`}" aria-label="${open ? `Hide ${title}` : `Show ${title}`}">${open ? '−' : '+'}</button>
             <div class="home-device-label">
                 <span class="home-device-dot" aria-hidden="true"></span>
@@ -5943,6 +5943,14 @@ function applyHomeManageUi() {
 
 function homeReorderHandleHtml() {
     if (!homeManageOpen) return '';
+    return homeReorderControlsHtml();
+}
+
+function homeDoorSectionReorderHtml() {
+    return homeReorderControlsHtml();
+}
+
+function homeReorderControlsHtml() {
     return `<span class="home-reorder-controls">
         <button type="button" class="home-drag-handle" title="Drag to reorder" aria-label="Drag to reorder">⋮⋮</button>
         <button type="button" class="home-move-btn" data-home-move="-1" title="Move up" aria-label="Move up">▲</button>
@@ -6150,7 +6158,15 @@ async function homeCommitReorder(kind, ids, extra = {}) {
         const paper = (homeDash.paper_devices || []).find((p) => p.id === tabletId);
         if (paper) paper.assigned = ids;
     } else if (kind === 'door_sections') {
-        if (homeDash) homeDash.doors_section_order = ids;
+        const order = Array.isArray(data.doors_section_order) && data.doors_section_order.length
+            ? data.doors_section_order
+            : ids;
+        if (homeDash) homeDash.doors_section_order = order;
+        const grid = document.getElementById('home-doors-grid');
+        if (grid && homeDash) {
+            const doors = Array.isArray(homeDash.unifi_doors) ? homeDash.unifi_doors : [];
+            grid.dataset.sig = homeDoorTileSignature(homeDash, doors);
+        }
     }
 }
 
@@ -6244,7 +6260,7 @@ function bindHomeReorder() {
         if (card.dataset.homeReorderBound === '1') return;
         card.dataset.homeReorderBound = '1';
         card.addEventListener('pointerdown', (event) => {
-            if (!homeManageOpen) return;
+            if (!homeManageOpen && card.id !== 'home-doors-card') return;
             const handle = event.target.closest?.('.home-drag-handle');
             if (!handle || event.button) return;
             const item = homeReorderItemFromHandle(handle);

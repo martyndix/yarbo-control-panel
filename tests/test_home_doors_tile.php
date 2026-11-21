@@ -522,6 +522,10 @@ assert_true(str_contains($js, 'function homeDoorSectionOf'), 'JS splits doors, w
 assert_true(str_contains($js, 'Controllable doors'), 'controllable doors section is labelled');
 assert_true(str_contains($js, "action: 'doors_overview'"), 'JS saves which entries stay on the overview');
 assert_true(str_contains($js, "kind === 'door_sections'"), 'JS can reorder the three sections');
+assert_true(str_contains($js, 'function homeDoorSectionReorderHtml'), 'door headings always have reorder controls');
+assert_true(str_contains($js, "card.id !== 'home-doors-card'"), 'door headings can be dragged without opening Home settings');
+assert_true(str_contains($css, '.home-door-section .home-reorder-controls'), 'door reorder controls are visible on the overview');
+assert_true(str_contains($change, '## [5.0.65]'), 'changelog 5.0.65');
 assert_true(str_contains($js, 'data-home-door-section'), 'sections are collapsible blocks');
 assert_true(str_contains($js, "home-room\${anyOpen ? ' is-on' : ''}"), 'an open entry marks its section the same way a room does');
 assert_true(str_contains($css, '.home-door-section'), 'door sections have CSS');

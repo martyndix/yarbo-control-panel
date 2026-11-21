@@ -4697,11 +4697,13 @@ button.home-device-meta--history:hover {
     flex-shrink: 0;
 }
 
-.home-card--manage .home-reorder-controls {
+.home-card--manage .home-reorder-controls,
+.home-door-section .home-reorder-controls {
     display: inline-flex;
 }
 
-.home-card--manage .home-drag-handle {
+.home-card--manage .home-drag-handle,
+.home-door-section .home-drag-handle {
     display: inline-flex;
     align-items: center;
     justify-content: center;

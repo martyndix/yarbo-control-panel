@@ -3891,8 +3891,12 @@ final class YarboHome
         if (!$this->write($store)) {
             return ['ok' => false, 'error' => 'Could not save order'];
         }
+        $saved = ['ok' => true];
+        if ($kind === 'door_sections') {
+            $saved['doors_section_order'] = $store['doors_section_order'];
+        }
 
-        return ['ok' => true];
+        return $saved;
     }
 
     /**

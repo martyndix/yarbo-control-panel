@@ -704,7 +704,7 @@ $config = require dirname(__DIR__) . '/config.php';
             </label>
             <p class="hint">Each open/close sensor can be <strong>Door</strong> or <strong>Window</strong> on its row. That chooses 🚪 or 🪟 on Home and on the PaperMono <strong>ACCESS</strong> page. Lockable Access doors stay doors.</p>
             <h3 class="settings-subtitle">On the DOORS / WINDOWS list</h3>
-            <p class="hint">Untick a door or window to leave it off this list. It still shows in the room it is assigned to. The list itself is Doors, Windows, and Controllable doors. Those headings collapse, and you can drag them while this menu is open. A heading turns green when something in it is open.</p>
+            <p class="hint">Untick a door or window to leave it off this list. It still shows in the room it is assigned to. The list itself is Doors, Windows, and Controllable doors. Those headings collapse, and the arrows on each heading change their order. That order is remembered. A heading turns green when something in it is open.</p>
             <div id="home-doors-overview-picks" class="home-doors-picks"></div>
             <div class="home-backup">
                 <h3 class="settings-subtitle">Backup</h3>
