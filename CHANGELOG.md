@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.68] - 2026-11-22
+
+### Added
+
+- CCTV is a full-screen page of every UniFi camera, shown while UniFi is on. Drag the pictures to rearrange them; that order is remembered. Click a picture and it fills the screen. The live pictures stop when you leave the page.
+
 ## [5.0.67] - 2026-11-21
 
 ### Added

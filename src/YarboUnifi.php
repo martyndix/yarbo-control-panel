@@ -305,6 +305,7 @@ final class YarboUnifi
      *   show_on_home: list<string>,
      *   doors_tile: bool,
      *   doors_tile_sensors: bool,
+     *   cctv_order: list<string>,
      *   last_ok: bool,
      *   last_error: string,
      *   last_check: ?string
@@ -327,6 +328,7 @@ final class YarboUnifi
             'auto_off_sec' => [],
             'doors_tile' => true,
             'doors_tile_sensors' => false,
+            'cctv_order' => [],
             'speakers_enabled' => true,
             'last_ok' => false,
             'last_error' => '',
@@ -364,6 +366,7 @@ final class YarboUnifi
             'doors_tile_sensors' => array_key_exists('doors_tile_sensors', $decoded)
                 ? (bool) $decoded['doors_tile_sensors']
                 : false,
+            'cctv_order' => $this->normalizeIdList($decoded['cctv_order'] ?? []),
             'speakers_enabled' => array_key_exists('speakers_enabled', $decoded)
                 ? (bool) $decoded['speakers_enabled']
                 : true,
@@ -463,6 +466,9 @@ final class YarboUnifi
             || array_key_exists('speakers_enabled', $input)
             ? YarboHub::asBool($input['unifi_speakers_enabled'] ?? $input['speakers_enabled'] ?? true)
             : ($current['speakers_enabled'] ?? true);
+        $cctvOrder = array_key_exists('cctv_order', $input)
+            ? $this->normalizeIdList($input['cctv_order'])
+            : ($current['cctv_order'] ?? []);
         $next = [
             'host' => $host,
             'verify_tls' => $verify,
@@ -478,6 +484,7 @@ final class YarboUnifi
             'auto_off_sec' => $autoOff,
             'doors_tile' => $doorsTile,
             'doors_tile_sensors' => $doorsTileSensors,
+            'cctv_order' => $cctvOrder,
             'speakers_enabled' => $speakersEnabled,
             'last_ok' => array_key_exists('last_ok', $input) ? (bool) $input['last_ok'] : $current['last_ok'],
             'last_error' => (string) ($input['last_error'] ?? $current['last_error']),
@@ -509,6 +516,23 @@ final class YarboUnifi
         }
 
         return $this->save(['show_on_home' => $list]);
+    }
+
+    /**
+     * Remember the CCTV wall order. Unknown ids are dropped. Cameras missing
+     * from the list stay at the end when the page is drawn.
+     *
+     * @param mixed $ids
+     * @return array{ok: bool, cctv_order?: list<string>, error?: string}
+     */
+    public function setCctvOrder(mixed $ids): array
+    {
+        $order = $this->normalizeIdList($ids);
+        if (!$this->save(['cctv_order' => $order])) {
+            return ['ok' => false, 'error' => 'Could not save the camera order'];
+        }
+
+        return ['ok' => true, 'cctv_order' => $order];
     }
 
     /**
@@ -791,6 +815,7 @@ final class YarboUnifi
             'auto_off_sec' => $config['auto_off_sec'] ?? [],
             'doors_tile' => $config['doors_tile'] !== false,
             'doors_tile_sensors' => !empty($config['doors_tile_sensors']),
+            'cctv_order' => $config['cctv_order'] ?? [],
             'speakers_enabled' => ($config['speakers_enabled'] ?? true) !== false,
             'last_ok' => $config['last_ok'],
             'last_error' => $config['last_error'] !== '' ? $config['last_error'] : null,

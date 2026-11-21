@@ -3209,10 +3209,19 @@ function rememberHub(hub) {
     }
 }
 
+function moduleListWithCctv(enabled) {
+    const list = Array.isArray(enabled) ? enabled.slice() : [];
+    if (list.some((m) => m && m.id === 'unifi') && !list.some((m) => m && m.id === 'cctv')) {
+        const at = list.findIndex((m) => m && m.id === 'unifi');
+        list.splice(at + 1, 0, { id: 'cctv', label: 'CCTV' });
+    }
+    return list;
+}
+
 function applyModuleSwitcher(hub) {
     if (!hub) return [];
     rememberHub(hub);
-    const enabled = Array.isArray(hub.enabled) ? hub.enabled : [];
+    const enabled = moduleListWithCctv(hub.enabled);
     const ids = enabled.map((m) => m.id);
     if (els.moduleSwitcher) {
         els.moduleSwitcher.classList.toggle('hidden', ids.length < 2);
@@ -3349,7 +3358,7 @@ function applyHubFromStatus(data) {
 
 function setActiveModule(id, persist = true) {
     const enabledIds = Array.isArray(lastHub?.enabled)
-        ? lastHub.enabled.map((m) => m.id)
+        ? moduleListWithCctv(lastHub.enabled).map((m) => m.id)
         : null;
     let moduleId = id || 'yarbo';
     if (enabledIds && enabledIds.length && !enabledIds.includes(moduleId)) {
@@ -3360,10 +3369,11 @@ function setActiveModule(id, persist = true) {
     if (persist) {
         try { localStorage.setItem(ACTIVE_MODULE_KEY, moduleId); } catch { /* ignore */ }
     }
+    document.body.classList.toggle('cctv-open', moduleId === 'cctv');
     document.querySelectorAll('#panel-sections .panel-section[data-module]').forEach((section) => {
         const owner = section.getAttribute('data-module');
         const ownerOn = !enabledIds || owner === 'shared' || enabledIds.includes(owner);
-        const show = owner === 'shared' || (owner === moduleId && ownerOn);
+        const show = (owner === 'shared' && moduleId !== 'cctv') || (owner === moduleId && ownerOn);
         section.classList.toggle('module-pane-hidden', !show);
     });
     els.moduleSwitcher?.querySelectorAll('[data-module-id]').forEach((btn) => {
@@ -3389,6 +3399,226 @@ function setActiveModule(id, persist = true) {
     } else {
         stopUnifiPoll();
     }
+    if (moduleId === 'cctv') {
+        if (prevModuleId !== 'cctv') startCctvWall();
+    } else if (prevModuleId === 'cctv') {
+        stopCctvWall();
+    }
+}
+
+let cctvOrder = [];
+let cctvBigId = '';
+let cctvRefreshSeq = 0;
+const cctvFallbackTimers = new Map();
+
+function cctvStreamSrc(id) {
+    return `/api/unifi.php?action=stream&id=${encodeURIComponent(id)}&fps=3`;
+}
+
+function cctvSnapSrc(id) {
+    return `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}&fresh=1&r=${Date.now()}`;
+}
+
+function cctvOrdered(cameras, order) {
+    const list = Array.isArray(cameras) ? cameras.filter((cam) => cam && cam.id) : [];
+    const byId = new Map(list.map((cam) => [cam.id, cam]));
+    const out = [];
+    (Array.isArray(order) ? order : []).forEach((id) => {
+        const cam = byId.get(id);
+        if (!cam) return;
+        out.push(cam);
+        byId.delete(id);
+    });
+    byId.forEach((cam) => out.push(cam));
+    return out;
+}
+
+function stopCctvFallbacks() {
+    cctvFallbackTimers.forEach((timer) => window.clearInterval(timer));
+    cctvFallbackTimers.clear();
+}
+
+function cctvUseSnapshot(tile) {
+    const id = tile?.getAttribute('data-cctv-id') || '';
+    const img = tile?.querySelector('img');
+    if (!id || !img || cctvFallbackTimers.has(id)) return;
+    const pull = () => {
+        if (!tile.isConnected || activeModuleId !== 'cctv') return;
+        img.src = cctvSnapSrc(id);
+    };
+    pull();
+    cctvFallbackTimers.set(id, window.setInterval(pull, 1500));
+}
+
+function cctvAttachStream(tile) {
+    const id = tile.getAttribute('data-cctv-id') || '';
+    const img = tile.querySelector('img');
+    if (!id || !img) return;
+    const timer = cctvFallbackTimers.get(id);
+    if (timer) {
+        window.clearInterval(timer);
+        cctvFallbackTimers.delete(id);
+    }
+    img.onerror = () => cctvUseSnapshot(tile);
+    if (img.getAttribute('src') !== cctvStreamSrc(id)) img.src = cctvStreamSrc(id);
+}
+
+function renderCctvGrid(cameras, order) {
+    const grid = document.getElementById('cctv-grid');
+    const hint = document.getElementById('cctv-hint');
+    if (!grid || activeModuleId !== 'cctv') return;
+    const list = cctvOrdered(cameras, order);
+    if (hint) {
+        hint.textContent = list.length
+            ? 'Drag a picture to move it. Click it to fill the screen.'
+            : 'No Protect cameras yet.';
+    }
+    const want = list.map((cam) => cam.id).join('\n');
+    const have = [...grid.querySelectorAll('[data-cctv-id]')].map((el) => el.getAttribute('data-cctv-id')).join('\n');
+    if (want === have) {
+        grid.querySelectorAll('[data-cctv-id]').forEach((tile) => {
+            const id = tile.getAttribute('data-cctv-id') || '';
+            tile.classList.toggle('is-big', cctvBigId !== '' && id === cctvBigId);
+            const img = tile.querySelector('img');
+            if (img && !img.getAttribute('src')) cctvAttachStream(tile);
+        });
+        document.body.classList.toggle('cctv-big', cctvBigId !== '');
+        return;
+    }
+    stopCctvFallbacks();
+    grid.innerHTML = list.map((cam) => {
+        const name = String(cam.name || 'Camera');
+        const id = String(cam.id);
+        const big = id === cctvBigId ? ' is-big' : '';
+        return `<article class="cctv-tile${big}" data-cctv-id="${escapeHtml(id)}">
+            <img alt="${escapeHtml(name)}" draggable="false">
+            <span class="cctv-name">${escapeHtml(name)}</span>
+            <button type="button" class="btn btn-secondary cctv-close">Close</button>
+        </article>`;
+    }).join('');
+    grid.querySelectorAll('[data-cctv-id]').forEach((tile) => cctvAttachStream(tile));
+    document.body.classList.toggle('cctv-big', cctvBigId !== '');
+}
+
+function setCctvBig(id) {
+    cctvBigId = id || '';
+    document.body.classList.toggle('cctv-big', cctvBigId !== '');
+    document.querySelectorAll('#cctv-grid [data-cctv-id]').forEach((tile) => {
+        const mine = tile.getAttribute('data-cctv-id') || '';
+        tile.classList.toggle('is-big', cctvBigId !== '' && mine === cctvBigId);
+    });
+}
+
+async function saveCctvOrder() {
+    const ids = [...document.querySelectorAll('#cctv-grid [data-cctv-id]')]
+        .map((el) => el.getAttribute('data-cctv-id') || '')
+        .filter(Boolean);
+    cctvOrder = ids;
+    if (unifiDash) {
+        unifiDash.config = { ...(unifiDash.config || {}), cctv_order: ids.slice() };
+    }
+    try {
+        const data = await unifiApi({ action: 'cctv_order', ids });
+        if (!data?.ok || !Array.isArray(data.cctv_order)) return;
+        cctvOrder = data.cctv_order;
+        if (unifiDash?.config) unifiDash.config.cctv_order = data.cctv_order;
+    } catch {
+        /* The pictures stay where they were dropped. */
+    }
+}
+
+function stopCctvWall() {
+    cctvRefreshSeq += 1;
+    cctvBigId = '';
+    document.body.classList.remove('cctv-big');
+    stopCctvFallbacks();
+    document.querySelectorAll('#cctv-grid .is-big').forEach((tile) => tile.classList.remove('is-big'));
+    document.querySelectorAll('#cctv-grid img').forEach((img) => {
+        img.onerror = null;
+        img.removeAttribute('src');
+    });
+}
+
+async function startCctvWall() {
+    const seq = ++cctvRefreshSeq;
+    let cameras = Array.isArray(unifiDash?.cameras) ? unifiDash.cameras : [];
+    let order = Array.isArray(unifiDash?.config?.cctv_order) ? unifiDash.config.cctv_order : cctvOrder;
+    try {
+        const res = await fetch('/api/unifi.php?action=status', { cache: 'no-store' });
+        const data = await res.json();
+        if (seq !== cctvRefreshSeq || activeModuleId !== 'cctv') return;
+        if (data && Array.isArray(data.cameras)) {
+            unifiDash = { ...(unifiDash || {}), ...data };
+            cameras = data.cameras;
+            if (Array.isArray(data.config?.cctv_order)) order = data.config.cctv_order;
+        }
+    } catch {
+        /* Keep the camera list already on the page. */
+    }
+    if (seq !== cctvRefreshSeq || activeModuleId !== 'cctv') return;
+    cctvOrder = Array.isArray(order) ? order.slice() : [];
+    renderCctvGrid(cameras, cctvOrder);
+}
+
+function bindCctvWall() {
+    const grid = document.getElementById('cctv-grid');
+    if (!grid || grid.dataset.bound === '1') return;
+    grid.dataset.bound = '1';
+    let drag = null;
+    grid.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        const tile = event.target.closest('[data-cctv-id]');
+        if (!tile) return;
+        const closing = Boolean(event.target.closest('.cctv-close')) || tile.classList.contains('is-big');
+        drag = { tile, x: event.clientX, y: event.clientY, moved: false, close: closing };
+        if (!closing) {
+            try { tile.setPointerCapture(event.pointerId); } catch { /* pointer already released */ }
+        }
+    });
+    grid.addEventListener('pointermove', (event) => {
+        if (!drag || drag.close) return;
+        if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) < 8) return;
+        drag.moved = true;
+        drag.tile.classList.add('is-dragging');
+        drag.tile.style.pointerEvents = 'none';
+        const under = document.elementFromPoint(event.clientX, event.clientY);
+        drag.tile.style.pointerEvents = '';
+        const over = under?.closest?.('[data-cctv-id]');
+        if (!over || over === drag.tile || over.parentElement !== grid) return;
+        const rect = over.getBoundingClientRect();
+        let after = false;
+        if (event.clientY > rect.bottom) after = true;
+        else if (event.clientY < rect.top) after = false;
+        else after = event.clientX > rect.left + rect.width / 2;
+        const next = after ? over.nextSibling : over;
+        if (next !== drag.tile) grid.insertBefore(drag.tile, next);
+    });
+    const finish = () => {
+        if (!drag) return;
+        const { tile, moved, close } = drag;
+        drag = null;
+        tile.classList.remove('is-dragging');
+        tile.style.pointerEvents = '';
+        if (moved) {
+            void saveCctvOrder();
+            return;
+        }
+        if (close) {
+            setCctvBig('');
+            return;
+        }
+        setCctvBig(tile.getAttribute('data-cctv-id') || '');
+    };
+    grid.addEventListener('pointerup', finish);
+    grid.addEventListener('pointercancel', () => {
+        if (!drag) return;
+        drag.tile.classList.remove('is-dragging');
+        drag.tile.style.pointerEvents = '';
+        drag = null;
+    });
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape' && cctvBigId) setCctvBig('');
+    });
 }
 
 function updatePowerwallDashboard(pw) {
@@ -20284,6 +20514,7 @@ document.getElementById('home-paper-assign')?.addEventListener('change', async (
     await homeSavePaperAssignment(ids);
 });
 setupUnifiLive();
+bindCctvWall();
 refreshUpdateBadge();
 if (settingsHashPane()) {
     openSettingsModal();

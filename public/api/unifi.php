@@ -42,7 +42,8 @@ if ($method === 'GET' && $action === 'stream') {
     try {
         ignore_user_abort(true);
         set_time_limit(0);
-        $unifi->streamMjpeg((string) ($_GET['id'] ?? ''));
+        $fps = (int) ($_GET['fps'] ?? 5);
+        $unifi->streamMjpeg((string) ($_GET['id'] ?? ''), $fps);
         exit;
     } catch (Throwable $e) {
         json_response(['ok' => false, 'error' => $e->getMessage()], 502);
@@ -94,6 +95,13 @@ if ($action === 'probe' || $action === 'test') {
 
 if (!$hub->enabled(YarboHub::MODULE_UNIFI) && !in_array($action, ['save', 'probe', 'test'], true)) {
     json_response(['ok' => false, 'error' => 'Turn on the UniFi module in Settings.'], 403);
+}
+
+if ($action === 'cctv_order') {
+    if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
+        json_response(['ok' => false, 'error' => 'Turn on the UniFi module in Settings.'], 403);
+    }
+    json_response($unifi->setCctvOrder($input['ids'] ?? []));
 }
 
 if ($action === 'show_on_home') {

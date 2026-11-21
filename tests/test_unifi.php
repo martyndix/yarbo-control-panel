@@ -1623,4 +1623,44 @@ if (!str_contains($change, '## [4.0.127]')) {
     exit(1);
 }
 
+$cctvRoot = sys_get_temp_dir() . '/yarbo-cctv-' . bin2hex(random_bytes(3));
+mkdir($cctvRoot . '/data', 0775, true);
+$cctv = new Yarbo\YarboUnifi($cctvRoot);
+$savedOrder = $cctv->setCctvOrder(['unifi:camera:b', 'unifi:camera:a', 'not-a-camera', 'unifi:camera:b']);
+if (($savedOrder['ok'] ?? false) !== true || ($savedOrder['cctv_order'] ?? null) !== ['unifi:camera:b', 'unifi:camera:a']) {
+    fwrite(STDERR, 'cctv order ' . json_encode($savedOrder) . "\n");
+    exit(1);
+}
+if ($cctv->load()['cctv_order'] !== ['unifi:camera:b', 'unifi:camera:a']) {
+    fwrite(STDERR, "cctv order did not load\n");
+    exit(1);
+}
+if (!$cctv->save(['host' => '10.1.1.1']) || $cctv->load()['cctv_order'] !== ['unifi:camera:b', 'unifi:camera:a']) {
+    fwrite(STDERR, "saving UniFi settings wiped the CCTV order\n");
+    exit(1);
+}
+if (($cctv->publicView()['cctv_order'] ?? null) !== ['unifi:camera:b', 'unifi:camera:a']) {
+    fwrite(STDERR, "cctv order missing from public view\n");
+    exit(1);
+}
+$cctvJs = file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
+$cctvHtml = file_get_contents(dirname(__DIR__) . '/public/index.php');
+$cctvCss = file_get_contents(dirname(__DIR__) . '/public/assets/style.css');
+foreach ([
+    'id="cctv-page"' => $cctvHtml,
+    '>CCTV<' => $cctvHtml,
+    'function setCctvBig' => $cctvJs,
+    "action: 'cctv_order'" => $cctvJs,
+    'Drag a picture to move it' => $cctvJs,
+    'moduleListWithCctv' => $cctvJs,
+    '.cctv-tile.is-big' => $cctvCss,
+    'body.cctv-open .container' => $cctvCss,
+    '## [5.0.68]' => $change,
+] as $needle => $hay) {
+    if (!is_string($hay) || !str_contains($hay, $needle)) {
+        fwrite(STDERR, "missing $needle\n");
+        exit(1);
+    }
+}
+
 echo "ok: unifi\n";

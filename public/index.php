@@ -759,6 +759,14 @@ $config = require dirname(__DIR__) . '/config.php';
             <div id="unifi-sensors" class="home-device-grid unifi-device-grid"></div>
         </section>
 
+        <section class="card panel-section module-pane-hidden" data-panel-id="cctv" data-module="cctv" id="cctv-page">
+            <div class="cctv-bar">
+                <h2>CCTV</h2>
+                <p class="hint" id="cctv-hint">Drag a picture to move it. Click it to fill the screen.</p>
+            </div>
+            <div id="cctv-grid" class="cctv-grid" aria-label="Live cameras"></div>
+        </section>
+
         </div>
 
         <div id="home-automations-page" class="mail-page auto-page hidden" role="region" aria-labelledby="home-automations-title">
