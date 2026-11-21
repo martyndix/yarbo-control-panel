@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.71] - 2026-11-22
+
+### Fixed
+
+- UniFi cameras no longer pile up and take the panel down. The CCTV wall asks for one picture at a time, and closing a live picture stops ffmpeg instead of leaving it running.
+
 ## [5.0.70] - 2026-11-22
 
 ### Fixed

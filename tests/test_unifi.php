@@ -1650,7 +1650,9 @@ foreach ([
     'id="cctv-page"' => $cctvHtml,
     '>CCTV<' => $cctvHtml,
     'function setCctvBig' => $cctvJs,
-    'CCTV_SNAP_PARALLEL' => $cctvJs,
+    'CCTV_SNAP_PARALLEL = 1' => $cctvJs,
+    'CCTV_SNAP_EVERY_MS' => $cctvJs,
+    'action=stop_pictures' => $cctvJs,
     'action=snapshot' => $cctvJs,
     "action: 'cctv_order'" => $cctvJs,
     'Drag a picture to move it' => $cctvJs,
@@ -1659,6 +1661,7 @@ foreach ([
     'body.cctv-open .container' => $cctvCss,
     '## [5.0.68]' => $change,
     '## [5.0.69]' => $change,
+    '## [5.0.71]' => $change,
 ] as $needle => $hay) {
     if (!is_string($hay) || !str_contains($hay, $needle)) {
         fwrite(STDERR, "missing $needle\n");
@@ -1684,6 +1687,34 @@ if ($gen < 1) {
 }
 $release->invoke($slotA);
 $release->invoke($slotB);
+$begin = new ReflectionMethod(Yarbo\YarboUnifi::class, 'tryBeginSnapshotFetch');
+$begin->setAccessible(true);
+$endFetch = new ReflectionMethod(Yarbo\YarboUnifi::class, 'endSnapshotFetch');
+$endFetch->setAccessible(true);
+if ($begin->invoke($slotA) !== true || $begin->invoke($slotB) !== false) {
+    fwrite(STDERR, "a second camera fetch must not run at the same time\n");
+    exit(1);
+}
+$endFetch->invoke($slotA);
+if ($begin->invoke($slotB) !== true) {
+    fwrite(STDERR, "camera fetch slot stayed taken\n");
+    exit(1);
+}
+$endFetch->invoke($slotB);
+$unifiSrc = file_get_contents(dirname(__DIR__) . '/src/YarboUnifi.php');
+if (!str_contains($unifiSrc, 'function killPidTree') || !str_contains($unifiSrc, 'function reapStrayCameraFfmpeg')) {
+    fwrite(STDERR, "camera ffmpeg is not stopped with its children\n");
+    exit(1);
+}
+if (str_contains($unifiSrc, 'function streamSnapshotLoop')) {
+    fwrite(STDERR, "live picture still loops forever\n");
+    exit(1);
+}
+$unifiApi = file_get_contents(dirname(__DIR__) . '/public/api/unifi.php');
+if (!str_contains($unifiApi, 'stop_pictures')) {
+    fwrite(STDERR, "panel cannot stop camera pictures\n");
+    exit(1);
+}
 $updatePhp = file_get_contents(dirname(__DIR__) . '/public/api/update.php');
 if (!str_contains($updatePhp, 'stopLivePictures')) {
     fwrite(STDERR, "update does not stop live pictures\n");

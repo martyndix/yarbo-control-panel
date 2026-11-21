@@ -3412,14 +3412,17 @@ let cctvRefreshSeq = 0;
 let cctvSnapTimer = 0;
 let cctvSnapBusy = 0;
 let cctvSnapCursor = 0;
-const CCTV_SNAP_PARALLEL = 4;
+const CCTV_SNAP_PARALLEL = 1;
+const CCTV_SNAP_EVERY_MS = 5000;
+const CCTV_BIG_EVERY_MS = 1000;
 
-function cctvStreamSrc(id) {
-    return `/api/unifi.php?action=stream&id=${encodeURIComponent(id)}&fps=4`;
+function cctvSnapSrc(id, fresh) {
+    const extra = fresh ? '&fresh=1' : '';
+    return `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}${extra}&r=${Date.now()}`;
 }
 
-function cctvSnapSrc(id) {
-    return `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}&r=${Date.now()}`;
+function stopServerPictures() {
+    fetch('/api/unifi.php?action=stop_pictures', { cache: 'no-store', keepalive: true }).catch(() => {});
 }
 
 function cctvOrdered(cameras, order) {
@@ -3445,48 +3448,71 @@ function stopCctvSnapshots() {
     cctvSnapCursor = 0;
 }
 
+function releaseCctvBlobs() {
+    document.querySelectorAll('#cctv-grid [data-cctv-id]').forEach((tile) => {
+        const prev = tile.dataset.cctvBlob || '';
+        if (prev) URL.revokeObjectURL(prev);
+        delete tile.dataset.cctvBlob;
+    });
+}
+
 function cctvQueueSnapshot(tile, allowBig = false) {
     if (!tile || tile.dataset.cctvBusy === '1' || activeModuleId !== 'cctv') return false;
     if (tile.classList.contains('is-big') && !allowBig) return false;
     const id = tile.getAttribute('data-cctv-id') || '';
     const img = tile.querySelector('img');
     if (!id || !img) return false;
+    const big = tile.classList.contains('is-big');
     tile.dataset.cctvBusy = '1';
     cctvSnapBusy += 1;
-    const next = new Image();
+    const req = String(Date.now()) + ':' + id;
+    tile.dataset.cctvReq = req;
     const finish = () => {
+        tile.dataset.cctvSnapAt = String(Date.now());
         tile.dataset.cctvBusy = '';
         cctvSnapBusy = Math.max(0, cctvSnapBusy - 1);
     };
-    next.onload = () => {
-        if (tile.isConnected && activeModuleId === 'cctv' && (allowBig || !tile.classList.contains('is-big'))) {
-            img.src = next.src;
-        }
-        finish();
-    };
-    next.onerror = finish;
-    next.src = cctvSnapSrc(id);
+    fetch(cctvSnapSrc(id, big), { cache: 'no-store' })
+        .then((res) => {
+            if (!res.ok) throw new Error('snapshot');
+            return res.blob();
+        })
+        .then((blob) => {
+            if (tile.dataset.cctvReq !== req || !tile.isConnected || activeModuleId !== 'cctv') return;
+            if (!allowBig && tile.classList.contains('is-big')) return;
+            const url = URL.createObjectURL(blob);
+            const prev = tile.dataset.cctvBlob || '';
+            img.src = url;
+            if (prev) URL.revokeObjectURL(prev);
+            tile.dataset.cctvBlob = url;
+        })
+        .catch(() => { /* Keep the picture already on the tile. */ })
+        .finally(finish);
     return true;
 }
 
+function cctvSnapDue(tile, everyMs, now) {
+    if (tile.dataset.cctvBusy === '1') return false;
+    const last = Number(tile.dataset.cctvSnapAt || 0);
+    return now - last >= everyMs;
+}
+
 function cctvSnapTick() {
-    if (activeModuleId !== 'cctv') return;
-    const tiles = [...document.querySelectorAll('#cctv-grid [data-cctv-id]')]
-        .filter((tile) => !tile.classList.contains('is-big'));
+    if (activeModuleId !== 'cctv' || cctvSnapBusy >= CCTV_SNAP_PARALLEL) return;
+    const tiles = [...document.querySelectorAll('#cctv-grid [data-cctv-id]')];
     if (!tiles.length) return;
-    let skipped = 0;
-    while (cctvSnapBusy < CCTV_SNAP_PARALLEL && skipped < tiles.length) {
+    const now = Date.now();
+    const big = tiles.find((tile) => tile.classList.contains('is-big'));
+    if (big && cctvSnapDue(big, CCTV_BIG_EVERY_MS, now)) {
+        cctvQueueSnapshot(big, true);
+        return;
+    }
+    for (let i = 0; i < tiles.length; i += 1) {
         const tile = tiles[cctvSnapCursor % tiles.length];
-        cctvSnapCursor = (cctvSnapCursor + 1) % Math.max(1, tiles.length);
-        if (tile.dataset.cctvBusy === '1') {
-            skipped += 1;
-            continue;
-        }
-        if (!cctvQueueSnapshot(tile)) {
-            skipped += 1;
-            continue;
-        }
-        skipped = 0;
+        cctvSnapCursor = (cctvSnapCursor + 1) % tiles.length;
+        if (tile.classList.contains('is-big') || !cctvSnapDue(tile, CCTV_SNAP_EVERY_MS, now)) continue;
+        cctvQueueSnapshot(tile);
+        return;
     }
 }
 
@@ -3497,15 +3523,9 @@ function startCctvSnapshots() {
 }
 
 function cctvPlayStream(tile) {
-    const id = tile?.getAttribute('data-cctv-id') || '';
-    const img = tile?.querySelector('img');
-    if (!id || !img) return;
-    tile.dataset.cctvBusy = '';
-    img.onerror = () => {
-        img.onerror = null;
-        cctvQueueSnapshot(tile, true);
-    };
-    img.src = cctvStreamSrc(id);
+    if (!tile) return;
+    tile.dataset.cctvSnapAt = '';
+    cctvQueueSnapshot(tile, true);
 }
 
 function renderCctvGrid(cameras, order) {
@@ -3590,10 +3610,12 @@ function stopCctvWall() {
     cctvBigId = '';
     document.body.classList.remove('cctv-big');
     stopCctvSnapshots();
+    stopServerPictures();
     document.querySelectorAll('#cctv-grid .is-big').forEach((tile) => tile.classList.remove('is-big'));
     document.querySelectorAll('#cctv-grid [data-cctv-id]').forEach((tile) => {
         tile.dataset.cctvBusy = '';
     });
+    releaseCctvBlobs();
     document.querySelectorAll('#cctv-grid img').forEach((img) => {
         img.onerror = null;
         img.removeAttribute('src');
@@ -4127,6 +4149,7 @@ function closeUnifiLive() {
     showUnifiLiveError('');
     els.unifiLiveModal?.classList.add('hidden');
     syncBodyModalClass();
+    stopServerPictures();
 }
 
 function openUnifiLive(id, name) {
@@ -16782,6 +16805,8 @@ function releaseLivePictures() {
     }
     if (cctvBigId) setCctvBig('');
     stopCctvSnapshots();
+    stopServerPictures();
+    releaseCctvBlobs();
     document.querySelectorAll('#cctv-grid img').forEach((img) => {
         img.onerror = null;
         img.removeAttribute('src');

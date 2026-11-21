@@ -1742,8 +1742,19 @@ final class YarboUnifi
         if (!$fresh && $cached !== '' && (time() - (int) @filemtime($cache)) < self::SNAPSHOT_CACHE_TTL) {
             return $cached;
         }
-        if (!is_dir($cacheDir)) {
-            mkdir($cacheDir, 0755, true);
+        if (!is_dir($cacheDir) && !mkdir($cacheDir, 0755, true) && !is_dir($cacheDir)) {
+            if ($cached !== '') {
+                return $cached;
+            }
+            throw new \RuntimeException('Protect snapshot is busy');
+        }
+        // One Protect fetch at a time. Extra cameras get the last picture and
+        // finish, so a wall of cameras cannot fill every panel worker.
+        if (!$this->tryBeginSnapshotFetch()) {
+            if ($cached !== '') {
+                return $cached;
+            }
+            throw new \RuntimeException('Protect snapshot is busy');
         }
         $lockPath = $cache . '.lock';
         $lock = @fopen($lockPath, 'c');
@@ -1751,29 +1762,12 @@ final class YarboUnifi
         if (!$locked) {
             if (is_resource($lock)) {
                 fclose($lock);
-                $lock = null;
             }
-            if (!$fresh && $cached !== '') {
+            $this->endSnapshotFetch();
+            if ($cached !== '') {
                 return $cached;
             }
-            $lock = @fopen($lockPath, 'c');
-            if (!is_resource($lock) || !flock($lock, LOCK_EX)) {
-                if (is_resource($lock)) {
-                    fclose($lock);
-                }
-                if ($cached !== '') {
-                    return $cached;
-                }
-                throw new \RuntimeException('Protect snapshot is busy');
-            }
-            $locked = true;
-            $cached = $this->readSnapshotCache($cache);
-            if (!$fresh && $cached !== '') {
-                flock($lock, LOCK_UN);
-                fclose($lock);
-
-                return $cached;
-            }
+            throw new \RuntimeException('Protect snapshot is busy');
         }
         try {
             $cached = $this->readSnapshotCache($cache);
@@ -1792,10 +1786,9 @@ final class YarboUnifi
 
             return $res['body'];
         } finally {
-            if ($locked && is_resource($lock)) {
-                flock($lock, LOCK_UN);
-                fclose($lock);
-            }
+            flock($lock, LOCK_UN);
+            fclose($lock);
+            $this->endSnapshotFetch();
         }
     }
 
@@ -1910,12 +1903,21 @@ final class YarboUnifi
                 }
                 if ($rtsp !== '') {
                     $this->pipeFfmpegMjpeg($rtsp, $fps);
-                    if ($this->streamShouldStop()) {
-                        return;
-                    }
                 }
             }
-            $this->streamSnapshotLoop($cameraId, $fps);
+            if ($this->streamShouldStop()) {
+                return;
+            }
+            // One still, then the worker is free. A loop here used to hold the
+            // panel for as long as the picture stayed open.
+            try {
+                $jpeg = $this->snapshotJpeg($cameraId, false);
+            } catch (\Throwable) {
+                $jpeg = '';
+            }
+            if ($jpeg !== '') {
+                $this->emitMjpegFrame($jpeg);
+            }
         } finally {
             $this->releaseStreamSlot();
         }
@@ -1929,6 +1931,7 @@ final class YarboUnifi
     {
         $this->bumpStreamGeneration();
         $this->killRecordedFfmpeg();
+        $this->reapStrayCameraFfmpeg(0);
     }
 
     private function streamGenerationPath(): string
@@ -2018,19 +2021,155 @@ final class YarboUnifi
         }
         $pid = (int) trim((string) file_get_contents($path));
         @unlink($path);
-        if ($pid <= 1) {
+        $cmd = @file_get_contents('/proc/' . $pid . '/cmdline');
+        if (!is_string($cmd) || !str_contains($cmd, 'ffmpeg')) {
             return;
         }
+        $this->killPidTree($pid);
+    }
+
+    /**
+     * ffmpeg used to be started through a shell. Stopping the picture killed
+     * the shell and left ffmpeg running, so camera processes piled up.
+     */
+    private function killPidTree(int $pid): void
+    {
+        if ($pid <= 1 || !is_dir('/proc/' . $pid)) {
+            return;
+        }
+        $children = @file_get_contents('/proc/' . $pid . '/task/' . $pid . '/children');
+        if (is_string($children)) {
+            foreach (preg_split('/\s+/', trim($children)) ?: [] as $child) {
+                if ($child !== '') {
+                    $this->killPidTree((int) $child);
+                }
+            }
+        }
         if (function_exists('posix_kill')) {
-            if (@posix_kill($pid, 0)) {
-                @posix_kill($pid, 9);
+            @posix_kill($pid, 9);
+
+            return;
+        }
+        exec('kill -9 ' . $pid . ' >/dev/null 2>&1');
+    }
+
+    /**
+     * Stop UniFi camera ffmpeg left behind by an earlier picture.
+     * One-frame grabs (-frames:v) and radio (udp/adts) are left alone.
+     */
+    private function reapStrayCameraFfmpeg(int $keepPid): void
+    {
+        if (!is_dir('/proc')) {
+            return;
+        }
+        foreach (glob('/proc/[0-9]*/cmdline') ?: [] as $cmdPath) {
+            $pid = (int) basename(dirname($cmdPath));
+            if ($pid <= 1 || $pid === $keepPid) {
+                continue;
+            }
+            $raw = @file_get_contents($cmdPath);
+            if (!is_string($raw) || $raw === '') {
+                continue;
+            }
+            $cmd = str_replace("\0", ' ', $raw);
+            if (!str_contains($cmd, 'ffmpeg') || !str_contains($cmd, '-f mjpeg') || !str_contains($cmd, 'pipe:1')) {
+                continue;
+            }
+            if (str_contains($cmd, '-frames:v') || str_contains($cmd, 'udp://') || str_contains($cmd, 'adts')) {
+                continue;
+            }
+            $this->killPidTree($pid);
+        }
+    }
+
+    private function snapshotSlotPath(): string
+    {
+        return $this->projectRoot . '/data/unifi-snap-fetch.slot';
+    }
+
+    /**
+     * @return array<int, float>
+     */
+    private function liveSnapshotSlots(string $raw): array
+    {
+        $now = microtime(true);
+        $live = [];
+        foreach (preg_split('/\n/', trim($raw)) ?: [] as $line) {
+            if ($line === '') {
+                continue;
+            }
+            [$pid, $at] = array_pad(explode(' ', trim($line), 2), 2, '0');
+            $pid = (int) $pid;
+            $at = (float) $at;
+            if ($pid <= 1 || !is_dir('/proc/' . $pid)) {
+                continue;
+            }
+            if (($now - $at) > 8.0) {
+                continue;
+            }
+            $live[$pid] = $at;
+        }
+
+        return $live;
+    }
+
+    private function tryBeginSnapshotFetch(): bool
+    {
+        $path = $this->snapshotSlotPath();
+        $fh = @fopen($path, 'c+');
+        if (!is_resource($fh) || !flock($fh, LOCK_EX | LOCK_NB)) {
+            if (is_resource($fh)) {
+                fclose($fh);
+            }
+
+            return false;
+        }
+        $live = $this->liveSnapshotSlots((string) stream_get_contents($fh));
+        $pid = getmypid();
+        if ($pid <= 1 || isset($live[$pid]) || count($live) >= 1) {
+            flock($fh, LOCK_UN);
+            fclose($fh);
+
+            return false;
+        }
+        $live[$pid] = microtime(true);
+        $lines = '';
+        foreach ($live as $slotPid => $at) {
+            $lines .= $slotPid . ' ' . $at . "\n";
+        }
+        ftruncate($fh, 0);
+        rewind($fh);
+        fwrite($fh, $lines);
+        fflush($fh);
+        flock($fh, LOCK_UN);
+        fclose($fh);
+
+        return true;
+    }
+
+    private function endSnapshotFetch(): void
+    {
+        $path = $this->snapshotSlotPath();
+        $fh = @fopen($path, 'c+');
+        if (!is_resource($fh) || !flock($fh, LOCK_EX)) {
+            if (is_resource($fh)) {
+                fclose($fh);
             }
 
             return;
         }
-        if (is_dir('/proc/' . $pid)) {
-            exec('kill -9 ' . $pid . ' >/dev/null 2>&1');
+        $live = $this->liveSnapshotSlots((string) stream_get_contents($fh));
+        unset($live[getmypid()]);
+        $lines = '';
+        foreach ($live as $slotPid => $at) {
+            $lines .= $slotPid . ' ' . $at . "\n";
         }
+        ftruncate($fh, 0);
+        rewind($fh);
+        fwrite($fh, $lines);
+        fflush($fh);
+        flock($fh, LOCK_UN);
+        fclose($fh);
     }
 
     private function emitOneSnapshot(string $cameraId): void
@@ -2113,20 +2252,28 @@ final class YarboUnifi
         if ($ffmpeg === '') {
             return;
         }
-        $cmd = implode(' ', [
-            escapeshellarg($ffmpeg),
-            '-hide_banner',
-            '-loglevel', 'error',
-            '-nostdin',
-            '-rtsp_transport', 'tcp',
-            '-i', escapeshellarg($rtsp),
-            '-an',
-            '-f', 'mjpeg',
-            '-q:v', '5',
-            '-r', (string) $fps,
-            'pipe:1',
-        ]);
-        $proc = proc_open($cmd, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        $this->reapStrayCameraFfmpeg(0);
+        // Array form starts ffmpeg itself. A shell command killed the shell
+        // and left ffmpeg running after the picture closed.
+        $proc = proc_open(
+            [
+                $ffmpeg,
+                '-hide_banner',
+                '-loglevel', 'error',
+                '-nostdin',
+                '-rtsp_transport', 'tcp',
+                '-stimeout', '5000000',
+                '-i', $rtsp,
+                '-an',
+                '-threads', '1',
+                '-f', 'mjpeg',
+                '-q:v', '8',
+                '-r', (string) $fps,
+                'pipe:1',
+            ],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
         if (!is_resource($proc)) {
             return;
         }
@@ -2138,7 +2285,7 @@ final class YarboUnifi
         $sent = false;
         $started = microtime(true);
         while (!feof($pipes[1])) {
-            if ($this->streamShouldStop()) {
+            if ($this->streamShouldStop() || (microtime(true) - $started) > 45.0) {
                 break;
             }
             $chunk = fread($pipes[1], 8192);
@@ -2162,6 +2309,9 @@ final class YarboUnifi
                 continue;
             }
             $buffer .= $chunk;
+            if (strlen($buffer) > 1500000) {
+                $buffer = substr($buffer, -200000);
+            }
             while (($start = strpos($buffer, "\xff\xd8")) !== false) {
                 $next = strpos($buffer, "\xff\xd8", $start + 2);
                 if ($next === false) {
@@ -2179,27 +2329,9 @@ final class YarboUnifi
             }
         }
         $status = proc_get_status($proc);
-        if ($status['running'] ?? false) {
-            proc_terminate($proc, 9);
-        }
+        $pid = (int) ($status['pid'] ?? $pid);
+        $this->killPidTree($pid);
         proc_close($proc);
-    }
-
-    private function streamSnapshotLoop(string $cameraId, int $fps): void
-    {
-        $delayUs = (int) max(250000, intdiv(1000000, max(1, $fps)));
-        while (!$this->streamShouldStop()) {
-            try {
-                $jpeg = $this->snapshotJpeg($cameraId, true);
-            } catch (\Throwable) {
-                usleep($delayUs);
-                continue;
-            }
-            if ($jpeg !== '') {
-                $this->emitMjpegFrame($jpeg);
-            }
-            usleep($delayUs);
-        }
     }
 
     private function emitMjpegFrame(string $jpeg): void

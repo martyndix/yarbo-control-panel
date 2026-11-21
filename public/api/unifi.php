@@ -18,6 +18,11 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 $action = (string) ($_GET['action'] ?? '');
 set_time_limit(20);
 
+if (($method === 'GET' || $method === 'POST') && $action === 'stop_pictures') {
+    $unifi->stopLivePictures();
+    json_response(['ok' => true]);
+}
+
 if ($method === 'GET' && $action === 'snapshot') {
     if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
         json_response(['ok' => false, 'error' => 'Turn on the UniFi module in Settings.'], 403);
@@ -41,7 +46,7 @@ if ($method === 'GET' && $action === 'stream') {
     }
     try {
         ignore_user_abort(true);
-        set_time_limit(0);
+        set_time_limit(60);
         $fps = (int) ($_GET['fps'] ?? 5);
         $unifi->streamMjpeg((string) ($_GET['id'] ?? ''), $fps);
         exit;
