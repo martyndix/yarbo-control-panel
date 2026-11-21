@@ -3500,6 +3500,7 @@ function cctvPlayStream(tile) {
     const id = tile?.getAttribute('data-cctv-id') || '';
     const img = tile?.querySelector('img');
     if (!id || !img) return;
+    tile.dataset.cctvBusy = '';
     img.onerror = () => {
         img.onerror = null;
         cctvQueueSnapshot(tile, true);
