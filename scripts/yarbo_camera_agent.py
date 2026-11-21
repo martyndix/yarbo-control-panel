@@ -33,6 +33,11 @@ VIEWS = ("middle", "left", "right", "back")
 # The high stream filled the network, so another device could not load the panel.
 FRAME_GAP_S = 0.2
 BYTE_BUDGET_PER_S = 60_000
+# Bytes the camera library may pull in one second. Anything past this is
+# already on the machine before we can throw it away, so the download itself
+# stops and the page can load on another device.
+RECEIVE_BUDGET_PER_S = 120_000
+RECEIVE_PAUSE_MAX_S = 1.5
 SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/prod"
 TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
 # The robot's video service is the Yarbo app region, North America (2),
@@ -402,7 +407,9 @@ class Hub:
         self.ever_subscribed = False
         self.drops = 0
         self._sent_bytes: list[tuple[float, int]] = []
+        self._recv_bytes: list[tuple[float, int]] = []
         self._last_over_budget_key = 0.0
+        self.video_quiet_until = 0.0
         self.last_key: dict[str, dict[str, Any]] = {}
         self.views: dict[str, dict[str, Any]] = {
             view: {
@@ -439,6 +446,27 @@ class Hub:
     def saw_viewer(self) -> bool:
         with self.lock:
             return self.ever_subscribed
+
+    def note_receive(self, size: int) -> bool:
+        """Whether to copy this frame. Past the budget, the download must stop.
+
+        The frame that crosses the budget is still copied: the library has
+        already pulled it. Later frames are skipped until that pause ends,
+        so the copy does not keep the machine busy.
+        """
+        now = time.time()
+        nbytes = max(0, int(size))
+        with self.lock:
+            if now < self.video_quiet_until:
+                return False
+            self._recv_bytes = [(stamp, n) for stamp, n in self._recv_bytes if now - stamp < 1.0]
+            used = sum(n for _, n in self._recv_bytes)
+            self._recv_bytes.append((now, nbytes))
+            total = used + nbytes
+            if total > RECEIVE_BUDGET_PER_S:
+                pause = min(RECEIVE_PAUSE_MAX_S, max(0.35, total / float(RECEIVE_BUDGET_PER_S)))
+                self.video_quiet_until = now + pause
+            return True
 
     def push(self, view: str, key: bool, pts: int, data: bytes, uid: int) -> None:
         now = time.time()
@@ -552,6 +580,7 @@ class LiveSession:
         self.sensors_on = False
         self.user_stop = False
         self.tried_high = False
+        self.video_pause = threading.Event()
         self._status_lock = threading.Lock()
 
     def write_status(self) -> None:
@@ -732,6 +761,18 @@ def join_views(session: LiveSession, serial: str, uid: int, grants: dict[str, di
         def on_encoded_video_frame(self, frame_uid, image_buffer, length, info):  # type: ignore[no-untyped-def]
             # The hub keeps a small share of the frames. Sending all of them
             # filled the network, so another device could not load the panel.
+            # Counting happens before the copy. Once the budget is spent, the
+            # download stops, or the library keeps filling the machine with
+            # frames we were only going to throw away.
+            try:
+                size = int(length or 0)
+            except (TypeError, ValueError):
+                size = 0
+            if not session.hub.note_receive(size):
+                session.video_pause.set()
+                return 1
+            if time.time() < session.hub.video_quiet_until:
+                session.video_pause.set()
             data = copy_frame(image_buffer, length)
             if not data:
                 return 1
@@ -949,6 +990,61 @@ def finish_session(session: LiveSession) -> None:
         shutdown()
 
 
+def leave_cores_for_the_panel() -> None:
+    """Keep every camera thread on one core so the page still has a core to load on.
+
+    Affinity belongs to each thread. Setting it on the main thread leaves the
+    camera library's own threads free to use the rest, and the page waits.
+    """
+    count = os.cpu_count() or 1
+    if count < 2:
+        return
+    mask = {count - 1}
+    try:
+        tids = [int(name) for name in os.listdir("/proc/self/task")]
+    except (OSError, ValueError):
+        tids = [0]
+    for tid in tids:
+        try:
+            os.sched_setaffinity(tid, mask)
+        except (AttributeError, OSError, ValueError):
+            pass
+
+
+def release_video(session: LiveSession) -> None:
+    """Tell the camera library to stop downloading. The last picture stays up."""
+    for view, conn in session.links.items():
+        try:
+            user = conn.get_local_user()
+            unsubscribe = getattr(user, "unsubscribe_all_video", None) if user is not None else None
+            if callable(unsubscribe):
+                unsubscribe()
+        except Exception:
+            print(f"[camera] {view} could not pause the download", file=sys.stderr, flush=True)
+
+
+def guard_video(session: LiveSession) -> None:
+    """Pause the download when the pictures fill the machine, then let it resume."""
+    while not session.stop.is_set():
+        session.video_pause.wait(0.5)
+        if session.stop.is_set():
+            return
+        leave_cores_for_the_panel()
+        if not session.video_pause.is_set() and time.time() >= session.hub.video_quiet_until:
+            continue
+        session.video_pause.clear()
+        release_video(session)
+        while not session.stop.is_set():
+            wait = session.hub.video_quiet_until - time.time()
+            if wait <= 0:
+                break
+            session.stop.wait(min(wait, 0.25))
+        session.video_pause.clear()
+        if session.stop.is_set():
+            return
+        subscribe_again(session, force=True)
+
+
 def prefer_high_stream(session: LiveSession) -> None:
     """The small stream stayed quiet. Ask for the large one."""
     try:
@@ -963,12 +1059,15 @@ def prefer_high_stream(session: LiveSession) -> None:
     subscribe_again(session)
 
 
-def subscribe_again(session: LiveSession) -> None:
+def subscribe_again(session: LiveSession, force: bool = False) -> None:
     """Ask for pictures again without leaving the channel.
 
     Disconnecting unregisters the picture listener, so a rejoin leaves
-    the tiles on "waiting" for good.
+    the tiles on "waiting" for good. A pause in progress is left alone
+    until it ends, or the download would start again at once.
     """
+    if not force and time.time() < session.hub.video_quiet_until:
+        return
     options = session.video_options
     if options is None:
         return
@@ -1041,6 +1140,9 @@ def watch_lease(session: LiveSession, armed_at: float) -> None:
 def run(root: Path) -> int:
     global SESSION
     # Pictures give the panel the CPU when the machine is busy.
+    # Nice only asks. The camera library was still using every core, so the
+    # page waited until Stop. One core is enough for the pictures.
+    leave_cores_for_the_panel()
     try:
         os.nice(10)
     except OSError:
@@ -1113,6 +1215,7 @@ def run(root: Path) -> int:
         session.port = port
         session.set_state("live", "Live view is on")
         threading.Thread(target=watch_lease, args=(session, time.time()), daemon=True).start()
+        threading.Thread(target=guard_video, args=(session,), daemon=True).start()
         httpd.serve_forever(poll_interval=0.5)
     except ImportError as exc:
         missing = str(exc)
@@ -1203,6 +1306,13 @@ def self_test() -> int:
         except queue.Empty:
             break
     assert limited_pts == [1], limited_pts
+    paced = Hub()
+    assert paced.note_receive(40_000) is True
+    assert paced.note_receive(40_000) is True
+    assert paced.note_receive(40_000) is True
+    assert paced.note_receive(40_000) is True
+    assert paced.video_quiet_until > time.time()
+    assert paced.note_receive(40_000) is False
     print("ok")
     return 0
 

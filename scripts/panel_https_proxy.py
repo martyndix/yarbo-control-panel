@@ -741,7 +741,10 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 if not data:
                     # A tight send loop held the CPU, so the panel and a second
                     # device could not get a turn while the cameras were showing.
-                    time.sleep(0.02 if sent == 0 else 0)
+                    # Yield even while a picture is going out. A bare yield let
+                    # this loop keep the core, and the page on another device
+                    # waited until the stream stopped.
+                    time.sleep(0.02 if sent == 0 else 0.005)
                     continue
                 incoming += data
                 try:
@@ -1067,6 +1070,19 @@ def main() -> int:
 
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
     if args.pictures_only:
+        # The picture relay shares the cameras' core. The page keeps the rest.
+        count = os.cpu_count() or 1
+        if count >= 2:
+            mask = {count - 1}
+            try:
+                tids = [int(name) for name in os.listdir("/proc/self/task")]
+            except (OSError, ValueError):
+                tids = [0]
+            for tid in tids:
+                try:
+                    os.sched_setaffinity(tid, mask)
+                except (AttributeError, OSError, ValueError):
+                    pass
         try:
             os.nice(15)
         except OSError:

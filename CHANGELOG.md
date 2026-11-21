@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.61] - 2026-11-21
+
+### Fixed
+
+- Stopping the cameras made another device load at once, because the camera library was still downloading every picture onto the panel and using every core to do it. Throwing pictures away afterwards did not free the machine. Live view now stops that download when it gets ahead, and leaves the other cores for the page. Update to latest, refresh Safari, press Stop view, then Start live view.
+
 ## [5.0.60] - 2026-11-21
 
 ### Fixed
