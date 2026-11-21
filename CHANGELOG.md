@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.62] - 2026-11-21
+
+### Fixed
+
+- The cameras still kept the other device from loading, because all four pictures stayed downloaded the whole time. A short pause was not enough for the page to finish. Live view now lets one camera download at a time, and leaves the download off between turns. The picture line says “Pictures take turns so another device can open the panel.” Update to latest, refresh Safari, press Stop view, then Start live view. That line means this version is running.
+
 ## [5.0.61] - 2026-11-21
 
 ### Fixed

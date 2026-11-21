@@ -17376,7 +17376,10 @@ function applyCameraLiveStatus(data) {
         badge.className = 'camera-status';
     });
     if (els.cameraAlert) {
-        if (anyLive || !message || data?.state === 'stopped') {
+        if (data?.pace === 'turns' && (data?.state === 'live' || data?.state === 'starting')) {
+            els.cameraAlert.textContent = 'Pictures take turns so another device can open the panel.';
+            els.cameraAlert.classList.remove('hidden');
+        } else if (anyLive || !message || data?.state === 'stopped') {
             els.cameraAlert.classList.add('hidden');
         } else if (data?.state && data.state !== 'stopped') {
             els.cameraAlert.textContent = message;
