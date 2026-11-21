@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use Yarbo\YarboHome;
+use Yarbo\YarboSensorHistory;
 use Yarbo\YarboWeather;
 
 function assert_true(bool $ok, string $message): void
@@ -70,6 +71,9 @@ assert_true($first['ok'] === true, 'fetch ok');
 assert_true($first['icon'] === 'rain', 'mapped icon rain');
 assert_true(($first['label'] ?? '') === 'Light rain', 'label Light rain');
 assert_true(isset($first['temp_c']) && abs((float) $first['temp_c'] - 12.6) < 0.01, 'temp 12.6');
+$savedOutside = (new YarboSensorHistory($root))->load(YarboSensorHistory::OUTSIDE_ID);
+$savedTemp = $savedOutside['samples'][0][1] ?? null;
+assert_true(is_numeric($savedTemp) && abs((float) $savedTemp - 12.6) < 0.01, 'weather temperature is saved for the graphs');
 assert_true($fetchCount === 1, 'one network call on miss');
 
 $cachePath = $root . '/' . YarboWeather::CACHE_FILE;

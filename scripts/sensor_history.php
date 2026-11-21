@@ -74,6 +74,7 @@ function sensor_history_mark_run(string $path, int $now): void
 function sensor_history_run(YarboSensorHistory $history, string $lastRunPath): void
 {
     try {
+        $history->sampleOutside();
         $result = $history->sampleOnce();
         $sampled = (int) ($result['sampled'] ?? 0);
         if ($sampled > 0) {

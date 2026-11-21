@@ -82,11 +82,19 @@ foreach ($pruned as $row) {
     assert_true((int) $row[0] >= ($now + 2000 - YarboSensorHistory::RETENTION_S), 'old sample pruned');
 }
 
+assert_true($hist->recordOutsideTemperature(3.5, $now), 'outside temperature saved');
+assert_true(!$hist->recordOutsideTemperature(3.6, $now + 200), 'outside waits ten minutes');
+assert_true($hist->recordOutsideTemperature(4.0, $now + 1600), 'outside saved with the next sample');
+
 $series = $hist->series('unifi:sensor:living', $now - 3600, $now + 2000, '30m');
 assert_true($series['ok'] === true, 'series ok');
 assert_true($series['has_humidity'] === true, 'humidity present');
 assert_true(count($series['points']) >= 2, 'points present');
 assert_true(($series['trends']['temperature']['latest'] ?? null) === 19.0, 'latest temp');
+assert_true(($series['has_outside'] ?? false) === true, 'climate graph includes outside');
+assert_true(($series['points'][0]['outside'] ?? null) === 3.5, 'first point uses the outside reading');
+assert_true(($series['points'][count($series['points']) - 1]['outside'] ?? null) === 4.0, 'later point uses the later outside reading');
+assert_true(($series['trends']['outside']['latest'] ?? null) === 4.0, 'outside trend');
 
 $heater = $hist->series('matter:42', $now - 3600, $now + 2000, '30m');
 assert_true($heater['has_humidity'] === false, 'heater has no humidity');
@@ -115,6 +123,7 @@ assert_true(($plug['points'][0]['power_w'] ?? null) === 1043.6, 'plug watts');
 assert_true(($plug['points'][0]['voltage_v'] ?? null) === 229.4, 'plug volts');
 assert_true(abs((float) ($plug['points'][0]['current_a'] ?? 0) - 4.56) < 0.001, 'plug amps');
 assert_true($plug['has_humidity'] === false, 'plug is not a climate series');
+assert_true(($plug['has_outside'] ?? true) === false, 'power graph does not draw outside temperature');
 $keptMeter = $hist->pruneSamples([[$now, null, null, 10.5, 230.0, 0.05]], $now + 10);
 assert_true(($keptMeter[0][3] ?? null) === 10.5, 'prune keeps watts');
 
@@ -122,6 +131,10 @@ $daily = $hist->series('unifi:sensor:living', $now - 86400, $now + 2000, '1d');
 assert_true($daily['bucket'] === '1d', 'daily bucket');
 assert_true(count($daily['points']) >= 1, 'daily points');
 assert_true(array_key_exists('temp_min', $daily['points'][0]), 'daily has temp_min');
+assert_true(abs((float) ($daily['points'][0]['outside'] ?? 0) - 3.75) < 0.02, 'daily outside is the day’s average');
+
+$hist->pruneOrphans(['unifi:sensor:living']);
+assert_true(is_file($hist->pathFor(YarboSensorHistory::OUTSIDE_ID)), 'outside history is kept');
 
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboSensorHistory.php');
 $api = (string) file_get_contents(__DIR__ . '/../public/api/home.php');
@@ -147,5 +160,7 @@ assert_true(str_contains($change, '## [4.0.247]'), 'changelog 4.0.247');
 assert_true(str_contains($js, 'Power history'), 'plug meter opens history');
 assert_true(str_contains($js, 'has_power'), 'chart reads plug watts');
 assert_true(str_contains($change, '## [4.0.379]'), 'changelog 4.0.379');
+assert_true(str_contains($js, 'Outside °C'), 'chart labels the outside line');
+assert_true(str_contains($change, '## [5.0.67]'), 'changelog 5.0.67');
 
 echo "ok: sensor history\n";

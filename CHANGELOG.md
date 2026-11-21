@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.67] - 2026-11-21
+
+### Added
+
+- The outdoor temperature from the weather reading is saved, and each sensor’s temperature and humidity graph draws it as Outside.
+
 ## [5.0.66] - 2026-11-21
 
 ### Changed

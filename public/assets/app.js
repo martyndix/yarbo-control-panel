@@ -2309,6 +2309,7 @@ function renderSensorHistoryChart(data) {
         });
     });
     const temps = points.map((p) => (p.temperature == null ? null : Number(p.temperature)));
+    const outs = points.map((p) => (p.outside == null ? null : Number(p.outside)));
     const hums = points.map((p) => (p.humidity == null ? null : Number(p.humidity)));
     const watts = points.map((p) => (p.power_w == null ? null : Number(p.power_w)));
     const volts = points.map((p) => (p.voltage_v == null ? null : Number(p.voltage_v)));
@@ -2338,6 +2339,8 @@ function renderSensorHistoryChart(data) {
     } else {
         const tTrend = formatSensorTrendMetric('Temp', '°', data.trends?.temperature);
         if (tTrend) trendBits.push(tTrend);
+        const oTrend = formatSensorTrendMetric('Outside', '°', data.trends?.outside);
+        if (oTrend) trendBits.push(oTrend);
         if (hasHumidity) {
             const hTrend = formatSensorTrendMetric('Humidity', '%', data.trends?.humidity);
             if (hTrend) trendBits.push(hTrend);
@@ -2370,6 +2373,21 @@ function renderSensorHistoryChart(data) {
             spanGaps: true,
         },
     ];
+    if (!electrical && outs.some((v) => v != null)) {
+        datasets.push({
+            label: 'Outside °C',
+            data: outs,
+            borderColor: '#8ecae6',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            borderDash: [6, 4],
+            pointRadius: points.length > 80 ? 0 : 2,
+            tension: 0.25,
+            fill: false,
+            yAxisID: 'yTemp',
+            spanGaps: false,
+        });
+    }
     if (!electrical && data.bucket === '1d' && tempMins.some((v) => v != null) && tempMaxs.some((v) => v != null)) {
         datasets.push({
             label: 'Temp max',

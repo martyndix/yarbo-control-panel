@@ -13,6 +13,8 @@ final class YarboSensorHistory
 {
     public const SAMPLE_INTERVAL_S = 1800;
     public const SAMPLE_MIN_GAP_S = 1500;
+    public const OUTSIDE_ID = 'outside';
+    public const OUTSIDE_MIN_GAP_S = 600;
     public const RETENTION_S = 365 * 86400;
     public const MAX_SAMPLES = 18000;
     public const DIR_NAME = 'sensor-history';
@@ -295,6 +297,7 @@ final class YarboSensorHistory
         } catch (\Throwable) {
         }
 
+        $this->recordCachedOutside($now);
         $sources = $this->listSources();
         $sampled = 0;
         $skipped = 0;
@@ -335,6 +338,7 @@ final class YarboSensorHistory
         ?float $powerW = null,
         ?float $voltageV = null,
         ?float $currentA = null,
+        ?int $minGap = null,
     ): bool {
         $id = trim($id);
         if ($id === '') {
@@ -351,7 +355,8 @@ final class YarboSensorHistory
             $last = $samples[count($samples) - 1];
             $lastTs = is_array($last) ? (int) ($last[0] ?? 0) : 0;
         }
-        if ($lastTs > 0 && ($now - $lastTs) < self::SAMPLE_MIN_GAP_S) {
+        $minGap ??= self::SAMPLE_MIN_GAP_S;
+        if ($lastTs > 0 && ($now - $lastTs) < $minGap) {
             return false;
         }
         $sample = [
@@ -372,6 +377,73 @@ final class YarboSensorHistory
         $store['samples'] = $this->pruneSamples($samples, $now);
 
         return $this->write($id, $store);
+    }
+
+    /**
+     * Keep the outdoor temperature from the weather reading.
+     * A new reading inside ten minutes does not add another point.
+     */
+    public function recordOutsideTemperature(?float $temperature, ?int $at = null): bool
+    {
+        if ($temperature === null || !is_finite($temperature) || $temperature < -80.0 || $temperature > 60.0) {
+            return false;
+        }
+
+        return $this->appendSample(
+            self::OUTSIDE_ID,
+            'Outside',
+            'weather',
+            round($temperature, 1),
+            null,
+            $at,
+            null,
+            null,
+            null,
+            self::OUTSIDE_MIN_GAP_S,
+        );
+    }
+
+    /**
+     * Fetch the current weather, which stores its temperature as it is saved.
+     */
+    public function sampleOutside(?int $now = null): bool
+    {
+        try {
+            $coords = (new YarboHomeAutomations($this->projectRoot))->coordsPublic();
+        } catch (\Throwable) {
+            return false;
+        }
+        $lat = is_numeric($coords['latitude'] ?? null) ? (float) $coords['latitude'] : null;
+        $lon = is_numeric($coords['longitude'] ?? null) ? (float) $coords['longitude'] : null;
+        try {
+            $weather = (new YarboWeather($this->projectRoot))->forCoords($lat, $lon);
+        } catch (\Throwable) {
+            return false;
+        }
+        if (!($weather['ok'] ?? false) || !is_numeric($weather['temp_c'] ?? null)) {
+            return false;
+        }
+        $at = (int) ($weather['at'] ?? 0);
+
+        return $this->recordOutsideTemperature((float) $weather['temp_c'], $at > 0 ? $at : ($now ?? time()));
+    }
+
+    private function recordCachedOutside(?int $now = null): void
+    {
+        $now ??= time();
+        $path = rtrim($this->projectRoot, '/') . '/' . YarboWeather::CACHE_FILE;
+        if (!is_file($path)) {
+            return;
+        }
+        $decoded = json_decode((string) file_get_contents($path), true);
+        if (!is_array($decoded) || !is_numeric($decoded['temp_c'] ?? null)) {
+            return;
+        }
+        $fetched = (int) ($decoded['fetched_at'] ?? 0);
+        if ($fetched <= 0 || ($now - $fetched) > 45 * 60) {
+            return;
+        }
+        $this->recordOutsideTemperature((float) $decoded['temp_c'], $now);
     }
 
     /**
@@ -436,7 +508,7 @@ final class YarboSensorHistory
         if (!is_dir($dir)) {
             return;
         }
-        $keep = [];
+        $keep = [self::safeId(self::OUTSIDE_ID) => true];
         foreach ($liveIds as $id) {
             $keep[self::safeId((string) $id)] = true;
         }
@@ -499,10 +571,21 @@ final class YarboSensorHistory
         $points = $bucket === '1d'
             ? $this->dailyPoints($inRange)
             : $this->rawPoints($inRange);
+        $climate = false;
+        foreach ($points as $point) {
+            if (($point['temperature'] ?? null) !== null || ($point['humidity'] ?? null) !== null) {
+                $climate = true;
+                break;
+            }
+        }
+        if ($climate && $id !== self::OUTSIDE_ID) {
+            $points = $this->withOutsideTemperature($points, $bucket, $to);
+        }
         $hasHumidity = false;
         $hasPower = false;
         $hasVoltage = false;
         $hasCurrent = false;
+        $hasOutside = false;
         foreach ($points as $p) {
             if (isset($p['humidity']) && $p['humidity'] !== null) {
                 $hasHumidity = true;
@@ -515,6 +598,9 @@ final class YarboSensorHistory
             }
             if (isset($p['current_a']) && $p['current_a'] !== null) {
                 $hasCurrent = true;
+            }
+            if (isset($p['outside']) && $p['outside'] !== null) {
+                $hasOutside = true;
             }
         }
 
@@ -530,6 +616,7 @@ final class YarboSensorHistory
             'has_power' => $hasPower,
             'has_voltage' => $hasVoltage,
             'has_current' => $hasCurrent,
+            'has_outside' => $hasOutside,
             'points' => $points,
             'trends' => $this->trends($points, $hasHumidity),
         ];
@@ -746,16 +833,7 @@ final class YarboSensorHistory
      */
     private function dailyPoints(array $rows): array
     {
-        $tz = new \DateTimeZone('Europe/Zurich');
-        try {
-            $vb = new YarboVestaboard($this->projectRoot);
-            $cfg = $vb->load();
-            $name = trim((string) ($cfg['quiet_timezone'] ?? ''));
-            if ($name !== '') {
-                $tz = new \DateTimeZone($name);
-            }
-        } catch (\Throwable) {
-        }
+        $tz = $this->historyTimezone();
         /** @var array<string, array{t: int, temps: list<float>, hums: list<float>, watts: list<float>, volts: list<float>, amps: list<float>}> $buckets */
         $buckets = [];
         foreach ($rows as $row) {
@@ -823,6 +901,7 @@ final class YarboSensorHistory
     {
         $temps = [];
         $hums = [];
+        $outs = [];
         $watts = [];
         $volts = [];
         $amps = [];
@@ -842,15 +921,114 @@ final class YarboSensorHistory
             if (isset($p['current_a']) && is_numeric($p['current_a'])) {
                 $amps[] = (float) $p['current_a'];
             }
+            if (isset($p['outside']) && is_numeric($p['outside'])) {
+                $outs[] = (float) $p['outside'];
+            }
         }
 
         return [
             'temperature' => $this->metricTrend($temps),
             'humidity' => $hasHumidity ? $this->metricTrend($hums) : null,
+            'outside' => $this->metricTrend($outs),
             'power_w' => $this->metricTrend($watts, 5.0),
             'voltage_v' => $this->metricTrend($volts, 0.5),
             'current_a' => $this->metricTrend($amps, 0.05),
         ];
+    }
+
+    private function historyTimezone(): \DateTimeZone
+    {
+        $tz = new \DateTimeZone('Europe/Zurich');
+        try {
+            $vb = new YarboVestaboard($this->projectRoot);
+            $cfg = $vb->load();
+            $name = trim((string) ($cfg['quiet_timezone'] ?? ''));
+            if ($name !== '') {
+                $tz = new \DateTimeZone($name);
+            }
+        } catch (\Throwable) {
+        }
+
+        return $tz;
+    }
+
+    /**
+     * @return list<array{0: int, 1: ?float, 2: ?float, 3: ?float, 4: ?float, 5: ?float}>
+     */
+    private function outsideSamples(int $now): array
+    {
+        $store = $this->load(self::OUTSIDE_ID);
+        $samples = is_array($store['samples'] ?? null) ? $store['samples'] : [];
+
+        return $this->pruneSamples($samples, $now);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $points
+     * @return list<array<string, mixed>>
+     */
+    private function withOutsideTemperature(array $points, string $bucket, int $now): array
+    {
+        $samples = $this->outsideSamples($now);
+        if ($samples === []) {
+            return $points;
+        }
+        $tz = $bucket === '1d' ? $this->historyTimezone() : null;
+        foreach ($points as $index => $point) {
+            $t = (int) ($point['t'] ?? 0);
+            $points[$index]['outside'] = $bucket === '1d'
+                ? $this->outsideOnDay($t, $samples, $tz ?? new \DateTimeZone('Europe/Zurich'))
+                : $this->outsideNear($t, $samples);
+        }
+
+        return $points;
+    }
+
+    /**
+     * @param list<array{0: int, 1: ?float, 2: ?float, 3: ?float, 4: ?float, 5: ?float}> $samples
+     */
+    private function outsideNear(int $t, array $samples): ?float
+    {
+        $best = null;
+        $bestDelta = 40 * 60 + 1;
+        foreach ($samples as $row) {
+            if ($row[1] === null) {
+                continue;
+            }
+            $delta = abs((int) $row[0] - $t);
+            if ($delta < $bestDelta) {
+                $bestDelta = $delta;
+                $best = (float) $row[1];
+            }
+        }
+        if ($best === null || $bestDelta > 40 * 60) {
+            return null;
+        }
+
+        return round($best, 2);
+    }
+
+    /**
+     * @param list<array{0: int, 1: ?float, 2: ?float, 3: ?float, 4: ?float, 5: ?float}> $samples
+     */
+    private function outsideOnDay(int $t, array $samples, \DateTimeZone $tz): ?float
+    {
+        $day = (new \DateTimeImmutable('@' . $t))->setTimezone($tz)->format('Y-m-d');
+        $values = [];
+        foreach ($samples as $row) {
+            if ($row[1] === null) {
+                continue;
+            }
+            $sampleDay = (new \DateTimeImmutable('@' . (int) $row[0]))->setTimezone($tz)->format('Y-m-d');
+            if ($sampleDay === $day) {
+                $values[] = (float) $row[1];
+            }
+        }
+        if ($values === []) {
+            return null;
+        }
+
+        return round(array_sum($values) / count($values), 2);
     }
 
     /**

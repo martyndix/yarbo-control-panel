@@ -244,6 +244,15 @@ final class YarboWeather
             return;
         }
         @rename($tmp, $path);
+        $temp = $data['temp_c'] ?? null;
+        if (!is_numeric($temp)) {
+            return;
+        }
+        $at = (int) ($data['fetched_at'] ?? time());
+        try {
+            (new YarboSensorHistory($this->projectRoot))->recordOutsideTemperature((float) $temp, $at > 0 ? $at : time());
+        } catch (\Throwable) {
+        }
     }
 
     private function httpGet(string $url): ?string
