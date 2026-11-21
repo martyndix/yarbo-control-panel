@@ -63,6 +63,7 @@ def main() -> None:
     while time.time() < deadline and sink.buf.getvalue() != b"data: hi\n\n":
         time.sleep(0.02)
     assert sink.buf.getvalue() == b"data: hi\n\n", "first picture packet must arrive before the stream ends"
+    assert unifi_multipart_relays(proxy), "a UniFi camera stream must reach the browser before it ends"
     assert stream_reaches_client(proxy), "a picture must reach the browser while the stream stays open"
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
@@ -108,6 +109,58 @@ class _Upstream(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(body)
+
+
+class _MjpegHold(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, fmt: str, *args) -> None:
+        return
+
+    def do_GET(self) -> None:  # noqa: N802
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n\xff\xd8" + (b"A" * 20000) + b"\xff\xd9")
+        self.wfile.flush()
+        time.sleep(1.5)
+
+
+def unifi_multipart_relays(proxy) -> bool:
+    upstream = ThreadingHTTPServer(("127.0.0.1", 0), _MjpegHold)
+    threading.Thread(target=upstream.serve_forever, daemon=True).start()
+    previous = proxy.PanelHttpsProxyHandler.upstream_port
+    proxy.PanelHttpsProxyHandler.upstream_port = upstream.server_address[1]
+    proxy.PanelHttpsProxyHandler.upstream_host = "127.0.0.1"
+    wall = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
+    threading.Thread(target=wall.serve_forever, daemon=True).start()
+    client = None
+    try:
+        client = socket.create_connection(("127.0.0.1", wall.server_address[1]), timeout=3)
+        client.sendall(
+            b"GET /api/unifi.php?action=stream&id=cam HTTP/1.1\r\nHost: panel.local\r\nConnection: close\r\n\r\n"
+        )
+        client.settimeout(0.8)
+        data = b""
+        deadline = time.time() + 0.8
+        while time.time() < deadline and b"\xff\xd8" not in data:
+            try:
+                part = client.recv(4096)
+            except socket.timeout:
+                break
+            if not part:
+                break
+            data += part
+        lowered = data.lower()
+        return b"multipart/x-mixed-replace" in lowered and b"\xff\xd8" in data
+    finally:
+        if client is not None:
+            client.close()
+        wall.shutdown()
+        upstream.shutdown()
+        proxy.PanelHttpsProxyHandler.upstream_port = previous
 
 
 def stream_reaches_client(proxy) -> bool:

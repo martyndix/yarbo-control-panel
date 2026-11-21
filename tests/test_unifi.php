@@ -1650,12 +1650,15 @@ foreach ([
     'id="cctv-page"' => $cctvHtml,
     '>CCTV<' => $cctvHtml,
     'function setCctvBig' => $cctvJs,
+    'CCTV_SNAP_PARALLEL' => $cctvJs,
+    'action=snapshot' => $cctvJs,
     "action: 'cctv_order'" => $cctvJs,
     'Drag a picture to move it' => $cctvJs,
     'moduleListWithCctv' => $cctvJs,
     '.cctv-tile.is-big' => $cctvCss,
     'body.cctv-open .container' => $cctvCss,
     '## [5.0.68]' => $change,
+    '## [5.0.69]' => $change,
 ] as $needle => $hay) {
     if (!is_string($hay) || !str_contains($hay, $needle)) {
         fwrite(STDERR, "missing $needle\n");

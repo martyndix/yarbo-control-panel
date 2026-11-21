@@ -3409,14 +3409,17 @@ function setActiveModule(id, persist = true) {
 let cctvOrder = [];
 let cctvBigId = '';
 let cctvRefreshSeq = 0;
-const cctvFallbackTimers = new Map();
+let cctvSnapTimer = 0;
+let cctvSnapBusy = 0;
+let cctvSnapCursor = 0;
+const CCTV_SNAP_PARALLEL = 4;
 
 function cctvStreamSrc(id) {
-    return `/api/unifi.php?action=stream&id=${encodeURIComponent(id)}&fps=3`;
+    return `/api/unifi.php?action=stream&id=${encodeURIComponent(id)}&fps=4`;
 }
 
 function cctvSnapSrc(id) {
-    return `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}&fresh=1&r=${Date.now()}`;
+    return `/api/unifi.php?action=snapshot&id=${encodeURIComponent(id)}&r=${Date.now()}`;
 }
 
 function cctvOrdered(cameras, order) {
@@ -3433,34 +3436,75 @@ function cctvOrdered(cameras, order) {
     return out;
 }
 
-function stopCctvFallbacks() {
-    cctvFallbackTimers.forEach((timer) => window.clearInterval(timer));
-    cctvFallbackTimers.clear();
+function stopCctvSnapshots() {
+    if (cctvSnapTimer) {
+        window.clearInterval(cctvSnapTimer);
+        cctvSnapTimer = 0;
+    }
+    cctvSnapBusy = 0;
+    cctvSnapCursor = 0;
 }
 
-function cctvUseSnapshot(tile) {
-    const id = tile?.getAttribute('data-cctv-id') || '';
-    const img = tile?.querySelector('img');
-    if (!id || !img || cctvFallbackTimers.has(id)) return;
-    const pull = () => {
-        if (!tile.isConnected || activeModuleId !== 'cctv') return;
-        img.src = cctvSnapSrc(id);
-    };
-    pull();
-    cctvFallbackTimers.set(id, window.setInterval(pull, 1500));
-}
-
-function cctvAttachStream(tile) {
+function cctvQueueSnapshot(tile, allowBig = false) {
+    if (!tile || tile.dataset.cctvBusy === '1' || activeModuleId !== 'cctv') return false;
+    if (tile.classList.contains('is-big') && !allowBig) return false;
     const id = tile.getAttribute('data-cctv-id') || '';
     const img = tile.querySelector('img');
-    if (!id || !img) return;
-    const timer = cctvFallbackTimers.get(id);
-    if (timer) {
-        window.clearInterval(timer);
-        cctvFallbackTimers.delete(id);
+    if (!id || !img) return false;
+    tile.dataset.cctvBusy = '1';
+    cctvSnapBusy += 1;
+    const next = new Image();
+    const finish = () => {
+        tile.dataset.cctvBusy = '';
+        cctvSnapBusy = Math.max(0, cctvSnapBusy - 1);
+    };
+    next.onload = () => {
+        if (tile.isConnected && activeModuleId === 'cctv' && (allowBig || !tile.classList.contains('is-big'))) {
+            img.src = next.src;
+        }
+        finish();
+    };
+    next.onerror = finish;
+    next.src = cctvSnapSrc(id);
+    return true;
+}
+
+function cctvSnapTick() {
+    if (activeModuleId !== 'cctv') return;
+    const tiles = [...document.querySelectorAll('#cctv-grid [data-cctv-id]')]
+        .filter((tile) => !tile.classList.contains('is-big'));
+    if (!tiles.length) return;
+    let skipped = 0;
+    while (cctvSnapBusy < CCTV_SNAP_PARALLEL && skipped < tiles.length) {
+        const tile = tiles[cctvSnapCursor % tiles.length];
+        cctvSnapCursor = (cctvSnapCursor + 1) % Math.max(1, tiles.length);
+        if (tile.dataset.cctvBusy === '1') {
+            skipped += 1;
+            continue;
+        }
+        if (!cctvQueueSnapshot(tile)) {
+            skipped += 1;
+            continue;
+        }
+        skipped = 0;
     }
-    img.onerror = () => cctvUseSnapshot(tile);
-    if (img.getAttribute('src') !== cctvStreamSrc(id)) img.src = cctvStreamSrc(id);
+}
+
+function startCctvSnapshots() {
+    cctvSnapTick();
+    if (cctvSnapTimer) return;
+    cctvSnapTimer = window.setInterval(cctvSnapTick, 250);
+}
+
+function cctvPlayStream(tile) {
+    const id = tile?.getAttribute('data-cctv-id') || '';
+    const img = tile?.querySelector('img');
+    if (!id || !img) return;
+    img.onerror = () => {
+        img.onerror = null;
+        cctvQueueSnapshot(tile, true);
+    };
+    img.src = cctvStreamSrc(id);
 }
 
 function renderCctvGrid(cameras, order) {
@@ -3479,33 +3523,46 @@ function renderCctvGrid(cameras, order) {
         grid.querySelectorAll('[data-cctv-id]').forEach((tile) => {
             const id = tile.getAttribute('data-cctv-id') || '';
             tile.classList.toggle('is-big', cctvBigId !== '' && id === cctvBigId);
-            const img = tile.querySelector('img');
-            if (img && !img.getAttribute('src')) cctvAttachStream(tile);
         });
         document.body.classList.toggle('cctv-big', cctvBigId !== '');
+        startCctvSnapshots();
         return;
     }
-    stopCctvFallbacks();
     grid.innerHTML = list.map((cam) => {
         const name = String(cam.name || 'Camera');
         const id = String(cam.id);
         const big = id === cctvBigId ? ' is-big' : '';
         return `<article class="cctv-tile${big}" data-cctv-id="${escapeHtml(id)}">
-            <img alt="${escapeHtml(name)}" draggable="false">
+            <img alt="" draggable="false">
             <span class="cctv-name">${escapeHtml(name)}</span>
             <button type="button" class="btn btn-secondary cctv-close">Close</button>
         </article>`;
     }).join('');
-    grid.querySelectorAll('[data-cctv-id]').forEach((tile) => cctvAttachStream(tile));
     document.body.classList.toggle('cctv-big', cctvBigId !== '');
+    const bigTile = cctvBigId ? grid.querySelector('.is-big') : null;
+    if (bigTile) cctvPlayStream(bigTile);
+    startCctvSnapshots();
 }
 
 function setCctvBig(id) {
-    cctvBigId = id || '';
-    document.body.classList.toggle('cctv-big', cctvBigId !== '');
+    const next = id || '';
+    cctvBigId = next;
+    document.body.classList.toggle('cctv-big', next !== '');
     document.querySelectorAll('#cctv-grid [data-cctv-id]').forEach((tile) => {
         const mine = tile.getAttribute('data-cctv-id') || '';
-        tile.classList.toggle('is-big', cctvBigId !== '' && mine === cctvBigId);
+        const big = next !== '' && mine === next;
+        const was = tile.classList.contains('is-big');
+        tile.classList.toggle('is-big', big);
+        const img = tile.querySelector('img');
+        if (!img) return;
+        if (big) {
+            cctvPlayStream(tile);
+        } else if (was) {
+            img.onerror = null;
+            img.removeAttribute('src');
+            tile.dataset.cctvBusy = '';
+            cctvQueueSnapshot(tile);
+        }
     });
 }
 
@@ -3531,8 +3588,11 @@ function stopCctvWall() {
     cctvRefreshSeq += 1;
     cctvBigId = '';
     document.body.classList.remove('cctv-big');
-    stopCctvFallbacks();
+    stopCctvSnapshots();
     document.querySelectorAll('#cctv-grid .is-big').forEach((tile) => tile.classList.remove('is-big'));
+    document.querySelectorAll('#cctv-grid [data-cctv-id]').forEach((tile) => {
+        tile.dataset.cctvBusy = '';
+    });
     document.querySelectorAll('#cctv-grid img').forEach((img) => {
         img.onerror = null;
         img.removeAttribute('src');

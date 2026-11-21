@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.69] - 2026-11-22
+
+### Fixed
+
+- CCTV loads every UniFi camera together. A live picture that never ended was holding the browser’s few connections, so the other cameras waited. The wall keeps every camera updating, and the one you click still fills the screen.
+
 ## [5.0.68] - 2026-11-22
 
 ### Added

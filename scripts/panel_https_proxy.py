@@ -330,14 +330,38 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         headers["Connection"] = "close"
 
         conn = None
+        started = False
         try:
             conn = http.client.HTTPConnection(self.upstream_host, self.upstream_port, timeout=120)
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
+            content_type = (resp.getheader("Content-Type") or "").lower()
+            # A live picture never ends. Waiting for the whole body held the
+            # browser's few connections, so the other cameras could not start.
+            if "multipart/x-mixed-replace" in content_type:
+                if conn.sock is not None:
+                    conn.sock.settimeout(None)
+                self.close_connection = True
+                self.send_response(resp.status, resp.reason)
+                for key, value in resp.getheaders():
+                    lk = key.lower()
+                    if lk in HOP_BY_HOP or lk == "content-length":
+                        continue
+                    self.send_header(key, value)
+                self.send_header("Connection", "close")
+                self.end_headers()
+                started = True
+                if self.command != "HEAD":
+                    relay_upstream(resp, self.wfile)
+                return
             resp_body = resp.read()
         except Exception as exc:
             self.close_connection = True
-            self.send_error(502, f"Upstream error: {exc}")
+            if not started:
+                try:
+                    self.send_error(502, f"Upstream error: {exc}")
+                except Exception:
+                    pass
             return
         finally:
             if conn is not None:
