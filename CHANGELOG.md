@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.63] - 2026-11-21
+
+### Fixed
+
+- Live view left every tile on waiting. The cameras were being switched off before a picture could arrive. All four stay subscribed again, and their threads give the processor to the panel whenever a page is loading. Update to latest, refresh Safari, press Stop view, then Start live view. The “pictures take turns” line goes away.
+
 ## [5.0.62] - 2026-11-21
 
 ### Fixed

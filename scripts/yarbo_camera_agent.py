@@ -38,11 +38,6 @@ BYTE_BUDGET_PER_S = 60_000
 # stops and the page can load on another device.
 RECEIVE_BUDGET_PER_S = 120_000
 RECEIVE_PAUSE_MAX_S = 1.5
-# One camera at a time, and the download stays off for most of each turn.
-# A short pause of all four at once still filled the link, so the other
-# device could not finish loading until Stop.
-VIDEO_ON_S = 0.3
-VIDEO_OFF_S = 0.9
 SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/prod"
 TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
 # The robot's video service is the Yarbo app region, North America (2),
@@ -560,7 +555,6 @@ class Hub:
                 "viewers": len(self.subs),
                 "hubDrops": self.drops,
                 "uptimeS": int(now - started_at) if started_at else 0,
-                "pace": "turns",
                 "views": views,
             }
 
@@ -586,7 +580,6 @@ class LiveSession:
         self.sensors_on = False
         self.user_stop = False
         self.tried_high = False
-        self.one_at_a_time = False
         self.video_pause = threading.Event()
         self._status_lock = threading.Lock()
 
@@ -998,24 +991,31 @@ def finish_session(session: LiveSession) -> None:
 
 
 def leave_cores_for_the_panel() -> None:
-    """Keep every camera thread on one core so the page still has a core to load on.
+    """Let the page run while the cameras are open.
 
-    Affinity belongs to each thread. Setting it on the main thread leaves the
-    camera library's own threads free to use the rest, and the page waits.
+    The cameras stay subscribed. Their threads sit at idle priority and on one
+    core, so a page load on another device is served before another picture.
+    Switching the download off to make room left every tile on waiting.
     """
+    policy = getattr(os, "SCHED_IDLE", None)
+    param = os.sched_param(0)
     count = os.cpu_count() or 1
-    if count < 2:
-        return
-    mask = {count - 1}
+    mask = {count - 1} if count >= 2 else None
     try:
         tids = [int(name) for name in os.listdir("/proc/self/task")]
     except (OSError, ValueError):
         tids = [0]
     for tid in tids:
-        try:
-            os.sched_setaffinity(tid, mask)
-        except (AttributeError, OSError, ValueError):
-            pass
+        if policy is not None:
+            try:
+                os.sched_setscheduler(tid, policy, param)
+            except (AttributeError, OSError, PermissionError):
+                pass
+        if mask is not None:
+            try:
+                os.sched_setaffinity(tid, mask)
+            except (AttributeError, OSError, ValueError):
+                pass
 
 
 def release_video(session: LiveSession) -> None:
@@ -1030,45 +1030,30 @@ def release_video(session: LiveSession) -> None:
             print(f"[camera] {view} could not pause the download", file=sys.stderr, flush=True)
 
 
-def camera_turn(index: int) -> str:
-    """Which single camera may download on this turn."""
-    return VIEWS[index % len(VIEWS)]
-
-
-def subscribe_one(session: LiveSession, view: str) -> None:
-    """Ask one camera for pictures. The others stay joined and quiet."""
-    options = session.video_options
-    conn = session.links.get(view)
-    if options is None or conn is None:
-        return
-    try:
-        user = conn.get_local_user()
-        if user is not None:
-            user.subscribe_all_video(options)
-    except Exception:
-        print(f"[camera] {view} could not resume", file=sys.stderr, flush=True)
-
-
 def guard_video(session: LiveSession) -> None:
-    """One camera downloads briefly, then nothing does, so the page can load.
+    """Keep the cameras subscribed, and step aside when the page needs the processor.
 
-    Leaving all four running and pausing them together still filled the link
-    for the whole time the pictures were on. Stop was the only thing that
-    let the other device finish.
+    The download is paused only after it has already passed the byte budget.
+    Pictures keep arriving until then.
     """
-    index = 0
     while not session.stop.is_set():
+        session.video_pause.wait(0.5)
+        if session.stop.is_set():
+            return
         leave_cores_for_the_panel()
+        if not session.video_pause.is_set() and time.time() >= session.hub.video_quiet_until:
+            continue
+        session.video_pause.clear()
         release_video(session)
-        session.hub.video_quiet_until = time.time() + VIDEO_OFF_S
-        if session.stop.wait(VIDEO_OFF_S):
+        while not session.stop.is_set():
+            wait = session.hub.video_quiet_until - time.time()
+            if wait <= 0:
+                break
+            session.stop.wait(min(wait, 0.25))
+        session.video_pause.clear()
+        if session.stop.is_set():
             return
-        view = camera_turn(index)
-        index += 1
-        session.hub.video_quiet_until = 0.0
-        subscribe_one(session, view)
-        if session.stop.wait(VIDEO_ON_S):
-            return
+        subscribe_again(session, force=True)
 
 
 def prefer_high_stream(session: LiveSession) -> None:
@@ -1092,8 +1077,6 @@ def subscribe_again(session: LiveSession, force: bool = False) -> None:
     the tiles on "waiting" for good. A pause in progress is left alone
     until it ends, or the download would start again at once.
     """
-    if session.one_at_a_time and not force:
-        return
     if not force and time.time() < session.hub.video_quiet_until:
         return
     options = session.video_options
@@ -1202,8 +1185,6 @@ def run(root: Path) -> int:
         if link_is_cellular(cached_raw()):
             raise RuntimeError("Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.")
         session.set_state("starting", "Joining the cameras")
-        # Heartbeats must not turn every camera back on. One downloads at a time.
-        session.one_at_a_time = True
         service, held = join_views(session, serial, uid, grants)
         threading.Thread(target=guard_video, args=(session,), daemon=True).start()
         deadline = time.time() + 12.0
@@ -1343,14 +1324,12 @@ def self_test() -> int:
     assert paced.note_receive(40_000) is True
     assert paced.video_quiet_until > time.time()
     assert paced.note_receive(40_000) is False
-    assert [camera_turn(i) for i in range(4)] == ["middle", "left", "right", "back"]
     session = LiveSession(Path("."))
-    session.one_at_a_time = True
     session.video_options = object()
 
     class _User:
         def __init__(self) -> None:
-            self.subscribed = False
+            self.subscribed = True
 
         def subscribe_all_video(self, _options: object) -> None:
             self.subscribed = True
@@ -1366,29 +1345,17 @@ def self_test() -> int:
             return self.user
 
     session.links = {name: _Conn() for name in VIEWS}
-    for conn in session.links.values():
-        conn.get_local_user().subscribed = True
     gate = threading.Thread(target=guard_video, args=(session,), daemon=True)
     gate.start()
-    quiet_at = time.time() + 1.0
-    while time.time() < quiet_at:
-        if all(not conn.get_local_user().subscribed for conn in session.links.values()):
-            break
-        time.sleep(0.05)
-    assert all(not conn.get_local_user().subscribed for conn in session.links.values())
-    subscribe_again(session)
-    assert all(not conn.get_local_user().subscribed for conn in session.links.values())
-    seen: list[str] = []
-    until = time.time() + VIDEO_OFF_S + VIDEO_ON_S + 0.8
-    while time.time() < until:
-        on = [name for name, conn in session.links.items() if conn.get_local_user().subscribed]
-        if len(on) == 1:
-            seen = on
-            break
-        time.sleep(0.05)
+    time.sleep(0.7)
+    still_on = [name for name, conn in session.links.items() if conn.get_local_user().subscribed]
     session.stop.set()
     gate.join(2)
-    assert seen == ["middle"], seen
+    assert still_on == list(VIEWS), still_on
+    leave_cores_for_the_panel()
+    if hasattr(os, "sched_getscheduler") and hasattr(os, "SCHED_IDLE"):
+        policies = {os.sched_getscheduler(int(tid)) for tid in os.listdir("/proc/self/task")}
+        assert policies == {os.SCHED_IDLE}, policies
     print("ok")
     return 0
 

@@ -67,10 +67,10 @@ assert_true(str_contains($camera, 'BYTE_BUDGET_PER_S'), 'pictures stay inside a 
 assert_true(str_contains($camera, 'RECEIVE_BUDGET_PER_S'), 'the camera download stops when it fills the machine');
 assert_true(str_contains($camera, 'unsubscribe_all_video'), 'a full download is paused at the camera library');
 assert_true(str_contains($camera, 'sched_setaffinity'), 'pictures keep one core so the page can load');
-assert_true(str_contains($camera, 'def subscribe_one'), 'only one camera downloads at a time');
-assert_true(str_contains($camera, 'VIDEO_OFF_S'), 'the camera download stays off between turns');
+assert_true(str_contains($camera, 'SCHED_IDLE'), 'camera threads step aside while the page loads');
+assert_true(!str_contains($camera, 'def subscribe_one'), 'all four cameras stay subscribed');
 $app = (string) file_get_contents($root . '/public/assets/app.js');
-assert_true(str_contains($app, 'Pictures take turns'), 'the page says when pictures are taking turns');
+assert_true(!str_contains($app, 'Pictures take turns'), 'the page does not switch the cameras off in turn');
 assert_true(str_contains($camera, 'annexb_has_idr'), 'keyframes are detected from the IDR NAL');
 assert_true(str_contains($camera, 'getAgoraToken'), 'camera agent requests an Agora token');
 assert_true(str_contains($camera, 'DEFAULT_AREA_CODE = 2'), 'joins the robot video region');

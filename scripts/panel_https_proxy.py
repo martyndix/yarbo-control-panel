@@ -1072,13 +1072,20 @@ def main() -> int:
     if args.pictures_only:
         # The picture relay shares the cameras' core. The page keeps the rest.
         count = os.cpu_count() or 1
-        if count >= 2:
-            mask = {count - 1}
-            try:
-                tids = [int(name) for name in os.listdir("/proc/self/task")]
-            except (OSError, ValueError):
-                tids = [0]
-            for tid in tids:
+        policy = getattr(os, "SCHED_IDLE", None)
+        param = os.sched_param(0)
+        mask = {count - 1} if count >= 2 else None
+        try:
+            tids = [int(name) for name in os.listdir("/proc/self/task")]
+        except (OSError, ValueError):
+            tids = [0]
+        for tid in tids:
+            if policy is not None:
+                try:
+                    os.sched_setscheduler(tid, policy, param)
+                except (AttributeError, OSError, PermissionError):
+                    pass
+            if mask is not None:
                 try:
                     os.sched_setaffinity(tid, mask)
                 except (AttributeError, OSError, ValueError):
