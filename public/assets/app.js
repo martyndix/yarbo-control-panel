@@ -16774,8 +16774,23 @@ function setUpdateButtonState(data) {
     applyUpdateAvailability(data);
 }
 
+function releaseLivePictures() {
+    try {
+        closeUnifiLive();
+    } catch {
+        /* The live window is already gone. */
+    }
+    if (cctvBigId) setCctvBig('');
+    stopCctvSnapshots();
+    document.querySelectorAll('#cctv-grid img').forEach((img) => {
+        img.onerror = null;
+        img.removeAttribute('src');
+    });
+}
+
 async function loadUpdateStatus() {
     if (!els.settingsUpdateStatus) return;
+    releaseLivePictures();
     els.settingsUpdateStatus.textContent = 'Checking for updates…';
     setUpdateResult(null);
     if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
@@ -16799,11 +16814,13 @@ async function loadUpdateStatus() {
     } finally {
         if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = false;
         loadHttpsStatus();
+        if (activeModuleId === 'cctv') startCctvSnapshots();
     }
 }
 
 async function checkPanelUpdates(button) {
     if (button) button.disabled = true;
+    releaseLivePictures();
     setUpdateResult('Checking for updates…');
     try {
         const res = await fetch('/api/update.php', {
@@ -16827,6 +16844,7 @@ async function checkPanelUpdates(button) {
     } catch (err) {
         setUpdateResult(err.message || 'Update check failed', 'error');
     } finally {
+        if (activeModuleId === 'cctv') startCctvSnapshots();
         if (button) button.disabled = false;
     }
 }
@@ -17008,6 +17026,7 @@ async function runPanelUpdate(button) {
     if (els.settingsUpdateCheck) els.settingsUpdateCheck.disabled = true;
     if (els.settingsUpdateRun) els.settingsUpdateRun.disabled = true;
     if (els.settingsPanelRestart) els.settingsPanelRestart.disabled = true;
+    releaseLivePictures();
     setUpdateResult('Starting update…');
     try {
         const res = await fetch('/api/update.php', {
@@ -20576,6 +20595,7 @@ document.getElementById('home-paper-assign')?.addEventListener('change', async (
 });
 setupUnifiLive();
 bindCctvWall();
+window.addEventListener('pagehide', () => releaseLivePictures());
 refreshUpdateBadge();
 if (settingsHashPane()) {
     openSettingsModal();

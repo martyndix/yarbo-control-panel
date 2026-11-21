@@ -5,6 +5,7 @@ declare(strict_types=1);
 require __DIR__ . '/bootstrap.php';
 
 use Yarbo\YarboPanelHttps;
+use Yarbo\YarboUnifi;
 use Yarbo\YarboUpdate;
 
 set_time_limit(120);
@@ -28,6 +29,7 @@ if ($method === 'GET') {
         json_response($https->status());
     }
 
+    (new YarboUnifi($projectRoot))->stopLivePictures();
     json_response($update->status(true));
 }
 
@@ -49,10 +51,12 @@ if ($input === []) {
 $action = (string) ($input['action'] ?? '');
 
 if ($action === 'check') {
+    (new YarboUnifi($projectRoot))->stopLivePictures();
     json_response($update->status(true));
 }
 
 if ($action === 'update') {
+    (new YarboUnifi($projectRoot))->stopLivePictures();
     if (!($input['confirm'] ?? false)) {
         json_response(['ok' => false, 'error' => 'confirm=true is required'], 400);
     }
@@ -61,6 +65,7 @@ if ($action === 'update') {
 }
 
 if ($action === 'rollback') {
+    (new YarboUnifi($projectRoot))->stopLivePictures();
     if (!($input['confirm'] ?? false)) {
         json_response(['ok' => false, 'error' => 'confirm=true is required'], 400);
     }

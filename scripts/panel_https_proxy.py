@@ -14,6 +14,7 @@ import http.client
 import json
 import os
 import queue
+import select
 import socket
 import ssl
 import struct
@@ -228,6 +229,57 @@ def relay_upstream(resp, wfile, chunk_size: int = 16384) -> None:
         wfile.flush()
 
 
+def browser_closed(sock: socket.socket) -> bool:
+    """True when the browser has hung up. A blocked upstream read will not notice."""
+    try:
+        ready, _, _ = select.select([sock], [], [], 0)
+    except Exception:
+        return True
+    if sock not in ready:
+        return False
+    try:
+        if isinstance(sock, ssl.SSLSocket):
+            try:
+                if sock.pending() > 0:
+                    return False
+            except Exception:
+                return True
+        data = sock.recv(1, socket.MSG_PEEK | socket.MSG_DONTWAIT)
+    except BlockingIOError:
+        return False
+    except ssl.SSLWantReadError:
+        return False
+    except Exception:
+        return True
+    return data == b""
+
+
+def relay_until_browser_closes(resp, handler, chunk_size: int = 16384) -> None:
+    """Forward a live picture and stop the camera when the window closes."""
+    client = handler.connection
+    raw = getattr(getattr(resp, "fp", None), "raw", None)
+    upstream = getattr(raw, "_sock", None)
+    stop = threading.Event()
+
+    def watch() -> None:
+        while not stop.is_set():
+            if browser_closed(client):
+                if upstream is not None:
+                    try:
+                        upstream.shutdown(socket.SHUT_RDWR)
+                    except Exception:
+                        pass
+                return
+            stop.wait(0.3)
+
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        relay_upstream(resp, handler.wfile, chunk_size)
+    finally:
+        stop.set()
+
+
 HOP_BY_HOP = {
     "connection",
     "keep-alive",
@@ -352,7 +404,7 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 started = True
                 if self.command != "HEAD":
-                    relay_upstream(resp, self.wfile)
+                    relay_until_browser_closes(resp, self)
                 return
             resp_body = resp.read()
         except Exception as exc:

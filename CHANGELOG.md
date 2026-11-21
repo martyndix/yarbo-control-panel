@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.70] - 2026-11-22
+
+### Fixed
+
+- Closing a UniFi camera, leaving the page, or starting a panel update stops that live picture. Only one camera picture can hold the panel at a time, so an update is no longer stuck behind cameras that kept running.
+
 ## [5.0.69] - 2026-11-22
 
 ### Fixed

@@ -1666,4 +1666,32 @@ foreach ([
     }
 }
 
+$slotA = new Yarbo\YarboUnifi($cctvRoot);
+$slotB = new Yarbo\YarboUnifi($cctvRoot);
+$claim = new ReflectionMethod(Yarbo\YarboUnifi::class, 'claimStreamSlot');
+$claim->setAccessible(true);
+$release = new ReflectionMethod(Yarbo\YarboUnifi::class, 'releaseStreamSlot');
+$release->setAccessible(true);
+if ($claim->invoke($slotA) !== true || $claim->invoke($slotB) !== false) {
+    fwrite(STDERR, "a second live camera must not take a panel worker\n");
+    exit(1);
+}
+$slotA->stopLivePictures();
+$gen = (int) trim((string) file_get_contents($cctvRoot . '/data/unifi-stream.gen'));
+if ($gen < 1) {
+    fwrite(STDERR, "stopping live pictures did not mark the stream finished\n");
+    exit(1);
+}
+$release->invoke($slotA);
+$release->invoke($slotB);
+$updatePhp = file_get_contents(dirname(__DIR__) . '/public/api/update.php');
+if (!str_contains($updatePhp, 'stopLivePictures')) {
+    fwrite(STDERR, "update does not stop live pictures\n");
+    exit(1);
+}
+if (!str_contains($cctvJs, 'function releaseLivePictures')) {
+    fwrite(STDERR, "page does not release live pictures\n");
+    exit(1);
+}
+
 echo "ok: unifi\n";

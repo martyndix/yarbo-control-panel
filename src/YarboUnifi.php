@@ -18,6 +18,11 @@ final class YarboUnifi
     /** @var callable|null */
     private $transport = null;
 
+    /** @var resource|null */
+    private $streamLock = null;
+
+    private int $streamGeneration = 0;
+
     public function __construct(private readonly string $projectRoot)
     {
     }
@@ -1877,6 +1882,14 @@ final class YarboUnifi
             throw new \RuntimeException('Pick a camera');
         }
         $fps = max(1, min(8, $fps));
+        // One live picture at a time. Any other request gets a single snapshot
+        // and finishes, so it cannot keep a panel worker or an ffmpeg process.
+        if (!$this->claimStreamSlot()) {
+            $this->emitOneSnapshot($cameraId);
+
+            return;
+        }
+        $this->streamGeneration = $this->readStreamGeneration();
         header('Cache-Control: no-cache, no-store, must-revalidate');
         header('Pragma: no-cache');
         header('Connection: close');
@@ -1887,21 +1900,157 @@ final class YarboUnifi
         }
         @ini_set('zlib.output_compression', '0');
         @ini_set('output_buffering', 'off');
-        if ($this->transport === null) {
-            $rtsp = '';
-            try {
-                $rtsp = $this->rtspsUrl($cameraId);
-            } catch (\Throwable) {
+        try {
+            if ($this->transport === null) {
                 $rtsp = '';
-            }
-            if ($rtsp !== '') {
-                $this->pipeFfmpegMjpeg($rtsp, $fps);
-                if (connection_aborted()) {
-                    return;
+                try {
+                    $rtsp = $this->rtspsUrl($cameraId);
+                } catch (\Throwable) {
+                    $rtsp = '';
+                }
+                if ($rtsp !== '') {
+                    $this->pipeFfmpegMjpeg($rtsp, $fps);
+                    if ($this->streamShouldStop()) {
+                        return;
+                    }
                 }
             }
+            $this->streamSnapshotLoop($cameraId, $fps);
+        } finally {
+            $this->releaseStreamSlot();
         }
-        $this->streamSnapshotLoop($cameraId, $fps);
+    }
+
+    /**
+     * Stop a live UniFi picture left behind when its window closed.
+     * The update check calls this before git runs.
+     */
+    public function stopLivePictures(): void
+    {
+        $this->bumpStreamGeneration();
+        $this->killRecordedFfmpeg();
+    }
+
+    private function streamGenerationPath(): string
+    {
+        return $this->projectRoot . '/data/unifi-stream.gen';
+    }
+
+    private function streamPidPath(): string
+    {
+        return $this->projectRoot . '/data/unifi-stream.pid';
+    }
+
+    private function readStreamGeneration(): int
+    {
+        $raw = @file_get_contents($this->streamGenerationPath());
+
+        return is_string($raw) ? (int) trim($raw) : 0;
+    }
+
+    private function bumpStreamGeneration(): int
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $next = $this->readStreamGeneration() + 1;
+        file_put_contents($this->streamGenerationPath(), (string) $next);
+
+        return $next;
+    }
+
+    private function streamShouldStop(): bool
+    {
+        if (connection_aborted() || connection_status() !== CONNECTION_NORMAL) {
+            return true;
+        }
+
+        return $this->streamGeneration > 0 && $this->readStreamGeneration() !== $this->streamGeneration;
+    }
+
+    private function claimStreamSlot(): bool
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return false;
+        }
+        $fh = fopen($dir . '/unifi-stream.lock', 'c');
+        if (!is_resource($fh) || !flock($fh, LOCK_EX | LOCK_NB)) {
+            if (is_resource($fh)) {
+                fclose($fh);
+            }
+
+            return false;
+        }
+        $this->streamLock = $fh;
+
+        return true;
+    }
+
+    private function releaseStreamSlot(): void
+    {
+        $this->killRecordedFfmpeg();
+        if (is_resource($this->streamLock)) {
+            flock($this->streamLock, LOCK_UN);
+            fclose($this->streamLock);
+        }
+        $this->streamLock = null;
+    }
+
+    private function rememberFfmpegPid(int $pid): void
+    {
+        if ($pid <= 0) {
+            return;
+        }
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        file_put_contents($this->streamPidPath(), (string) $pid);
+    }
+
+    private function killRecordedFfmpeg(): void
+    {
+        $path = $this->streamPidPath();
+        if (!is_file($path)) {
+            return;
+        }
+        $pid = (int) trim((string) file_get_contents($path));
+        @unlink($path);
+        if ($pid <= 1) {
+            return;
+        }
+        if (function_exists('posix_kill')) {
+            if (@posix_kill($pid, 0)) {
+                @posix_kill($pid, 9);
+            }
+
+            return;
+        }
+        if (is_dir('/proc/' . $pid)) {
+            exec('kill -9 ' . $pid . ' >/dev/null 2>&1');
+        }
+    }
+
+    private function emitOneSnapshot(string $cameraId): void
+    {
+        try {
+            $jpeg = $this->snapshotJpeg($cameraId, false);
+        } catch (\Throwable) {
+            $jpeg = '';
+        }
+        if ($jpeg === '') {
+            http_response_code(503);
+            header('Content-Type: application/json');
+            echo json_encode(['ok' => false, 'error' => 'Camera picture is busy']);
+
+            return;
+        }
+        header('Content-Type: image/jpeg');
+        header('Cache-Control: no-store');
+        header('Content-Length: ' . strlen($jpeg));
+        echo $jpeg;
     }
 
     private function normalizeCameraId(string $cameraId): string
@@ -1981,13 +2130,15 @@ final class YarboUnifi
         if (!is_resource($proc)) {
             return;
         }
+        $pid = (int) (proc_get_status($proc)['pid'] ?? 0);
+        $this->rememberFfmpegPid($pid);
         stream_set_blocking($pipes[1], false);
         stream_set_blocking($pipes[2], false);
         $buffer = '';
         $sent = false;
         $started = microtime(true);
         while (!feof($pipes[1])) {
-            if (connection_aborted()) {
+            if ($this->streamShouldStop()) {
                 break;
             }
             $chunk = fread($pipes[1], 8192);
@@ -1996,6 +2147,15 @@ final class YarboUnifi
             }
             if ($chunk === '') {
                 if (!$sent && (microtime(true) - $started) > 6.0) {
+                    break;
+                }
+                // A write is what tells PHP the browser has gone. Without it,
+                // closing the window leaves ffmpeg running.
+                echo "\r\n";
+                if (function_exists('flush')) {
+                    flush();
+                }
+                if ($this->streamShouldStop()) {
                     break;
                 }
                 usleep(20000);
@@ -2028,7 +2188,7 @@ final class YarboUnifi
     private function streamSnapshotLoop(string $cameraId, int $fps): void
     {
         $delayUs = (int) max(250000, intdiv(1000000, max(1, $fps)));
-        while (!connection_aborted()) {
+        while (!$this->streamShouldStop()) {
             try {
                 $jpeg = $this->snapshotJpeg($cameraId, true);
             } catch (\Throwable) {
