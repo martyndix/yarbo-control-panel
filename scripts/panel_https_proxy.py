@@ -595,7 +595,9 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
             # A few pictures of room. A multi-megabyte buffer let this loop
             # accept frames the browser had not read, and that work crowded
             # out every other request.
-            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 262144)
+            # A small send buffer so a burst of pictures cannot sit in front of
+            # the panel on the same network.
+            client.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
         except Exception:
             pass
         stop = threading.Event()
@@ -737,10 +739,9 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
                 if data is None:
                     break
                 if not data:
-                    # A successful send used to spin straight into the next
-                    # picture. That held the panel, so another device hung
-                    # while the cameras were on.
-                    time.sleep(0.001 if sent else 0.01)
+                    # A tight send loop held the CPU, so the panel and a second
+                    # device could not get a turn while the cameras were showing.
+                    time.sleep(0.02 if sent == 0 else 0)
                     continue
                 incoming += data
                 try:
@@ -1066,6 +1067,10 @@ def main() -> int:
 
     httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
     if args.pictures_only:
+        try:
+            os.nice(15)
+        except OSError:
+            pass
         print(
             f"panel_https_proxy: pictures on https://{args.listen_host}:{args.listen_port}",
             flush=True,

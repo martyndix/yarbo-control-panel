@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 require __DIR__ . '/bootstrap.php';
 
+// A stuck status used to keep a PHP worker until the request limit. While the
+// cameras are busy that filled every worker, so another device could not load.
+set_time_limit(12);
+
 use Yarbo\YarboErrors;
 use Yarbo\YarboHomeAutomations;
 use Yarbo\YarboHub;

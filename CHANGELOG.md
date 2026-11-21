@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.59] - 2026-11-21
+
+### Fixed
+
+- The cameras still stopped the rest of the panel, and another device could not open it, while the pictures were moving. Every encoded frame was being copied and sent, and that work crowded out the panel. Each camera now keeps about five pictures a second, and the picture process steps aside so the panel can answer. Update to latest, refresh Safari, press Stop view, then Start live view.
+
 ## [5.0.58] - 2026-11-20
 
 ### Fixed

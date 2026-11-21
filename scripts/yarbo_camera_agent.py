@@ -29,6 +29,9 @@ from pathlib import Path
 from typing import Any
 
 VIEWS = ("middle", "left", "right", "back")
+# About five pictures a second from each camera. Sending every encoded frame
+# filled the machine, so the panel and a second device could not get a turn.
+FRAME_GAP_S = 0.2
 SERVICE_URL = "https://4zx17x5q7l.execute-api.us-east-1.amazonaws.com/prod"
 TOKEN_PATH = "/yarbo/robot-service/robot/commonUser/getAgoraToken"
 # The robot's video service is the Yarbo app region, North America (2),
@@ -453,6 +456,11 @@ class Hub:
             if not key and all(sub.full() for sub in self.subs):
                 self.drops += 1
                 return
+            last_sent = float(slot.get("_sent_at") or 0)
+            if not key and (now - last_sent) < FRAME_GAP_S:
+                self.drops += 1
+                return
+            slot["_sent_at"] = now
         event = {
             "view": view,
             "k": 1 if key else 0,
@@ -997,6 +1005,11 @@ def watch_lease(session: LiveSession, armed_at: float) -> None:
 
 def run(root: Path) -> int:
     global SESSION
+    # Pictures give the panel the CPU when the machine is busy.
+    try:
+        os.nice(10)
+    except OSError:
+        pass
     session = LiveSession(root)
     SESSION = session
     (root / "data").mkdir(parents=True, exist_ok=True)
@@ -1131,6 +1144,18 @@ def self_test() -> int:
     idr = b"\x00\x00\x00\x01\x67\x42" + b"\x00\x00\x00\x01\x65\x88"
     assert annexb_has_idr(idr) is True
     assert annexb_has_idr(b"\x00\x00\x00\x01\x41\x9a") is False
+    hub = Hub()
+    sub = hub.subscribe()
+    hub.push("middle", False, 1, b"aa", 1)
+    hub.push("middle", False, 2, b"bb", 1)
+    hub.push("middle", True, 3, b"cc", 1)
+    sent_pts = []
+    while True:
+        try:
+            sent_pts.append(sub.get_nowait()["t"])
+        except queue.Empty:
+            break
+    assert sent_pts == [1, 3], sent_pts
     print("ok")
     return 0
 
