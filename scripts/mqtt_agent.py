@@ -471,9 +471,14 @@ async def force_controller(client: Any) -> dict[str, Any]:
 
 
 async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout: float = 0.8) -> bool:
-    """Publish without letting a slow camera command eat the whole press."""
+    """Publish without waiting for an acknowledgement.
+
+    data_feedback does not come back for cmd_vel while the cameras are
+    publishing. Waiting for it held this session, and the page reported
+    that the direction did not answer.
+    """
     try:
-        await asyncio.wait_for(client.publish_command(cmd, payload), timeout=timeout)
+        await asyncio.wait_for(client.publish_command(cmd, payload, wait=False), timeout=timeout)
         return True
     except Exception as exc:  # noqa: BLE001
         log(f"{cmd} did not finish in time ({exc})")
@@ -482,11 +487,12 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
 
 async def wake_for_control(client: Any) -> None:
     """Leave idle so lights/actions are not dropped after ~0.5s (no voice prompt)."""
-    await client.publish_command(
+    await publish_quick(
+        client,
         "set_working_state",
         {"state": 1, "source": "smart_home"},
+        timeout=0.8,
     )
-    await asyncio.sleep(0.2)
 
 
 async def sleep_from_control(client: Any) -> None:
@@ -635,12 +641,18 @@ async def read_controller_reality(client: Any, state: dict[str, Any]) -> dict[st
 
 async def soft_keepalive(client: Any, state: dict[str, Any]) -> None:
     """Quiet hold: wake (+ lights) without get_controller speech."""
+    if _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0):
+        return
     if state.get("work_hold") and not state.get("lights_on") and not state.get("control_session"):
         await wake_for_control(client)
         return
-    await ensure_session(client)
+    try:
+        # A slow controller claim must not sit in front of a direction.
+        await asyncio.wait_for(ensure_session(client), timeout=0.8)
+    except TimeoutError:
+        pass
     if state.get("lights_on"):
-        await client.publish_command("light_ctrl", COMMUNITY_LIGHTS_ON)
+        await publish_quick(client, "light_ctrl", COMMUNITY_LIGHTS_ON, timeout=0.8)
 
 
 def charging_status_of(raw: dict[str, Any] | None) -> int:
@@ -1150,7 +1162,10 @@ async def handle_request(
                         )
                         acked = bool(waited.get("acked")) if isinstance(waited, dict) else False
                     else:
-                        await asyncio.wait_for(client.publish_command(cmd, payload), timeout=1.0)
+                        await asyncio.wait_for(
+                            client.publish_command(cmd, payload, wait=False),
+                            timeout=1.0,
+                        )
                 except TimeoutError:
                     log(f"vision {cmd} gave the session back for drive")
                 return {
@@ -1338,8 +1353,12 @@ async def controller_keepalive_loop(
         if not due:
             continue
         try:
+            if _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0):
+                continue
             async with lock:
                 if not wants_wakeup(state):
+                    continue
+                if _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0):
                     continue
                 await soft_keepalive(client, state)
                 state["last_keepalive"] = time.time()

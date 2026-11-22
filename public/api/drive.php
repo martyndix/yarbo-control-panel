@@ -37,7 +37,7 @@ $linear = max(-MAX_LINEAR, min(MAX_LINEAR, $linear));
 $angular = max(-MAX_ANGULAR, min(MAX_ANGULAR, $angular));
 
 try {
-    $agent = YarboMqttAgentClient::requireRunning();
+    $agent = YarboMqttAgentClient::fromEnv();
     $result = $agent->drive($linear, $angular, $enterManual);
     if (!($result['ok'] ?? false)) {
         json_response([

@@ -263,12 +263,15 @@ final class YarboMqttAgentClient
      */
     public function drive(float $linear, float $angular, bool $enterManual): array
     {
+        // A direction has to come back while the cameras are publishing.
+        // Restarting the agent, or waiting out a slow acknowledgement, is
+        // what made the page say the drive did not answer.
         return $this->request([
             'op' => 'drive',
             'linear' => $linear,
             'angular' => $angular,
             'enter_manual' => $enterManual,
-        ]);
+        ], 3.0, false);
     }
 
     /**
@@ -432,11 +435,10 @@ final class YarboMqttAgentClient
         }
 
         $timeout = $timeoutSeconds ?? $this->timeoutSeconds;
-        stream_set_timeout($socket, (int) ceil($timeout));
         $payload['id'] = bin2hex(random_bytes(4));
         fwrite($socket, json_encode($payload, JSON_UNESCAPED_SLASHES) . "\n");
 
-        $line = fgets($socket);
+        $line = $this->readLine($socket, $timeout);
         fclose($socket);
 
         if ($line === false || trim($line) === '') {
@@ -449,5 +451,46 @@ final class YarboMqttAgentClient
         }
 
         return $decoded;
+    }
+
+    /**
+     * Read one line, and give up when the deadline passes.
+     *
+     * stream_set_timeout does not always stop fgets, so a direction waited
+     * until the browser gave up.
+     */
+    private function readLine($socket, float $timeoutSeconds): string
+    {
+        $deadline = microtime(true) + max(0.2, $timeoutSeconds);
+        $buf = '';
+        stream_set_blocking($socket, false);
+        while (microtime(true) < $deadline) {
+            $remaining = $deadline - microtime(true);
+            $read = [$socket];
+            $write = null;
+            $except = null;
+            $ready = @stream_select($read, $write, $except, 0, (int) min(200000, max(0, $remaining) * 1000000));
+            if ($ready === false) {
+                break;
+            }
+            if ($ready === 0) {
+                continue;
+            }
+            $chunk = fread($socket, 8192);
+            if ($chunk === false || $chunk === '') {
+                $meta = stream_get_meta_data($socket);
+                if (!empty($meta['eof'])) {
+                    break;
+                }
+                continue;
+            }
+            $buf .= $chunk;
+            $nl = strpos($buf, "\n");
+            if ($nl !== false) {
+                return substr($buf, 0, $nl);
+            }
+        }
+
+        return '';
     }
 }

@@ -18250,7 +18250,7 @@ async function fetchDrive(linear, angular, enterManual, signal) {
 async function sendDrive(linear, angular, enterManual = false) {
     // A held direction is an ordinary request and leaves the pictures open.
     const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-        ? AbortSignal.timeout(12000)
+        ? AbortSignal.timeout(5000)
         : undefined;
     const done = linear === 0 && angular === 0;
     try {

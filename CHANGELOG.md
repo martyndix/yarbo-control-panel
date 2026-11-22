@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.72] - 2026-11-22
+
+### Fixed
+
+- A direction answers while the cameras are showing. It is sent straight to the robot and no longer waits for an acknowledgement that does not come back during live view.
+
 ## [5.0.71] - 2026-11-22
 
 ### Fixed

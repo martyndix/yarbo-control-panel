@@ -213,12 +213,24 @@ class YarboCloudControlClient:
         except Exception as exc:  # noqa: BLE001
             _LOGGER.warning("Initial cloud telemetry snapshot failed: %s", exc)
 
-    async def publish_command(self, cmd: str, payload: dict[str, Any] | None = None) -> None:
+    async def publish_command(
+        self,
+        cmd: str,
+        payload: dict[str, Any] | None = None,
+        *,
+        wait: bool = True,
+    ) -> None:
         body = payload if isinstance(payload, dict) else {}
-        await asyncio.to_thread(self._publish_sync, str(cmd), body)
+        await asyncio.to_thread(self._publish_sync, str(cmd), body, wait)
 
-    def _publish_sync(self, cmd: str, payload: dict[str, Any]) -> None:
+    def _publish_sync(self, cmd: str, payload: dict[str, Any], wait: bool = True) -> None:
         sdk = self._require_sdk()
+        # A direction must not wait for data_feedback. While the cameras are
+        # publishing, that acknowledgement does not come back, and the press
+        # sits on the session until the page gives up.
+        if not wait or cmd in {"cmd_vel", "set_working_state", "emergency_unlock", "wireless_charging_cmd"}:
+            self._publish_raw(sdk, cmd, payload)
+            return
         # Prefer the SDK registry when the topic is known (handles compression).
         try:
             sdk.mqtt_publish_command(self.sn, self.type_id, cmd, payload)
@@ -229,6 +241,9 @@ class YarboCloudControlClient:
             # Drive / get_controller / community light payloads are not always registered.
             _LOGGER.debug("registry publish %s failed (%s); raw topic", cmd, reg_err)
 
+        self._publish_raw(sdk, cmd, payload)
+
+    def _publish_raw(self, sdk: Any, cmd: str, payload: dict[str, Any]) -> None:
         from yarbo_robot_sdk.codec import encode_mqtt_payload
 
         mqtt = sdk._ensure_mqtt_for(self.sn)

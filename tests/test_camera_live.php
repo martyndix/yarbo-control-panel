@@ -106,6 +106,12 @@ assert_true(!str_contains($camera, 'should_forward'), 'live pictures are not thi
 assert_true(str_contains($camera, 'LINK_CHECK_S = 30'), 'live view does not ask the robot every second');
 assert_true(str_contains($agent, '_control_waiters'), 'dock and lights go ahead of a status read');
 assert_true(str_contains($agent, 'async def publish_quick'), 'a direction is sent without waiting out a camera publish');
+assert_true(str_contains($agent, 'wait=False'), 'a direction does not wait for an acknowledgement');
+$cloud = (string) file_get_contents($root . '/scripts/yarbo_cloud_control.py');
+assert_true(str_contains($cloud, 'def _publish_raw'), 'a direction is published without data_feedback');
+assert_true(str_contains($cloud, '"cmd_vel"'), 'cmd_vel does not wait for data_feedback');
+$drivePhp = (string) file_get_contents($root . '/public/api/drive.php');
+assert_true(!str_contains($drivePhp, 'requireRunning'), 'a direction does not restart the robot session');
 assert_true(str_contains($agent, '_drive_waiters'), 'a direction goes ahead of a camera publish');
 assert_true(str_contains($agent, 'state["dock_release"] = True'), 'dock lets go of the controller so the robot can leave manual mode');
 assert_true(!str_contains($agent, 'set_manul_camera_check", {"state": 0'), 'dock does not turn the cameras off');
