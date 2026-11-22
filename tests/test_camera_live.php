@@ -114,9 +114,8 @@ assert_true(str_contains($agent, 'self._stop.wait(0.1)'), 'a held direction is r
 $motionAt = strpos($agent, 'class DriveMotion');
 $queueAt = strpos($agent, 'def queue_drive');
 $motionFn = substr($agent, (int) $motionAt, (int) $queueAt - (int) $motionAt);
-assert_true(str_contains($motionFn, 'set_working_state", {"state": 0}'), 'a direction lets go of the controller so the robot will move');
-assert_true(str_contains($motionFn, '_publish_sync'), 'a direction uses the same publish as turning the controller off');
-assert_true(!str_contains($motionFn, 'get_controller'), 'a direction does not grab the controller again');
+assert_true(str_contains($motionFn, '_publish_sync'), 'a direction uses the same publish as Connect');
+assert_true(str_contains($motionFn, 'get_controller'), 'a direction does what the Connect button does');
 assert_true(str_contains($motionFn, '"source": "smart_home"'), 'a direction also wakes the robot, the same change as Connect');
 assert_true(str_contains($motionFn, 'publish_now'), 'a direction stays on the cloud session that is already up');
 assert_true(!str_contains($agent, 'for _ in range(3):'), 'a direction does not wait out several publishes before answering');
@@ -140,6 +139,7 @@ assert_true(!str_contains($dockFn, 'set_manul_camera_check'), 'dock does not tur
 assert_true(str_contains($motionFn, 'set_manul_camera_check", {"state": 0, "overtime": 0}'), 'a held direction leaves camera check so the robot will move');
 assert_true(!str_contains($agent, 'Connect the Controller first, then use the drive pad.'), 'a direction is not refused while the controller button is off');
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
+assert_true(str_contains($appJs, 'function connectControllerOnLoad'), 'the page connects the controller when it opens');
 assert_true(!str_contains($appJs, 'Connect the controller above the cameras first'), 'the pad does not wait for the controller button');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
 assert_true(!str_contains($appJs, 'has not received a picture'), 'the page does not close a picture stream that is still open');

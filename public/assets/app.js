@@ -1062,6 +1062,26 @@ async function toggleLights(button) {
     }
 }
 
+let controllerAutoRequested = false;
+
+function connectControllerOnLoad() {
+    // The robot carries a direction out when Connect is pressed. Do that
+    // when the page opens, so the pad does not wait for the button.
+    if (controllerAutoRequested || holdController) return;
+    if (!document.querySelector('[data-control="controller"]')) return;
+    controllerAutoRequested = true;
+    postPanelJson('/api/command.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'action=controller_on',
+    }).then((data) => {
+        if (!data || !data.ok) return;
+        applyControllerStateFromStatus(data);
+        updateControllerTile();
+        updateLightsTile();
+    }).catch(() => {});
+}
+
 function initAppearance() {
     initTheme();
     initPanelDragDrop();
@@ -20143,7 +20163,11 @@ initUpdateConfirmModal();
 // Do not wait on settings before the first status poll — that left the dashboard
 // on dashes while /api/settings.php finished, even when companions were ready.
 restoreVestaboardPreviewCache();
-fetchStatus().catch(() => {});
+fetchStatus()
+    .catch(() => {})
+    .finally(() => {
+        connectControllerOnLoad();
+    });
 setInterval(fetchStatus, POLL_INTERVAL_MS);
 loadSettings().catch(() => {});
 bindHomeDashboard();

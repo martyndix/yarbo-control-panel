@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.82] - 2026-11-22
+
+### Fixed
+
+- The controller connects when the page opens. A direction was only carried out when Connect was pressed, because that button sends get_controller. The pad now does that itself, and the controller stays on.
+
 ## [5.0.81] - 2026-11-22
 
 ### Fixed

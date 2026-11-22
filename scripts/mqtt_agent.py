@@ -538,16 +538,17 @@ class DriveMotion:
                 self._logged = now
                 log(f"drive {cmd} failed: {exc}")
 
-    def _release_publish(self, cmd: str, payload: dict[str, Any]) -> None:
-        """Publish the way the controller button does when it is turned off.
+    def _release_publish(self, cmd: str, payload: dict[str, Any], wait: bool = False) -> None:
+        """Publish the way the Connect button does.
 
-        That click is compressed set_working_state 0, and it is the moment
-        the robot actually moves. A plain copy of the same command does not.
+        Connect sends get_controller and then wakes the robot. A direction
+        was stored until that button was pressed. wait=True is required for
+        get_controller, because that is the publish Connect uses.
         """
         try:
             sync = getattr(self.client, "_publish_sync", None)
             if callable(sync):
-                sync(cmd, payload, False)
+                sync(cmd, payload, wait)
                 return
             self._publish(cmd, payload)
         except Exception as exc:  # noqa: BLE001
@@ -555,6 +556,18 @@ class DriveMotion:
             if now - self._logged > 1.0:
                 self._logged = now
                 log(f"drive {cmd} failed: {exc}")
+
+    def _like_connect(self) -> None:
+        """Do what the Connect button does, without anyone pressing it."""
+        try:
+            self.client._controller_acquired = False  # noqa: SLF001
+        except Exception:
+            pass
+        self._release_publish("get_controller", {}, True)
+        self._release_publish("set_working_state", {"state": 1, "source": "smart_home"}, True)
+        self.state["hold_controller"] = True
+        self.state["control_session"] = True
+        self.state["dock_release"] = False
 
     def _run(self) -> None:
         setup = False
@@ -598,21 +611,11 @@ class DriveMotion:
                 if held != self._announced:
                     self._announced = held
                     log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-            # The robot stores a direction and moves only when the controller
-            # state changes. Connect is the change to awake. Turning it off is
-            # the change to idle. Sitting in either state does nothing, which
-            # is why the pad waited for that button. Flip the state with
-            # every direction.
+            # Connect is what makes the robot carry out a stored direction.
+            # Send the direction, then do that same connect. A stop is carried
+            # out the same way, and the controller stays on.
             self._release_publish("cmd_vel", {"vel": linear, "rev": angular})
-            if moving:
-                self._edge = 0 if self._edge else 1
-                if self._edge:
-                    self._release_publish("set_working_state", {"state": 1, "source": "smart_home"})
-                else:
-                    self._release_publish("set_working_state", {"state": 0})
-            else:
-                self._edge = 0
-                self._release_publish("set_working_state", {"state": 0})
+            self._like_connect()
             if not moving:
                 zeros_left -= 1
                 if zeros_left == 0:
@@ -640,6 +643,8 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
         # Do not change the controller button. The pad flips the robot's
         # own awake state, and reporting that as Connected made the button
         # drop back to Connect after every press.
+        state["hold_controller"] = True
+        state["control_session"] = True
         state["work_hold"] = False
         state["work_latched"] = False
         state["manual_drive"] = True
