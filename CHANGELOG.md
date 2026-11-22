@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.84] - 2026-11-22
+
+### Fixed
+
+- The D-pad was still only moving the robot when Connect was pressed or the controller was turned off. Those two actions were happening together, so the robot stored the direction and never had time to move. A held direction now does one of them, the same way as the button, and leaves it in place while the wheels turn.
+
 ## [5.0.83] - 2026-11-22
 
 ### Fixed

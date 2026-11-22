@@ -573,15 +573,40 @@ class DriveMotion:
             self._stop.wait(0.1)
 
 
-async def drive_apply_loop(client: Any, state: dict[str, Any]) -> None:
-    """Carry out the latest direction the way the controller button does.
+async def _repeat_velocity(
+    client: Any,
+    lock: asyncio.Lock,
+    motion: DriveMotion,
+    seconds: float,
+) -> None:
+    """Keep the latest direction going while a controller change settles.
 
-    The robot stores a direction and moves when Connect is pressed or when
-    the controller is turned off. Sitting in either state does nothing.
-    Each pass sends the direction, then does one of those two button actions.
+    The robot moves when Connect finishes, or when the controller is turned
+    off. Undoing that change immediately cancelled the movement.
+    """
+    spent = 0.0
+    while spent < seconds:
+        await asyncio.sleep(0.1)
+        spent += 0.1
+        linear, angular, _updated = motion._snapshot()
+        try:
+            async with lock:
+                await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
+        except Exception as exc:  # noqa: BLE001
+            log(f"drive apply failed: {exc}")
+
+
+async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any]) -> None:
+    """Carry out a held direction with the controller button's own pause.
+
+    A direction is stored until Connect is pressed or the controller is
+    turned off. Those two actions were being fired together, so the robot
+    never had time to move. Each change is now the same call the button
+    makes, and it is left alone long enough for the wheels to turn.
     """
     edge = 0
     armed = False
+    was_moving = False
     while True:
         motion = state.get("motion")
         if not isinstance(motion, DriveMotion):
@@ -589,40 +614,49 @@ async def drive_apply_loop(client: Any, state: dict[str, Any]) -> None:
             continue
         linear, angular, _updated = motion._snapshot()
         moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-        if not moving and not state.get("manual_drive"):
+        if not moving and was_moving:
+            # The finger is up. A zero is stored until the controller changes,
+            # so turn it off once. That is the same change that stops a press.
+            try:
+                async with lock:
+                    await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
+                    await sleep_from_control(client)
+                log("Drive: stop")
+            except Exception as exc:  # noqa: BLE001
+                log(f"drive apply failed: {exc}")
+            was_moving = False
             armed = False
             edge = 0
+            continue
+        if not moving:
             await asyncio.sleep(0.05)
             continue
+        was_moving = True
         try:
-            if moving and not armed:
-                await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
-                await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
-                await publish_quick(client, "emergency_unlock", {})
-                armed = True
-            await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
-            if edge == 0:
-                await sleep_from_control(client)
-                edge = 1
-            else:
-                try:
-                    client._controller_acquired = False  # noqa: SLF001
-                except Exception:
-                    pass
-                await client.get_controller()
-                await wake_for_control(client)
-                edge = 0
-            # Leave the button on Connected. The robot state changes underneath.
-            state["hold_controller"] = True
-            state["control_session"] = True
-            state["dock_release"] = False
+            async with lock:
+                if moving and not armed:
+                    await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
+                    await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
+                    await publish_quick(client, "emergency_unlock", {})
+                    armed = True
+                await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
+                if edge == 0:
+                    # claim_controller is what the Connect button calls,
+                    # including the pause before the robot is woken.
+                    await claim_controller(client)
+                    log(f"Drive: connect vel={linear:.2f} rev={angular:.2f}")
+                    edge = 1
+                else:
+                    await sleep_from_control(client)
+                    log(f"Drive: release vel={linear:.2f} rev={angular:.2f}")
+                    edge = 0
+                state["hold_controller"] = True
+                state["control_session"] = True
+                state["dock_release"] = False
+                state["last_keepalive"] = time.time()
         except Exception as exc:  # noqa: BLE001
             log(f"drive apply failed: {exc}")
-        if not moving:
-            state["manual_drive"] = False
-            armed = False
-            edge = 0
-        await asyncio.sleep(0.25)
+        await _repeat_velocity(client, lock, motion, 1.2)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -1740,7 +1774,7 @@ async def amain() -> int:
     asyncio.create_task(connect_mqtt(client))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
-    asyncio.create_task(drive_apply_loop(client, state))
+    asyncio.create_task(drive_apply_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())
 
     async with server:
