@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.88] - 2026-11-22
+
+### Fixed
+
+- A held direction now publishes the speed first, then Disconnects in the same request. The pad was answering before cmd_vel was on the wire and pressing Connect first, so Disconnect had nothing to carry out until you pressed the button yourself.
+
 ## [5.0.87] - 2026-11-22
 
 ### Fixed

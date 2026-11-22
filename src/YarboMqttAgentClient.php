@@ -271,7 +271,7 @@ final class YarboMqttAgentClient
             'linear' => $linear,
             'angular' => $angular,
             'enter_manual' => $enterManual,
-        ], 3.0, false);
+        ], 12.0, false);
     }
 
     /**

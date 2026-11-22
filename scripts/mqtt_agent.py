@@ -581,12 +581,24 @@ async def publish_velocity(client: Any, linear: float, angular: float) -> None:
         await asyncio.to_thread(send_plain, "cmd_vel", payload)
 
 
-async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
-    """Keep publishing the held direction.
+async def disconnect_after_direction(client: Any) -> None:
+    """Run the robot half of the Disconnect button after cmd_vel is on the wire.
 
-    The page presses the real Connect/Disconnect request that makes the robot
-    move. This only stores the speed on the session. Re-arming here after a
-    Disconnect cancelled the movement before the wheels turned.
+    The pad used to answer before cmd_vel was published, then press Connect
+    first. Disconnect then ran against an empty buffer. Publish first, then
+    this, and do not take the controller again until the next pulse needs it.
+    """
+    await sleep_from_control(client)
+    try:
+        client._controller_acquired = False  # noqa: SLF001
+    except Exception:
+        pass
+
+
+async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
+    """Publish the held direction, then Disconnect so the robot moves.
+
+    Order matters. Disconnect only carries out a speed that is already stored.
     """
     motion = state.get("motion")
     if not isinstance(motion, DriveMotion):
@@ -597,9 +609,12 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
         if not state.get("drive_edge_active"):
             return
         await publish_velocity(client, 0.0, 0.0)
+        await disconnect_after_direction(client)
         state["drive_edge_active"] = False
         state["drive_setup_sent"] = False
         state["manual_drive"] = False
+        state["hold_controller"] = True
+        state["control_session"] = True
         log("Drive: stop")
         return
     if not state.get("drive_setup_sent"):
@@ -607,6 +622,15 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
         await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
         await publish_quick(client, "emergency_unlock", {})
         state["drive_setup_sent"] = True
+    # After a Disconnect the controller flag is clear. Take it again only so
+    # this speed can be stored, then Disconnect to carry it out.
+    if not getattr(client, "controller_acquired", False):
+        try:
+            client._controller_acquired = False  # noqa: SLF001
+        except Exception:
+            pass
+        await client.get_controller()
+        await wake_for_control(client)
     await publish_velocity(client, linear, angular)
     held = (linear, angular)
     if state.get("drive_announced") != held:
@@ -618,10 +642,16 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
     state["manual_drive"] = True
     state["dock_release"] = False
     state["last_keepalive"] = time.time()
+    now = time.time()
+    if now - float(state.get("drive_flushed_at") or 0) < 1.25:
+        return
+    await disconnect_after_direction(client)
+    state["drive_flushed_at"] = time.time()
+    log(f"Drive: disconnect after vel={linear:.2f} rev={angular:.2f}")
 
 
 async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any]) -> None:
-    """Keep the held direction on the session while the page toggles Connect."""
+    """Keep publishing and flushing while a direction is held."""
     while True:
         motion = state.get("motion")
         if not isinstance(motion, DriveMotion):
@@ -638,7 +668,11 @@ async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any
         except Exception as exc:  # noqa: BLE001
             log(f"drive apply failed: {exc}")
             state["drive_error"] = str(exc)
-        await asyncio.sleep(0.12)
+        # After Disconnect, wait before taking the controller again.
+        if time.time() - float(state.get("drive_flushed_at") or 0) < 1.0:
+            await asyncio.sleep(1.0)
+        else:
+            await asyncio.sleep(0.12)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -1234,9 +1268,16 @@ async def handle_request(
             }
 
         if op == "drive":
-            # Answer at once. The apply loop stores the speed and then presses
-            # Disconnect for the robot, which is what makes it move.
-            return queue_drive(client, req, state)
+            # Publish cmd_vel, then Disconnect, in this request. Answering
+            # first let Disconnect run before the speed was on the wire.
+            out = queue_drive(client, req, state)
+            try:
+                await carry_out_direction(client, state)
+            except Exception as exc:  # noqa: BLE001
+                log(f"drive apply failed: {exc}")
+                out["warning"] = f"Drive did not reach the robot ({exc})"
+            out.update(state_flags(state, client))
+            return out
 
         if op == "buzzer":
             if not state.get("hold_controller"):

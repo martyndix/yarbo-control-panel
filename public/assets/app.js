@@ -18271,50 +18271,12 @@ async function fetchDrive(linear, angular, enterManual) {
     return parseJsonResponse(res);
 }
 
-let driveControllerFlushInFlight = false;
-let driveControllerFlushAt = 0;
-let driveControllerEdge = 0;
-
-async function postControllerButton(on) {
-    // Exact same request as the Connect / Disconnect button.
-    return postPanelJson('/api/command.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `action=${on ? 'controller_on' : 'controller_off'}`,
-    });
-}
-
-async function flushDriveWithControllerButton() {
-    // The robot only moves when that button is pressed. Re-arming in the
-    // agent cancelled Disconnect before the wheels turned. Press the button
-    // request here, leave it alone, then take the controller again.
-    if (driveControllerFlushInFlight) return;
-    if (Date.now() - driveControllerFlushAt < 1100) return;
-    driveControllerFlushInFlight = true;
-    driveControllerFlushAt = Date.now();
-    try {
-        const turnOn = driveControllerEdge === 0;
-        driveControllerEdge = turnOn ? 1 : 0;
-        await postControllerButton(turnOn);
-        // Keep the tile on Connected. The robot still got the button press.
-        holdController = true;
-        try {
-            localStorage.setItem(CONTROLLER_HOLD_KEY, '1');
-        } catch {
-            // ignore
-        }
-        updateControllerTile();
-        updateLightsTile();
-    } catch {
-        // The next held pulse will try again.
-    } finally {
-        driveControllerFlushInFlight = false;
-    }
-}
-
 async function sendDrive(linear, angular, enterManual = false) {
     // A held direction is an ordinary request and leaves the pictures open.
     // The page waits for the panel to accept it, the same way Dock does.
+    // The agent publishes the speed and then Disconnects in that same
+    // request, in that order. A separate Connect/Disconnect call here
+    // used to run before cmd_vel was on the wire.
     const done = linear === 0 && angular === 0;
     try {
         const data = await fetchDrive(linear, angular, enterManual);
@@ -18329,16 +18291,9 @@ async function sendDrive(linear, angular, enterManual = false) {
             showToast(data.warning, 'error');
         }
         if (enterManual) manualModeEntered = true;
-        // Store the speed first, then press the same Connect/Disconnect
-        // request the button uses. That is what makes this robot move.
-        if (done) {
-            driveControllerEdge = 0;
-            await postControllerButton(false).catch(() => {});
-            holdController = true;
-            updateControllerTile();
-        } else {
-            flushDriveWithControllerButton();
-        }
+        // Disconnect ran on the robot; keep the tile on Connected.
+        holdController = true;
+        updateControllerTile();
         return true;
     } catch (err) {
         if (done) restorePicturesAfterDrive();
