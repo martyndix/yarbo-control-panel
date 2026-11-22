@@ -114,12 +114,13 @@ assert_true(str_contains($agent, 'self._stop.wait(0.1)'), 'a held direction is r
 $motionAt = strpos($agent, 'class DriveMotion');
 $queueAt = strpos($agent, 'def queue_drive');
 $motionFn = substr($agent, (int) $motionAt, (int) $queueAt - (int) $motionAt);
-$applyAt = strpos($agent, 'async def drive_apply_loop');
+$applyAt = strpos($agent, 'async def carry_out_direction');
 $applyEnd = strpos($agent, 'def queue_drive', (int) $applyAt);
 $applyFn = substr($agent, (int) $applyAt, (int) $applyEnd - (int) $applyAt);
 assert_true(str_contains($applyFn, 'claim_controller'), 'a direction uses the Connect button, including its pause');
+assert_true(str_contains($applyFn, 'read_controller_reality'), 'a direction waits for the same status read as Connect');
 assert_true(str_contains($applyFn, 'sleep_from_control'), 'a direction also turns the controller off, which moves the robot');
-assert_true(str_contains($applyFn, 'async with lock'), 'a direction keeps other commands out while the robot takes it');
+assert_true(str_contains($agent, 'await carry_out_direction(client, state)'), 'the direction request itself runs Connect before it answers');
 assert_true(str_contains($agent, 'await asyncio.sleep(0.45)'), 'Connect waits before waking the robot, and a direction uses that same Connect');
 assert_true(str_contains($motionFn, 'publish_now'), 'a direction stays on the cloud session that is already up');
 assert_true(!str_contains($agent, 'for _ in range(3):'), 'a direction does not wait out several publishes before answering');

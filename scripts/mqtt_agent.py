@@ -573,40 +573,63 @@ class DriveMotion:
             self._stop.wait(0.1)
 
 
-async def _repeat_velocity(
-    client: Any,
-    lock: asyncio.Lock,
-    motion: DriveMotion,
-    seconds: float,
-) -> None:
-    """Keep the latest direction going while a controller change settles.
+async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
+    """Send the latest direction, then do what the controller button does.
 
-    The robot moves when Connect finishes, or when the controller is turned
-    off. Undoing that change immediately cancelled the movement.
+    The robot stores cmd_vel. It moves when the Connect request finishes,
+    or when that request turns the controller off. A background publish
+    never did that. This is the same pair of calls, followed by the status
+    read the button waits for.
     """
-    spent = 0.0
-    while spent < seconds:
-        await asyncio.sleep(0.1)
-        spent += 0.1
-        linear, angular, _updated = motion._snapshot()
-        try:
-            async with lock:
-                await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
-        except Exception as exc:  # noqa: BLE001
-            log(f"drive apply failed: {exc}")
+    motion = state.get("motion")
+    if not isinstance(motion, DriveMotion):
+        return
+    linear, angular, _updated = motion._snapshot()
+    moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+    if not moving:
+        if not state.get("drive_edge_active"):
+            return
+        await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
+        await sleep_from_control(client)
+        await read_controller_reality(client, state)
+        state["drive_edge_active"] = False
+        state["drive_edge"] = 0
+        state["hold_controller"] = True
+        log("Drive: stop")
+        return
+    await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
+    send_plain = getattr(client, "publish_now", None)
+    if callable(send_plain):
+        await asyncio.to_thread(send_plain, "cmd_vel", {"vel": linear, "rev": angular})
+    now = time.time()
+    if state.get("drive_edge_active") and now - float(state.get("drive_edge_at") or 0) < 1.2:
+        return
+    if not state.get("drive_setup_sent"):
+        await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
+        await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
+        await publish_quick(client, "emergency_unlock", {})
+        state["drive_setup_sent"] = True
+    if int(state.get("drive_edge") or 0) == 0:
+        await claim_controller(client)
+        await read_controller_reality(client, state)
+        state["drive_edge"] = 1
+        log(f"Drive: connect vel={linear:.2f} rev={angular:.2f}")
+    else:
+        await sleep_from_control(client)
+        await read_controller_reality(client, state)
+        state["drive_edge"] = 0
+        log(f"Drive: release vel={linear:.2f} rev={angular:.2f}")
+    state["drive_edge_at"] = time.time()
+    state["drive_edge_active"] = True
+    state["hold_controller"] = True
+    state["control_session"] = True
+    state["manual_drive"] = True
+    state["dock_release"] = False
+    state["last_keepalive"] = time.time()
 
 
 async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any]) -> None:
-    """Carry out a held direction with the controller button's own pause.
-
-    A direction is stored until Connect is pressed or the controller is
-    turned off. Those two actions were being fired together, so the robot
-    never had time to move. Each change is now the same call the button
-    makes, and it is left alone long enough for the wheels to turn.
-    """
-    edge = 0
-    armed = False
-    was_moving = False
+    """Keep carrying out a held direction if the page's request is slow."""
     while True:
         motion = state.get("motion")
         if not isinstance(motion, DriveMotion):
@@ -614,49 +637,16 @@ async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any
             continue
         linear, angular, _updated = motion._snapshot()
         moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-        if not moving and was_moving:
-            # The finger is up. A zero is stored until the controller changes,
-            # so turn it off once. That is the same change that stops a press.
-            try:
-                async with lock:
-                    await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
-                    await sleep_from_control(client)
-                log("Drive: stop")
-            except Exception as exc:  # noqa: BLE001
-                log(f"drive apply failed: {exc}")
-            was_moving = False
-            armed = False
-            edge = 0
-            continue
-        if not moving:
+        if not moving and not state.get("drive_edge_active"):
             await asyncio.sleep(0.05)
             continue
-        was_moving = True
         try:
             async with lock:
-                if moving and not armed:
-                    await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
-                    await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
-                    await publish_quick(client, "emergency_unlock", {})
-                    armed = True
-                await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
-                if edge == 0:
-                    # claim_controller is what the Connect button calls,
-                    # including the pause before the robot is woken.
-                    await claim_controller(client)
-                    log(f"Drive: connect vel={linear:.2f} rev={angular:.2f}")
-                    edge = 1
-                else:
-                    await sleep_from_control(client)
-                    log(f"Drive: release vel={linear:.2f} rev={angular:.2f}")
-                    edge = 0
-                state["hold_controller"] = True
-                state["control_session"] = True
-                state["dock_release"] = False
-                state["last_keepalive"] = time.time()
+                await carry_out_direction(client, state)
         except Exception as exc:  # noqa: BLE001
             log(f"drive apply failed: {exc}")
-        await _repeat_velocity(client, lock, motion, 1.2)
+            state["drive_error"] = str(exc)
+        await asyncio.sleep(0.1)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -1252,10 +1242,21 @@ async def handle_request(
             }
 
         if op == "drive":
-            # Never get_controller here — that re-triggers "app controller connected".
-            # Answer before publishing. Waiting on cmd_vel is what made the page
-            # say the direction did not answer while Dock still worked.
-            return queue_drive(client, req, state)
+            # The page used to be answered before anything was sent. The robot
+            # then stored the direction and moved only when Connect ran.
+            # This request now runs that same Connect before it answers.
+            out = queue_drive(client, req, state)
+            try:
+                await carry_out_direction(client, state)
+            except Exception as exc:  # noqa: BLE001
+                log(f"drive apply failed: {exc}")
+                state["drive_error"] = str(exc)
+                out["warning"] = f"Drive did not reach the robot ({exc})"
+            else:
+                err = state.pop("drive_error", None)
+                if err and not out.get("warning"):
+                    out["warning"] = f"Drive did not reach the robot ({err})"
+            return out
 
         if op == "buzzer":
             if not state.get("hold_controller"):
@@ -1568,16 +1569,6 @@ async def handle_client(
 
             req_id = req.get("id") if isinstance(req, dict) else None
             op = str(req.get("op") or "") if isinstance(req, dict) else ""
-            # A direction answers before any other command finishes. Dock can
-            # wait its turn; a held direction cannot, or the page gives up
-            # while the cameras are still publishing.
-            if op == "drive" and isinstance(req, dict):
-                resp = queue_drive(client, req, state)
-                if req_id is not None:
-                    resp["id"] = req_id
-                writer.write((json.dumps(resp, separators=(",", ":")) + "\n").encode())
-                await writer.drain()
-                continue
             control = op in _CONTROL_OPS
             driving = op in {"drive", "stop"}
             vision = isinstance(req, dict) and op == "publish" and str(req.get("session") or "") == "vision"

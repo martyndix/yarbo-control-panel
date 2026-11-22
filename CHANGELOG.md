@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.85] - 2026-11-22
+
+### Fixed
+
+- Pressing a direction now runs the same request as the Connect button before the page is answered. The robot was storing the direction and moving only when that button was pressed.
+
 ## [5.0.84] - 2026-11-22
 
 ### Fixed
