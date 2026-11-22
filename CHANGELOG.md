@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.75] - 2026-11-22
+
+### Fixed
+
+- Holding a direction keeps the robot awake the same way Dock does, and sends that direction on the cloud session that is already open. A single wake was wearing off, so the speed commands after it were ignored.
+
 ## [5.0.74] - 2026-11-22
 
 ### Fixed

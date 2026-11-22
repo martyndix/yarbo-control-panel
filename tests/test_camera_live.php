@@ -111,8 +111,14 @@ assert_true(str_contains($agent, 'class DriveMotion'), 'a held direction keeps b
 assert_true(str_contains($agent, 'def set_velocity'), 'a direction answers before it is published');
 assert_true(str_contains($agent, 'def queue_drive'), 'a direction answers before it is published');
 assert_true(str_contains($agent, 'self._stop.wait(0.1)'), 'a held direction is repeated so the robot will move');
+$motionAt = strpos($agent, 'class DriveMotion');
+$queueAt = strpos($agent, 'def queue_drive');
+$motionFn = substr($agent, (int) $motionAt, (int) $queueAt - (int) $motionAt);
+assert_true(str_contains($motionFn, '"smart_home"'), 'a direction uses the same wake as Dock');
+assert_true(str_contains($motionFn, 'publish_now'), 'a direction stays on the cloud session that is already up');
 assert_true(!str_contains($agent, 'for _ in range(3):'), 'a direction does not wait out several publishes before answering');
 $cloud = (string) file_get_contents($root . '/scripts/yarbo_cloud_control.py');
+assert_true(str_contains($cloud, 'def publish_now'), 'a direction does not reopen the cloud session');
 assert_true(str_contains($cloud, 'def _publish_raw'), 'a direction is published without data_feedback');
 assert_true(str_contains($cloud, '"cmd_vel"'), 'cmd_vel does not wait for data_feedback');
 $drivePhp = (string) file_get_contents($root . '/public/api/drive.php');

@@ -252,6 +252,32 @@ class YarboCloudControlClient:
         if cmd == "get_controller":
             self._controller_acquired = True
 
+    def publish_now(self, cmd: str, payload: dict[str, Any]) -> None:
+        """Queue a command on the cloud session that is already connected.
+
+        A direction is repeated many times a second. The normal publish path
+        asks the SDK which broker to use, and that question can close the
+        live session and open another one. Dock stays on the session that is
+        already up. A direction has to do the same, or the robot never sees it.
+        """
+        sdk = self._require_sdk()
+        chosen = None
+        for mqtt in (getattr(sdk, "_new_mqtt", None), getattr(sdk, "_legacy_mqtt", None)):
+            client = getattr(mqtt, "_client", None) if mqtt is not None else None
+            if client is not None and getattr(mqtt, "is_connected", False):
+                chosen = client
+                break
+        if chosen is None:
+            self._publish_raw(sdk, cmd, payload)
+            return
+        from yarbo_robot_sdk.codec import encode_mqtt_payload
+
+        topic = f"snowbot/{self.sn}/app/{cmd}"
+        info = chosen.publish(topic, encode_mqtt_payload(payload if payload else {}), qos=0)
+        rc = getattr(info, "rc", 0)
+        if rc not in (0, None):
+            raise RuntimeError(f"{cmd} was not accepted by the cloud session ({rc})")
+
     async def publish_and_wait(
         self,
         cmd: str,

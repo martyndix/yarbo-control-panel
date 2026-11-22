@@ -505,6 +505,7 @@ class DriveMotion:
         self._updated = 0.0
         self._stop = threading.Event()
         self._logged = 0.0
+        self._announced: tuple[float, float] | None = None
         self._thread = threading.Thread(target=self._run, name="yarbo-drive", daemon=True)
         self._thread.start()
 
@@ -519,6 +520,12 @@ class DriveMotion:
             return self._linear, self._angular, self._updated
 
     def _publish(self, cmd: str, payload: dict[str, Any]) -> None:
+        # publish_now stays on the session Dock already uses. _publish_sync
+        # can close that session while it decides which broker to use.
+        send = getattr(self.client, "publish_now", None)
+        if callable(send):
+            send(cmd, payload)
+            return
         self.client._publish_sync(cmd, payload, False)
 
     def _run(self) -> None:
@@ -527,8 +534,10 @@ class DriveMotion:
         while not self._stop.is_set():
             linear, angular, updated = self._snapshot()
             moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-            if moving and updated > 0.0 and time.time() - updated > 0.45:
-                # The page stopped refreshing. Do not leave the robot rolling.
+            # The page repeats a held direction about eight times a second.
+            # Pictures can stall that timer. Two seconds is long enough to
+            # ride through a stall, and a real release sends zero itself.
+            if moving and updated > 0.0 and time.time() - updated > 2.0:
                 self.set_velocity(0.0, 0.0)
                 linear = 0.0
                 angular = 0.0
@@ -536,6 +545,7 @@ class DriveMotion:
                 zeros_left = 3
             if not moving and not self.state.get("manual_drive"):
                 setup = False
+                self._announced = None
             if moving:
                 zeros_left = 3
                 self.state["drive_busy_until"] = time.time() + 1.5
@@ -547,18 +557,30 @@ class DriveMotion:
                     self._stop.wait(0.1)
                     continue
                 if moving and not setup:
-                    self._publish("set_working_state", {"state": 1, "source": "app"})
                     raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
-                    if charging_status_of(raw) > 0 and not self.state.get("pad_released"):
-                        self._publish("wireless_charging_cmd", {"cmd": 0})
+                    self._publish("wireless_charging_cmd", {"cmd": 0})
+                    if charging_status_of(raw) > 0:
                         self.state["pad_released"] = True
                         log("Drive: disabled wireless charge so the robot can leave the pad")
                     self._publish("emergency_unlock", {})
                     setup = True
                     self.state["drive_setup_sent"] = True
+                if moving:
+                    # Dock wakes with smart_home. This firmware stays awake for
+                    # about half a second, so every speed command wakes it again.
+                    # One wake at the start of a hold leaves the rest ignored.
+                    self._publish("set_working_state", {"state": 1, "source": "smart_home"})
+                    held = (linear, angular)
+                    if held != self._announced:
+                        self._announced = held
+                        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
+                self._publish("cmd_vel", {"vel": linear, "rev": angular})
                 self._publish("cmd_vel", {"vel": linear, "rev": angular})
                 if not moving:
                     zeros_left -= 1
+                    if zeros_left == 0:
+                        log("Drive: stop")
+                        self._announced = None
             except Exception as exc:  # noqa: BLE001
                 now = time.time()
                 if now - self._logged > 1.0:
