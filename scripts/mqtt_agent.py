@@ -570,6 +570,20 @@ class DriveMotion:
                 # mode it ignores the d-pad, the same way it used to ignore
                 # Dock. Step out of it for the hold. The camera heartbeat
                 # turns it back on after the finger comes up.
+                # The page can say Connected while this process does not
+                # have the controller, which happens after a panel restart.
+                # A direction used to be refused, so the pad did nothing and
+                # Dock showed that refusal before it left. Take the controller
+                # here, then send the speed.
+                if self.state.get("need_controller") or not getattr(self.client, "controller_acquired", False):
+                    self._try_publish("get_controller", {})
+                    try:
+                        self.client._controller_acquired = True  # noqa: SLF001
+                    except Exception:
+                        pass
+                    self.state["need_controller"] = False
+                    self.state["hold_controller"] = True
+                    log("Drive: took the controller")
                 self._try_publish("set_manul_camera_check", {"state": 0, "overtime": 0})
                 self._try_publish("smart_vision_control", {"state": 0})
                 self._try_publish("wireless_charging_cmd", {"cmd": 0})
@@ -612,14 +626,14 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     linear = float(req.get("linear") or 0)
     angular = float(req.get("angular") or 0)
     moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-    if not state.get("hold_controller"):
-        return {
-            "ok": False,
-            "error": "Connect the Controller first, then use the drive pad.",
-        }
     warning = None
     raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
     if moving:
+        # Do not refuse the direction when the controller button is off.
+        # The motion thread sends get_controller before the first speed.
+        if not state.get("hold_controller") or not getattr(client, "controller_acquired", False):
+            state["need_controller"] = True
+        state["hold_controller"] = True
         state["dock_release"] = False
         state["work_hold"] = False
         state["work_latched"] = False

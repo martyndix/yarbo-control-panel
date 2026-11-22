@@ -788,8 +788,8 @@ function isControllerLive() {
 }
 
 function canDrive() {
-    // Do not block on BodyMsg.recharge_state (false positives). Only require controller.
-    return isControllerLive();
+    // A held direction takes the controller. The pad only waits for a picture.
+    return cameraStreamLive();
 }
 
 function updateControllerTile() {
@@ -828,12 +828,10 @@ function updateControllerTile() {
     if (els.driveControllerNote) {
         if (!cameraStreamLive()) {
             els.driveControllerNote.textContent = 'Drive stays off until a live picture is showing.';
-        } else if (live) {
-            els.driveControllerNote.textContent = 'Controller connected — hold a direction to drive.';
         } else {
-            els.driveControllerNote.textContent = 'Connect the controller to enable the drive pad.';
+            els.driveControllerNote.textContent = 'Hold a direction to drive.';
         }
-        els.driveControllerNote.classList.toggle('is-ready', canDrive() && cameraStreamLive());
+        els.driveControllerNote.classList.toggle('is-ready', canDrive());
     }
 
     updateControllerGatedControls();
@@ -857,7 +855,7 @@ function setControlDisabled(el, disabled) {
 
 function updateControllerGatedControls() {
     const live = isControllerLive();
-    const driveOk = canDrive() && cameraStreamLive();
+    const driveOk = canDrive();
     document.querySelectorAll('[data-needs-controller]').forEach((el) => {
         setControlDisabled(el, !live);
         if (!live) {
@@ -878,7 +876,6 @@ function updateControllerGatedControls() {
         // Keep the held direction alive. Disabling it releases the press.
         setControlDisabled(btn, !driveOk && !driveActive);
         if (!cameraStreamLive()) btn.title = 'Start live view and wait for a picture';
-        else if (!live) btn.title = 'Connect controller first';
         else if (!btn.title || btn.title.includes('picture') || btn.title.includes('controller')) btn.title = '';
     });
     // Head controls (attached module) also need a controller session.
@@ -18258,6 +18255,10 @@ async function sendDrive(linear, angular, enterManual = false) {
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
             return false;
         }
+        if (typeof data.hold_controller === 'boolean') {
+            applyControllerStateFromStatus(data);
+            updateControllerTile();
+        }
         if (data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
             sessionStorage.setItem('yarbo_drive_dock_warn', '1');
             showToast(data.warning, 'error');
@@ -18344,11 +18345,6 @@ async function startDrive(direction, button) {
         if (els.driveStatus) els.driveStatus.textContent = 'Live view required';
         return;
     }
-    if (!isControllerLive()) {
-        showToast('Connect the controller above the cameras first', 'error');
-        if (els.driveStatus) els.driveStatus.textContent = 'Controller required';
-        return;
-    }
     if (!sessionStorage.getItem('yarbo_drive_ack')) {
         sessionStorage.setItem('yarbo_drive_ack', '1');
         showToast('Manual drive can move the robot immediately — keep the area clear and release or press Stop to halt.', 'error');
@@ -18367,12 +18363,6 @@ async function startDrive(direction, button) {
             sendDrive(0, 0, false);
             if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
             updateControllerGatedControls();
-            return;
-        }
-        if (!isControllerLive()) {
-            stopDriveLoop();
-            sendDrive(0, 0, false);
-            if (els.driveStatus) els.driveStatus.textContent = 'Controller lost';
             return;
         }
         sendDrivePulse(vector.linear, vector.angular);

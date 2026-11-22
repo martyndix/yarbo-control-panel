@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.77] - 2026-11-22
+
+### Fixed
+
+- The D-pad drives while the controller button is off. A held direction takes the controller, then sends speed. Dock no longer shows “Connect the Controller first, then use the drive pad” before it leaves.
+
 ## [5.0.76] - 2026-11-22
 
 ### Fixed

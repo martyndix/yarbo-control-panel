@@ -451,7 +451,7 @@ $config = require dirname(__DIR__) . '/config.php';
                 <h2>Manual Drive</h2>
                 <button type="button" class="section-drag-handle" draggable="true" aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</button>
             </div>
-            <p class="hint">The direction pad sits between the cameras. Start view, the controller, lights, buzzer, pause, dock, and stop are above the pictures. Drive stays off until a picture is showing and the controller is connected. Release or press Stop to halt.</p>
+            <p class="hint">The direction pad sits between the cameras. Start view, the controller, lights, buzzer, pause, dock, and stop are above the pictures. Drive stays off until a picture is showing. Holding a direction takes the controller. Release or press Stop to halt.</p>
         </section>
 
         <section class="card panel-section plans-card" data-panel-id="plans" data-module="yarbo">
