@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.86] - 2026-11-22
+
+### Fixed
+
+- Holding a direction now presses Disconnect for the robot after each speed. That is the action that makes it move. Earlier updates tried Connect first and waited, so the direction stayed stored until you pressed Disconnect yourself.
+
 ## [5.0.85] - 2026-11-22
 
 ### Fixed

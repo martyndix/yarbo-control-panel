@@ -573,13 +573,43 @@ class DriveMotion:
             self._stop.wait(0.1)
 
 
-async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
-    """Send the latest direction, then do what the controller button does.
+async def flush_like_disconnect(client: Any) -> None:
+    """Do the robot half of pressing Disconnect.
 
-    The robot stores cmd_vel. It moves when the Connect request finishes,
-    or when that request turns the controller off. A background publish
-    never did that. This is the same pair of calls, followed by the status
-    read the button waits for.
+    A held direction is stored. The wheels turn when Disconnect is pressed.
+    That press sends working_state 0 and clears the controller flag.
+    """
+    await sleep_from_control(client)
+    try:
+        client._controller_acquired = False  # noqa: SLF001
+    except Exception:
+        pass
+
+
+async def arm_for_direction(client: Any) -> None:
+    """Take the controller briefly so the next direction can be stored."""
+    try:
+        client._controller_acquired = False  # noqa: SLF001
+    except Exception:
+        pass
+    await client.get_controller()
+    await wake_for_control(client)
+
+
+async def publish_velocity(client: Any, linear: float, angular: float) -> None:
+    payload = {"vel": linear, "rev": angular}
+    await publish_quick(client, "cmd_vel", payload)
+    send_plain = getattr(client, "publish_now", None)
+    if callable(send_plain):
+        await asyncio.to_thread(send_plain, "cmd_vel", payload)
+
+
+async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
+    """Store the latest direction, then press Disconnect for the robot.
+
+    Watching the pad showed the robot only moves when Disconnect is pressed.
+    Connect alone leaves the direction sitting there. Each held pulse arms
+    the controller, sends the speed, then runs that same Disconnect.
     """
     motion = state.get("motion")
     if not isinstance(motion, DriveMotion):
@@ -589,37 +619,29 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
     if not moving:
         if not state.get("drive_edge_active"):
             return
-        await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
-        await sleep_from_control(client)
-        await read_controller_reality(client, state)
+        await publish_velocity(client, 0.0, 0.0)
+        await flush_like_disconnect(client)
         state["drive_edge_active"] = False
-        state["drive_edge"] = 0
+        state["drive_setup_sent"] = False
+        state["manual_drive"] = False
+        # Keep the button on Connected so the next press can drive again.
         state["hold_controller"] = True
+        state["control_session"] = True
         log("Drive: stop")
-        return
-    await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
-    send_plain = getattr(client, "publish_now", None)
-    if callable(send_plain):
-        await asyncio.to_thread(send_plain, "cmd_vel", {"vel": linear, "rev": angular})
-    now = time.time()
-    if state.get("drive_edge_active") and now - float(state.get("drive_edge_at") or 0) < 1.2:
         return
     if not state.get("drive_setup_sent"):
         await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
         await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
         await publish_quick(client, "emergency_unlock", {})
         state["drive_setup_sent"] = True
-    if int(state.get("drive_edge") or 0) == 0:
-        await claim_controller(client)
-        await read_controller_reality(client, state)
-        state["drive_edge"] = 1
-        log(f"Drive: connect vel={linear:.2f} rev={angular:.2f}")
-    else:
-        await sleep_from_control(client)
-        await read_controller_reality(client, state)
-        state["drive_edge"] = 0
-        log(f"Drive: release vel={linear:.2f} rev={angular:.2f}")
-    state["drive_edge_at"] = time.time()
+    await arm_for_direction(client)
+    await publish_velocity(client, linear, angular)
+    # This is the press that makes the robot move.
+    await flush_like_disconnect(client)
+    held = (linear, angular)
+    if state.get("drive_announced") != held:
+        state["drive_announced"] = held
+        log(f"Drive: disconnect flush vel={linear:.2f} rev={angular:.2f}")
     state["drive_edge_active"] = True
     state["hold_controller"] = True
     state["control_session"] = True
@@ -629,7 +651,7 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
 
 
 async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any]) -> None:
-    """Keep carrying out a held direction if the page's request is slow."""
+    """Carry out a held direction. The page answers first; this does the work."""
     while True:
         motion = state.get("motion")
         if not isinstance(motion, DriveMotion):
@@ -646,7 +668,8 @@ async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any
         except Exception as exc:  # noqa: BLE001
             log(f"drive apply failed: {exc}")
             state["drive_error"] = str(exc)
-        await asyncio.sleep(0.1)
+        # Leave a short gap so Disconnect can finish before the next arm.
+        await asyncio.sleep(0.35)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -1242,21 +1265,9 @@ async def handle_request(
             }
 
         if op == "drive":
-            # The page used to be answered before anything was sent. The robot
-            # then stored the direction and moved only when Connect ran.
-            # This request now runs that same Connect before it answers.
-            out = queue_drive(client, req, state)
-            try:
-                await carry_out_direction(client, state)
-            except Exception as exc:  # noqa: BLE001
-                log(f"drive apply failed: {exc}")
-                state["drive_error"] = str(exc)
-                out["warning"] = f"Drive did not reach the robot ({exc})"
-            else:
-                err = state.pop("drive_error", None)
-                if err and not out.get("warning"):
-                    out["warning"] = f"Drive did not reach the robot ({err})"
-            return out
+            # Answer at once. The apply loop stores the speed and then presses
+            # Disconnect for the robot, which is what makes it move.
+            return queue_drive(client, req, state)
 
         if op == "buzzer":
             if not state.get("hold_controller"):
