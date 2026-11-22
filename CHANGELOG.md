@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.74] - 2026-11-22
+
+### Fixed
+
+- Holding a direction moves the robot while the cameras are showing. The panel accepts the press straight away, then keeps sending that direction about ten times a second, which is what the robot needs before it will roll. Dock is unchanged.
+
 ## [5.0.73] - 2026-11-22
 
 ### Fixed

@@ -23,6 +23,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
@@ -485,13 +486,94 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
         return False
 
 
+class DriveMotion:
+    """Repeat the latest direction about ten times a second.
+
+    Dock is one command, so sending it once is enough. This firmware ignores
+    a single cmd_vel. The page can accept the press immediately; this thread
+    keeps publishing the held direction until the finger comes up. It does
+    not use the shared worker pool, which the cameras can fill while they
+    wait for an acknowledgement.
+    """
+
+    def __init__(self, client: Any, state: dict[str, Any]) -> None:
+        self.client = client
+        self.state = state
+        self._lock = threading.Lock()
+        self._linear = 0.0
+        self._angular = 0.0
+        self._updated = 0.0
+        self._stop = threading.Event()
+        self._logged = 0.0
+        self._thread = threading.Thread(target=self._run, name="yarbo-drive", daemon=True)
+        self._thread.start()
+
+    def set_velocity(self, linear: float, angular: float) -> None:
+        with self._lock:
+            self._linear = float(linear)
+            self._angular = float(angular)
+            self._updated = time.time()
+
+    def _snapshot(self) -> tuple[float, float, float]:
+        with self._lock:
+            return self._linear, self._angular, self._updated
+
+    def _publish(self, cmd: str, payload: dict[str, Any]) -> None:
+        self.client._publish_sync(cmd, payload, False)
+
+    def _run(self) -> None:
+        setup = False
+        zeros_left = 0
+        while not self._stop.is_set():
+            linear, angular, updated = self._snapshot()
+            moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+            if moving and updated > 0.0 and time.time() - updated > 0.45:
+                # The page stopped refreshing. Do not leave the robot rolling.
+                self.set_velocity(0.0, 0.0)
+                linear = 0.0
+                angular = 0.0
+                moving = False
+                zeros_left = 3
+            if not moving and not self.state.get("manual_drive"):
+                setup = False
+            if moving:
+                zeros_left = 3
+                self.state["drive_busy_until"] = time.time() + 1.5
+            elif zeros_left <= 0:
+                self._stop.wait(0.05)
+                continue
+            try:
+                if not getattr(self.client, "is_connected", True):
+                    self._stop.wait(0.1)
+                    continue
+                if moving and not setup:
+                    self._publish("set_working_state", {"state": 1, "source": "app"})
+                    raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
+                    if charging_status_of(raw) > 0 and not self.state.get("pad_released"):
+                        self._publish("wireless_charging_cmd", {"cmd": 0})
+                        self.state["pad_released"] = True
+                        log("Drive: disabled wireless charge so the robot can leave the pad")
+                    self._publish("emergency_unlock", {})
+                    setup = True
+                    self.state["drive_setup_sent"] = True
+                self._publish("cmd_vel", {"vel": linear, "rev": angular})
+                if not moving:
+                    zeros_left -= 1
+            except Exception as exc:  # noqa: BLE001
+                now = time.time()
+                if now - self._logged > 1.0:
+                    self._logged = now
+                    log(f"drive motion failed: {exc}")
+            self._stop.wait(0.1)
+
+
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
     """Accept a direction and answer before any publish.
 
     Dock already returns as soon as its command is handed to the session.
     A direction used to stay on that session until cmd_vel finished, and
     with the cameras publishing that was long enough for the page to give
-    up. The robot still receives the latest velocity from motion_loop.
+    up. DriveMotion repeats the latest velocity after this answer.
     """
     linear = float(req.get("linear") or 0)
     angular = float(req.get("angular") or 0)
@@ -515,15 +597,11 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
             log(f"Drive warning: {warning}")
     # Camera keep-alives must not sit in front of a held direction.
     state["drive_busy_until"] = time.time() + 1.5
-    job = {"linear": linear, "angular": angular}
     motion = state.get("motion")
-    if isinstance(motion, asyncio.Queue):
-        motion.put_nowait(job)
+    if isinstance(motion, DriveMotion):
+        motion.set_velocity(linear, angular)
     else:
-        try:
-            asyncio.get_running_loop().create_task(_drive_once(client, state, linear, angular))
-        except RuntimeError:
-            log("drive has no motion queue")
+        log("drive has no motion sender")
     out: dict[str, Any] = {
         "ok": True,
         "op": "drive",
@@ -534,48 +612,6 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     if warning:
         out["warning"] = warning
     return out
-
-
-async def _drive_once(client: Any, state: dict[str, Any], linear: float, angular: float) -> None:
-    await _send_drive_velocity(client, state, linear, angular)
-
-
-async def _send_drive_velocity(client: Any, state: dict[str, Any], linear: float, angular: float) -> None:
-    moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-    state["drive_busy_until"] = time.time() + 1.5
-    if moving and not state.get("drive_setup_sent"):
-        await publish_quick(
-            client,
-            "set_working_state",
-            {"state": 1, "source": "app"},
-            timeout=1.0,
-        )
-        raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
-        if charging_status_of(raw) > 0 and not state.get("pad_released"):
-            if await publish_quick(client, "wireless_charging_cmd", {"cmd": 0}, timeout=1.0):
-                state["pad_released"] = True
-                log("Drive: disabled wireless charge so the robot can leave the pad")
-        await publish_quick(client, "emergency_unlock", {}, timeout=1.0)
-        state["drive_setup_sent"] = True
-    await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular}, timeout=1.0)
-
-
-async def motion_loop(client: Any, state: dict[str, Any]) -> None:
-    """Send the latest direction without holding the command session."""
-    queue: asyncio.Queue = state["motion"]
-    while True:
-        job = await queue.get()
-        while True:
-            try:
-                job = queue.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-        linear = float(job.get("linear") or 0)
-        angular = float(job.get("angular") or 0)
-        try:
-            await _send_drive_velocity(client, state, linear, angular)
-        except Exception as exc:  # noqa: BLE001
-            log(f"drive motion failed: {exc}")
 
 
 async def wake_for_control(client: Any) -> None:
@@ -1628,9 +1664,9 @@ async def amain() -> int:
         "last_keepalive": 0.0,
         "keepalive_soon": False,
         "drive_setup_sent": False,
-        "motion": asyncio.Queue(),
     }
     client = YarboCloudControlClient(email=email, password=password, sn=serial)
+    state["motion"] = DriveMotion(client, state)
 
     async def _on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await handle_client(reader, writer, client, lock, state)
@@ -1645,7 +1681,6 @@ async def amain() -> int:
     log(f"Agent listening on {sockets} (cloud MQTT SN={serial} email={email})")
 
     asyncio.create_task(connect_mqtt(client))
-    asyncio.create_task(motion_loop(client, state))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())

@@ -107,9 +107,10 @@ assert_true(str_contains($camera, 'LINK_CHECK_S = 30'), 'live view does not ask 
 assert_true(str_contains($agent, '_control_waiters'), 'dock and lights go ahead of a status read');
 assert_true(str_contains($agent, 'async def publish_quick'), 'a direction is sent without waiting out a camera publish');
 assert_true(str_contains($agent, 'wait=False'), 'a direction does not wait for an acknowledgement');
-assert_true(str_contains($agent, 'async def motion_loop'), 'a direction is sent after the page is answered');
+assert_true(str_contains($agent, 'class DriveMotion'), 'a held direction keeps being sent after the page is answered');
+assert_true(str_contains($agent, 'def set_velocity'), 'a direction answers before it is published');
 assert_true(str_contains($agent, 'def queue_drive'), 'a direction answers before it is published');
-assert_true(str_contains($agent, 'motion.put_nowait'), 'a direction does not wait for the robot before answering');
+assert_true(str_contains($agent, 'self._stop.wait(0.1)'), 'a held direction is repeated so the robot will move');
 assert_true(!str_contains($agent, 'for _ in range(3):'), 'a direction does not wait out several publishes before answering');
 $cloud = (string) file_get_contents($root . '/scripts/yarbo_cloud_control.py');
 assert_true(str_contains($cloud, 'def _publish_raw'), 'a direction is published without data_feedback');
