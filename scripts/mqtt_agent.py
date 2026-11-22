@@ -229,9 +229,9 @@ def wants_wakeup(state: dict[str, Any]) -> bool:
     After start_plan / dock, also wake until the job actually starts, then stop
     so keepalive does not keep re-entering app-awake over a running job.
     """
-    if state.get("dock_release"):
+    if state.get("dock_release") or state.get("manual_drive"):
         return False
-    if state.get("lights_on") or state.get("manual_drive") or state.get("control_session"):
+    if state.get("lights_on") or state.get("control_session"):
         return True
     if state.get("work_latched"):
         return False
@@ -563,52 +563,36 @@ class DriveMotion:
                 continue
             if moving and not setup:
                 raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
-                # Live view holds the robot in manual camera check. In that
-                # mode it ignores the d-pad, the same way it used to ignore
-                # Dock. Step out of it for the hold. The camera heartbeat
-                # turns it back on after the finger comes up.
-                # The page can say Connected while this process does not
-                # have the controller, which happens after a panel restart.
-                # A direction used to be refused, so the pad did nothing and
-                # Dock showed that refusal before it left. Take the controller
-                # here, then send the speed.
-                if self.state.get("need_controller") or not getattr(self.client, "controller_acquired", False):
-                    self._try_publish("get_controller", {})
-                    try:
-                        self.client._controller_acquired = True  # noqa: SLF001
-                    except Exception:
-                        pass
-                    self.state["need_controller"] = False
-                    self.state["hold_controller"] = True
-                    log("Drive: took the controller")
+                # Live view holds the robot in manual camera check. Leave it
+                # for the hold. The camera heartbeat turns it back on after
+                # the finger comes up.
                 self._try_publish("set_manul_camera_check", {"state": 0, "overtime": 0})
-                self._try_publish("smart_vision_control", {"state": 0})
                 self._try_publish("wireless_charging_cmd", {"cmd": 0})
                 if charging_status_of(raw) > 0:
                     self.state["pad_released"] = True
                     log("Drive: disabled wireless charge so the robot can leave the pad")
                 self._try_publish("emergency_unlock", {})
-                self._try_publish("set_working_state", {"state": "manual"})
                 setup = True
                 self.state["drive_setup_sent"] = True
             if moving:
-                # A late camera heartbeat can put the robot back into
-                # camera check. Keep that mode off for the whole hold.
-                self._try_publish("set_manul_camera_check", {"state": 0, "overtime": 0})
-                # This firmware stays awake for about half a second.
-                # Wake again with every speed command, the same wake Dock uses.
-                self._try_publish("set_working_state", {"state": 1, "source": "smart_home"})
                 held = (linear, angular)
                 if held != self._announced:
                     self._announced = held
                     log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
+            # The robot stores a direction while the controller is held and
+            # only moves when that hold is let go. Clicking Connected off
+            # sends set_working_state 0, which is why the robot then moved
+            # and the button turned itself back on. Let go with every
+            # direction, and do not take the controller again.
             self._try_publish("cmd_vel", {"vel": linear, "rev": angular})
-            self._try_publish("cmd_vel", {"vel": linear, "rev": angular})
+            self._try_publish("set_working_state", {"state": 0})
             if not moving:
                 zeros_left -= 1
                 if zeros_left == 0:
                     log("Drive: stop")
                     self._announced = None
+                    self.state["manual_drive"] = False
+                    setup = False
             self._stop.wait(0.1)
 
 
@@ -626,17 +610,20 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     warning = None
     raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
     if moving:
-        # Do not refuse the direction when the controller button is off.
-        # The motion thread sends get_controller before the first speed.
-        if not state.get("hold_controller") or not getattr(client, "controller_acquired", False):
-            state["need_controller"] = True
-        state["hold_controller"] = True
-        state["dock_release"] = False
+        # Leave the controller released. Holding it is what made the robot
+        # wait until the button was turned off, then turn the button back on.
+        state["hold_controller"] = False
+        state["need_controller"] = False
+        state["dock_release"] = True
         state["work_hold"] = False
         state["work_latched"] = False
-        state["control_session"] = True
+        state["control_session"] = False
         state["manual_drive"] = True
         state["last_keepalive"] = time.time()
+        try:
+            client._controller_acquired = False  # noqa: SLF001
+        except Exception:
+            pass
         warning = dock_block_reason(raw) or motion_fault_warning(raw)
         if warning:
             log(f"Drive warning: {warning}")
@@ -1049,6 +1036,7 @@ async def handle_request(
             if (
                 state.get("hold_controller")
                 and not state.get("work_hold")
+                and not state.get("manual_drive")
                 and not getattr(client, "controller_acquired", False)
             ):
                 try:

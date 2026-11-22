@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.79] - 2026-11-22
+
+### Fixed
+
+- The D-pad moves the robot while the direction is held. The robot was storing the direction and only moving when the controller button was turned off, and that button then turned itself back on. A direction now lets go of the controller, the same moment that used to happen when the button was clicked, and it does not take the controller again.
+
 ## [5.0.78] - 2026-11-22
 
 ### Fixed
