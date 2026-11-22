@@ -573,29 +573,6 @@ class DriveMotion:
             self._stop.wait(0.1)
 
 
-async def flush_like_disconnect(client: Any) -> None:
-    """Do the robot half of pressing Disconnect.
-
-    A held direction is stored. The wheels turn when Disconnect is pressed.
-    That press sends working_state 0 and clears the controller flag.
-    """
-    await sleep_from_control(client)
-    try:
-        client._controller_acquired = False  # noqa: SLF001
-    except Exception:
-        pass
-
-
-async def arm_for_direction(client: Any) -> None:
-    """Take the controller briefly so the next direction can be stored."""
-    try:
-        client._controller_acquired = False  # noqa: SLF001
-    except Exception:
-        pass
-    await client.get_controller()
-    await wake_for_control(client)
-
-
 async def publish_velocity(client: Any, linear: float, angular: float) -> None:
     payload = {"vel": linear, "rev": angular}
     await publish_quick(client, "cmd_vel", payload)
@@ -605,11 +582,11 @@ async def publish_velocity(client: Any, linear: float, angular: float) -> None:
 
 
 async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
-    """Store the latest direction, then press Disconnect for the robot.
+    """Keep publishing the held direction.
 
-    Watching the pad showed the robot only moves when Disconnect is pressed.
-    Connect alone leaves the direction sitting there. Each held pulse arms
-    the controller, sends the speed, then runs that same Disconnect.
+    The page presses the real Connect/Disconnect request that makes the robot
+    move. This only stores the speed on the session. Re-arming here after a
+    Disconnect cancelled the movement before the wheels turned.
     """
     motion = state.get("motion")
     if not isinstance(motion, DriveMotion):
@@ -620,13 +597,9 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
         if not state.get("drive_edge_active"):
             return
         await publish_velocity(client, 0.0, 0.0)
-        await flush_like_disconnect(client)
         state["drive_edge_active"] = False
         state["drive_setup_sent"] = False
         state["manual_drive"] = False
-        # Keep the button on Connected so the next press can drive again.
-        state["hold_controller"] = True
-        state["control_session"] = True
         log("Drive: stop")
         return
     if not state.get("drive_setup_sent"):
@@ -634,14 +607,11 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
         await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
         await publish_quick(client, "emergency_unlock", {})
         state["drive_setup_sent"] = True
-    await arm_for_direction(client)
     await publish_velocity(client, linear, angular)
-    # This is the press that makes the robot move.
-    await flush_like_disconnect(client)
     held = (linear, angular)
     if state.get("drive_announced") != held:
         state["drive_announced"] = held
-        log(f"Drive: disconnect flush vel={linear:.2f} rev={angular:.2f}")
+        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
     state["drive_edge_active"] = True
     state["hold_controller"] = True
     state["control_session"] = True
@@ -651,7 +621,7 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
 
 
 async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any]) -> None:
-    """Carry out a held direction. The page answers first; this does the work."""
+    """Keep the held direction on the session while the page toggles Connect."""
     while True:
         motion = state.get("motion")
         if not isinstance(motion, DriveMotion):
@@ -668,8 +638,7 @@ async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any
         except Exception as exc:  # noqa: BLE001
             log(f"drive apply failed: {exc}")
             state["drive_error"] = str(exc)
-        # Leave a short gap so Disconnect can finish before the next arm.
-        await asyncio.sleep(0.35)
+        await asyncio.sleep(0.12)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:

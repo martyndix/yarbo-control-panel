@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.87] - 2026-11-22
+
+### Fixed
+
+- Holding a direction now presses the same Connect/Disconnect request as the button. The agent was re-arming right after Disconnect, which cancelled the move before the wheels turned. The pad stores the speed, then fires that button request and leaves it alone.
+
 ## [5.0.86] - 2026-11-22
 
 ### Fixed
