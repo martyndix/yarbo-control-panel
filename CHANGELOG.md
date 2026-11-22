@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.80] - 2026-11-22
+
+### Fixed
+
+- The D-pad moves the robot while the direction is held. Turning the controller off was the only command the robot treated as a release, so the machine waited for that click and the button then came back on. A direction now uses that same release, and a late reply cannot turn the button back on.
+
 ## [5.0.79] - 2026-11-22
 
 ### Fixed

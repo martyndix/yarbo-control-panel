@@ -537,6 +537,24 @@ class DriveMotion:
                 self._logged = now
                 log(f"drive {cmd} failed: {exc}")
 
+    def _release_publish(self, cmd: str, payload: dict[str, Any]) -> None:
+        """Publish the way the controller button does when it is turned off.
+
+        That click is compressed set_working_state 0, and it is the moment
+        the robot actually moves. A plain copy of the same command does not.
+        """
+        try:
+            sync = getattr(self.client, "_publish_sync", None)
+            if callable(sync):
+                sync(cmd, payload, False)
+                return
+            self._publish(cmd, payload)
+        except Exception as exc:  # noqa: BLE001
+            now = time.time()
+            if now - self._logged > 1.0:
+                self._logged = now
+                log(f"drive {cmd} failed: {exc}")
+
     def _run(self) -> None:
         setup = False
         zeros_left = 0
@@ -579,13 +597,12 @@ class DriveMotion:
                 if held != self._announced:
                     self._announced = held
                     log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-            # The robot stores a direction while the controller is held and
-            # only moves when that hold is let go. Clicking Connected off
-            # sends set_working_state 0, which is why the robot then moved
-            # and the button turned itself back on. Let go with every
-            # direction, and do not take the controller again.
-            self._try_publish("cmd_vel", {"vel": linear, "rev": angular})
-            self._try_publish("set_working_state", {"state": 0})
+            # The robot stores a direction and moves when the controller
+            # button is turned off. That click publishes through _publish_sync.
+            # Do the same publish here, with every direction, so the finger
+            # does not have to leave the pad for the robot to move.
+            self._release_publish("cmd_vel", {"vel": linear, "rev": angular})
+            self._release_publish("set_working_state", {"state": 0})
             if not moving:
                 zeros_left -= 1
                 if zeros_left == 0:

@@ -496,6 +496,7 @@ let lightsOn = false;
 let lightsRequest = 0;
 let controllerRequest = 0;
 let holdController = false;
+let controllerOffUntil = 0;
 let controlAwake = false;
 let onChargePad = false;
 let driveBlockedReason = null;
@@ -762,7 +763,13 @@ function applyLightsStateFromStatus(data) {
 
 function applyControllerStateFromStatus(data) {
     if (typeof data?.hold_controller === 'boolean') {
-        holdController = data.hold_controller;
+        // Turning the controller off used to bounce straight back to
+        // Connected when a direction or a status poll arrived late.
+        if (data.hold_controller && Date.now() < controllerOffUntil) {
+            holdController = false;
+        } else {
+            holdController = data.hold_controller;
+        }
         try {
             localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
         } catch {
@@ -929,6 +936,7 @@ async function toggleController(button) {
     await stopDriveIfHeld();
     const nextOn = !holdController;
     const action = nextOn ? 'controller_on' : 'controller_off';
+    controllerOffUntil = nextOn ? 0 : Date.now() + 8000;
     const requestId = ++controllerRequest;
     holdController = nextOn;
     try {
@@ -18255,7 +18263,7 @@ async function sendDrive(linear, angular, enterManual = false) {
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
             return false;
         }
-        if (typeof data.hold_controller === 'boolean') {
+        if (data.hold_controller === false) {
             applyControllerStateFromStatus(data);
             updateControllerTile();
         }

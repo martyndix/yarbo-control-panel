@@ -115,6 +115,7 @@ $motionAt = strpos($agent, 'class DriveMotion');
 $queueAt = strpos($agent, 'def queue_drive');
 $motionFn = substr($agent, (int) $motionAt, (int) $queueAt - (int) $motionAt);
 assert_true(str_contains($motionFn, 'set_working_state", {"state": 0}'), 'a direction lets go of the controller so the robot will move');
+assert_true(str_contains($motionFn, '_publish_sync'), 'a direction uses the same publish as turning the controller off');
 assert_true(!str_contains($motionFn, 'get_controller'), 'a direction does not grab the controller again');
 assert_true(!str_contains($motionFn, 'smart_home'), 'a direction does not hold the robot awake');
 assert_true(str_contains($motionFn, 'publish_now'), 'a direction stays on the cloud session that is already up');
