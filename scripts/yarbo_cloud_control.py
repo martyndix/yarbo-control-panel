@@ -253,34 +253,24 @@ class YarboCloudControlClient:
             self._controller_acquired = True
 
     def publish_now(self, cmd: str, payload: dict[str, Any]) -> None:
-        """Queue a command on the cloud session that is already connected.
+        """Queue a direction on the same session, in the same form, as Dock.
 
-        A direction is repeated many times a second. The normal publish path
-        asks the SDK which broker to use, and that question can close the
-        live session and open another one. Dock stays on the session that is
-        already up. A direction has to do the same, or the robot never sees it.
+        Dock's recharge command is plain JSON. A direction was compressed,
+        and this robot ignores that, so the pad could say Forward while the
+        machine never moved. Stay on the session that is already up.
         """
         sdk = self._require_sdk()
         chosen = None
         for mqtt in (getattr(sdk, "_new_mqtt", None), getattr(sdk, "_legacy_mqtt", None)):
-            client = getattr(mqtt, "_client", None) if mqtt is not None else None
-            if client is not None and getattr(mqtt, "is_connected", False):
-                chosen = client
+            if mqtt is not None and getattr(mqtt, "is_connected", False):
+                chosen = mqtt
                 break
         if chosen is None:
-            self._publish_raw(sdk, cmd, payload)
-            return
-        from yarbo_robot_sdk.codec import encode_mqtt_payload
-
+            chosen = sdk._ensure_mqtt_for(self.sn)
         topic = f"snowbot/{self.sn}/app/{cmd}"
-        info = chosen.publish(topic, encode_mqtt_payload(payload if payload else {}), qos=0)
-        rc = getattr(info, "rc", 0)
-        try:
-            failed = int(rc) != 0
-        except (TypeError, ValueError):
-            failed = False
-        if failed:
-            raise RuntimeError(f"{cmd} was not accepted by the cloud session ({rc})")
+        # Same bytes Dock's cmd_recharge uses: plain JSON, not zlib.
+        body = json.dumps(payload if payload else {}, separators=(",", ":")).encode("utf-8")
+        chosen.publish(topic, body)
 
     async def publish_and_wait(
         self,

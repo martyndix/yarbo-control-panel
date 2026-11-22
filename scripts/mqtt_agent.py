@@ -561,9 +561,6 @@ class DriveMotion:
             elif zeros_left <= 0:
                 self._stop.wait(0.05)
                 continue
-            if not getattr(self.client, "is_connected", True):
-                self._stop.wait(0.1)
-                continue
             if moving and not setup:
                 raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
                 # Live view holds the robot in manual camera check. In that

@@ -119,6 +119,11 @@ assert_true(str_contains($motionFn, 'publish_now'), 'a direction stays on the cl
 assert_true(!str_contains($agent, 'for _ in range(3):'), 'a direction does not wait out several publishes before answering');
 $cloud = (string) file_get_contents($root . '/scripts/yarbo_cloud_control.py');
 assert_true(str_contains($cloud, 'def publish_now'), 'a direction does not reopen the cloud session');
+$nowAt = strpos($cloud, 'def publish_now');
+$nowEnd = strpos($cloud, 'async def publish_and_wait', (int) $nowAt);
+$nowFn = substr($cloud, (int) $nowAt, (int) $nowEnd - (int) $nowAt);
+assert_true(str_contains($nowFn, 'json.dumps'), 'a direction is plain JSON, the same form as Dock');
+assert_true(!str_contains($nowFn, 'encode_mqtt_payload'), 'a direction is not compressed, which this robot ignores');
 assert_true(str_contains($cloud, 'def _publish_raw'), 'a direction is published without data_feedback');
 assert_true(str_contains($cloud, '"cmd_vel"'), 'cmd_vel does not wait for data_feedback');
 $drivePhp = (string) file_get_contents($root . '/public/api/drive.php');

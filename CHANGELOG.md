@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.78] - 2026-11-22
+
+### Fixed
+
+- The D-pad now sends a direction in the same plain form Dock uses. The direction was compressed, and this robot ignores that, so the pad could say Forward while the machine never moved.
+
 ## [5.0.77] - 2026-11-22
 
 ### Fixed
