@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.83] - 2026-11-22
+
+### Fixed
+
+- The D-pad moves the robot while a direction is held. The robot was only moving when Connect was pressed or the controller was turned off. Each direction now does one of those two actions, on the same path as the button.
+
 ## [5.0.82] - 2026-11-22
 
 ### Fixed

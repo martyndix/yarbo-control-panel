@@ -538,39 +538,7 @@ class DriveMotion:
                 self._logged = now
                 log(f"drive {cmd} failed: {exc}")
 
-    def _release_publish(self, cmd: str, payload: dict[str, Any], wait: bool = False) -> None:
-        """Publish the way the Connect button does.
-
-        Connect sends get_controller and then wakes the robot. A direction
-        was stored until that button was pressed. wait=True is required for
-        get_controller, because that is the publish Connect uses.
-        """
-        try:
-            sync = getattr(self.client, "_publish_sync", None)
-            if callable(sync):
-                sync(cmd, payload, wait)
-                return
-            self._publish(cmd, payload)
-        except Exception as exc:  # noqa: BLE001
-            now = time.time()
-            if now - self._logged > 1.0:
-                self._logged = now
-                log(f"drive {cmd} failed: {exc}")
-
-    def _like_connect(self) -> None:
-        """Do what the Connect button does, without anyone pressing it."""
-        try:
-            self.client._controller_acquired = False  # noqa: SLF001
-        except Exception:
-            pass
-        self._release_publish("get_controller", {}, True)
-        self._release_publish("set_working_state", {"state": 1, "source": "smart_home"}, True)
-        self.state["hold_controller"] = True
-        self.state["control_session"] = True
-        self.state["dock_release"] = False
-
     def _run(self) -> None:
-        setup = False
         zeros_left = 0
         while not self._stop.is_set():
             linear, angular, updated = self._snapshot()
@@ -585,45 +553,76 @@ class DriveMotion:
                 moving = False
                 zeros_left = 3
             if not moving and not self.state.get("manual_drive"):
-                setup = False
                 self._announced = None
             if moving:
                 zeros_left = 3
                 self.state["drive_busy_until"] = time.time() + 1.5
-            elif zeros_left <= 0:
-                self._stop.wait(0.05)
-                continue
-            if moving and not setup:
-                raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
-                # Live view holds the robot in manual camera check. Leave it
-                # for the hold. The camera heartbeat turns it back on after
-                # the finger comes up.
-                self._try_publish("set_manul_camera_check", {"state": 0, "overtime": 0})
-                self._try_publish("wireless_charging_cmd", {"cmd": 0})
-                if charging_status_of(raw) > 0:
-                    self.state["pad_released"] = True
-                    log("Drive: disabled wireless charge so the robot can leave the pad")
-                self._try_publish("emergency_unlock", {})
-                setup = True
-                self.state["drive_setup_sent"] = True
-            if moving:
                 held = (linear, angular)
                 if held != self._announced:
                     self._announced = held
                     log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-            # Connect is what makes the robot carry out a stored direction.
-            # Send the direction, then do that same connect. A stop is carried
-            # out the same way, and the controller stays on.
-            self._release_publish("cmd_vel", {"vel": linear, "rev": angular})
-            self._like_connect()
-            if not moving:
+            elif zeros_left <= 0:
+                self._stop.wait(0.05)
+                continue
+            else:
                 zeros_left -= 1
                 if zeros_left == 0:
                     log("Drive: stop")
                     self._announced = None
                     self.state["manual_drive"] = False
-                    setup = False
             self._stop.wait(0.1)
+
+
+async def drive_apply_loop(client: Any, state: dict[str, Any]) -> None:
+    """Carry out the latest direction the way the controller button does.
+
+    The robot stores a direction and moves when Connect is pressed or when
+    the controller is turned off. Sitting in either state does nothing.
+    Each pass sends the direction, then does one of those two button actions.
+    """
+    edge = 0
+    armed = False
+    while True:
+        motion = state.get("motion")
+        if not isinstance(motion, DriveMotion):
+            await asyncio.sleep(0.1)
+            continue
+        linear, angular, _updated = motion._snapshot()
+        moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+        if not moving and not state.get("manual_drive"):
+            armed = False
+            edge = 0
+            await asyncio.sleep(0.05)
+            continue
+        try:
+            if moving and not armed:
+                await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
+                await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
+                await publish_quick(client, "emergency_unlock", {})
+                armed = True
+            await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular})
+            if edge == 0:
+                await sleep_from_control(client)
+                edge = 1
+            else:
+                try:
+                    client._controller_acquired = False  # noqa: SLF001
+                except Exception:
+                    pass
+                await client.get_controller()
+                await wake_for_control(client)
+                edge = 0
+            # Leave the button on Connected. The robot state changes underneath.
+            state["hold_controller"] = True
+            state["control_session"] = True
+            state["dock_release"] = False
+        except Exception as exc:  # noqa: BLE001
+            log(f"drive apply failed: {exc}")
+        if not moving:
+            state["manual_drive"] = False
+            armed = False
+            edge = 0
+        await asyncio.sleep(0.25)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
@@ -1741,6 +1740,7 @@ async def amain() -> int:
     asyncio.create_task(connect_mqtt(client))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
+    asyncio.create_task(drive_apply_loop(client, state))
     asyncio.create_task(vestaboard_tick_loop())
 
     async with server:
