@@ -107,6 +107,10 @@ assert_true(str_contains($camera, 'LINK_CHECK_S = 30'), 'live view does not ask 
 assert_true(str_contains($agent, '_control_waiters'), 'dock and lights go ahead of a status read');
 assert_true(str_contains($agent, 'async def publish_quick'), 'a direction is sent without waiting out a camera publish');
 assert_true(str_contains($agent, 'wait=False'), 'a direction does not wait for an acknowledgement');
+assert_true(str_contains($agent, 'async def motion_loop'), 'a direction is sent after the page is answered');
+assert_true(str_contains($agent, 'def queue_drive'), 'a direction answers before it is published');
+assert_true(str_contains($agent, 'motion.put_nowait'), 'a direction does not wait for the robot before answering');
+assert_true(!str_contains($agent, 'for _ in range(3):'), 'a direction does not wait out several publishes before answering');
 $cloud = (string) file_get_contents($root . '/scripts/yarbo_cloud_control.py');
 assert_true(str_contains($cloud, 'def _publish_raw'), 'a direction is published without data_feedback');
 assert_true(str_contains($cloud, '"cmd_vel"'), 'cmd_vel does not wait for data_feedback');
@@ -131,6 +135,11 @@ assert_true(str_contains($appJs, 'function pictureSocketUrl'), 'pictures open on
 assert_true(str_contains($appJs, 'Number(location.port) + 1'), 'the picture port is the one above the panel');
 assert_true(str_contains($appJs, 'leaves the pictures open'), 'a held direction leaves the pictures open');
 assert_true(str_contains($appJs, "fetch('/api/drive.php'"), 'a direction is an ordinary panel request');
+$sendAt = strpos($appJs, 'async function sendDrive');
+$sendEnd = strpos($appJs, 'async function flushDriveQueue', (int) $sendAt);
+$sendFn = substr($appJs, (int) $sendAt, (int) $sendEnd - (int) $sendAt);
+assert_true(!str_contains($sendFn, 'AbortSignal.timeout'), 'the page does not give up on a direction before the panel answers');
+assert_true(!str_contains($sendFn, 'Drive did not answer'), 'a direction is not reported as unanswered while the panel still has it');
 $fetchAt = strpos($appJs, 'async function fetchStatus');
 $fetchEnd = strpos($appJs, 'function cameraModeUrl', (int) $fetchAt);
 $fetchFn = substr($appJs, (int) $fetchAt, (int) $fetchEnd - (int) $fetchAt);

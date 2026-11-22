@@ -485,6 +485,99 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
         return False
 
 
+def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
+    """Accept a direction and answer before any publish.
+
+    Dock already returns as soon as its command is handed to the session.
+    A direction used to stay on that session until cmd_vel finished, and
+    with the cameras publishing that was long enough for the page to give
+    up. The robot still receives the latest velocity from motion_loop.
+    """
+    linear = float(req.get("linear") or 0)
+    angular = float(req.get("angular") or 0)
+    moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+    if not state.get("hold_controller"):
+        return {
+            "ok": False,
+            "error": "Connect the Controller first, then use the drive pad.",
+        }
+    warning = None
+    raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
+    if moving:
+        state["dock_release"] = False
+        state["work_hold"] = False
+        state["work_latched"] = False
+        state["control_session"] = True
+        state["manual_drive"] = True
+        state["last_keepalive"] = time.time()
+        warning = dock_block_reason(raw) or motion_fault_warning(raw)
+        if warning:
+            log(f"Drive warning: {warning}")
+    # Camera keep-alives must not sit in front of a held direction.
+    state["drive_busy_until"] = time.time() + 1.5
+    job = {"linear": linear, "angular": angular}
+    motion = state.get("motion")
+    if isinstance(motion, asyncio.Queue):
+        motion.put_nowait(job)
+    else:
+        try:
+            asyncio.get_running_loop().create_task(_drive_once(client, state, linear, angular))
+        except RuntimeError:
+            log("drive has no motion queue")
+    out: dict[str, Any] = {
+        "ok": True,
+        "op": "drive",
+        "linear": linear,
+        "angular": angular,
+        **state_flags(state, client),
+    }
+    if warning:
+        out["warning"] = warning
+    return out
+
+
+async def _drive_once(client: Any, state: dict[str, Any], linear: float, angular: float) -> None:
+    await _send_drive_velocity(client, state, linear, angular)
+
+
+async def _send_drive_velocity(client: Any, state: dict[str, Any], linear: float, angular: float) -> None:
+    moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+    state["drive_busy_until"] = time.time() + 1.5
+    if moving and not state.get("drive_setup_sent"):
+        await publish_quick(
+            client,
+            "set_working_state",
+            {"state": 1, "source": "app"},
+            timeout=1.0,
+        )
+        raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
+        if charging_status_of(raw) > 0 and not state.get("pad_released"):
+            if await publish_quick(client, "wireless_charging_cmd", {"cmd": 0}, timeout=1.0):
+                state["pad_released"] = True
+                log("Drive: disabled wireless charge so the robot can leave the pad")
+        await publish_quick(client, "emergency_unlock", {}, timeout=1.0)
+        state["drive_setup_sent"] = True
+    await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular}, timeout=1.0)
+
+
+async def motion_loop(client: Any, state: dict[str, Any]) -> None:
+    """Send the latest direction without holding the command session."""
+    queue: asyncio.Queue = state["motion"]
+    while True:
+        job = await queue.get()
+        while True:
+            try:
+                job = queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        linear = float(job.get("linear") or 0)
+        angular = float(job.get("angular") or 0)
+        try:
+            await _send_drive_velocity(client, state, linear, angular)
+        except Exception as exc:  # noqa: BLE001
+            log(f"drive motion failed: {exc}")
+
+
 async def wake_for_control(client: Any) -> None:
     """Leave idle so lights/actions are not dropped after ~0.5s (no voice prompt)."""
     await publish_quick(
@@ -1032,67 +1125,10 @@ async def handle_request(
             }
 
         if op == "drive":
-            linear = float(req.get("linear") or 0)
-            angular = float(req.get("angular") or 0)
-            moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-            if not state.get("hold_controller"):
-                return {
-                    "ok": False,
-                    "error": "Connect the Controller first, then use the drive pad.",
-                }
             # Never get_controller here — that re-triggers "app controller connected".
-            warning = None
-            if moving:
-                state["dock_release"] = False
-                raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
-                # A prior Stop/plan used work_hold; drive needs the control keepalive.
-                state["work_hold"] = False
-                state["work_latched"] = False
-                state["control_session"] = True
-                # Tell the robot to move before any session setup. Setup used to
-                # run first and did not finish while the cameras were publishing,
-                # so the page gave up and the robot never moved.
-                sent = 0
-                for _ in range(3):
-                    if await publish_quick(client, "cmd_vel", {"vel": linear, "rev": angular}):
-                        sent += 1
-                if sent == 0:
-                    return {
-                        "ok": False,
-                        "error": "Drive did not reach the robot. Hold the direction again.",
-                        "op": "drive",
-                    }
-                if not state.get("manual_drive"):
-                    await publish_quick(
-                        client,
-                        "set_working_state",
-                        {"state": 1, "source": "app"},
-                    )
-                    if charging_status_of(raw) > 0 and not state.get("pad_released"):
-                        if await publish_quick(client, "wireless_charging_cmd", {"cmd": 0}):
-                            state["pad_released"] = True
-                            log("Drive: disabled wireless charge so the robot can leave the pad")
-                    await publish_quick(client, "emergency_unlock", {})
-                    state["manual_drive"] = True
-                    state["last_keepalive"] = time.time()
-                    warning = dock_block_reason(raw)
-                    if warning is None:
-                        warning = motion_fault_warning(raw)
-                    if warning:
-                        log(f"Drive warning: {warning}")
-            else:
-                await publish_quick(client, "cmd_vel", {"vel": 0.0, "rev": 0.0})
-
-            out = {
-                "ok": True,
-                "op": "drive",
-                "linear": linear,
-                "angular": angular,
-                **state_flags(state, client),
-            }
-            if warning:
-                out["warning"] = warning
-            return out
+            # Answer before publishing. Waiting on cmd_vel is what made the page
+            # say the direction did not answer while Dock still worked.
+            return queue_drive(client, req, state)
 
         if op == "buzzer":
             if not state.get("hold_controller"):
@@ -1405,6 +1441,16 @@ async def handle_client(
 
             req_id = req.get("id") if isinstance(req, dict) else None
             op = str(req.get("op") or "") if isinstance(req, dict) else ""
+            # A direction answers before any other command finishes. Dock can
+            # wait its turn; a held direction cannot, or the page gives up
+            # while the cameras are still publishing.
+            if op == "drive" and isinstance(req, dict):
+                resp = queue_drive(client, req, state)
+                if req_id is not None:
+                    resp["id"] = req_id
+                writer.write((json.dumps(resp, separators=(",", ":")) + "\n").encode())
+                await writer.drain()
+                continue
             control = op in _CONTROL_OPS
             driving = op in {"drive", "stop"}
             vision = isinstance(req, dict) and op == "publish" and str(req.get("session") or "") == "vision"
@@ -1581,6 +1627,8 @@ async def amain() -> int:
         "quiet_until": 0.0,
         "last_keepalive": 0.0,
         "keepalive_soon": False,
+        "drive_setup_sent": False,
+        "motion": asyncio.Queue(),
     }
     client = YarboCloudControlClient(email=email, password=password, sn=serial)
 
@@ -1597,6 +1645,7 @@ async def amain() -> int:
     log(f"Agent listening on {sockets} (cloud MQTT SN={serial} email={email})")
 
     asyncio.create_task(connect_mqtt(client))
+    asyncio.create_task(motion_loop(client, state))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())

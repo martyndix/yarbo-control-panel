@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.73] - 2026-11-22
+
+### Fixed
+
+- A direction answers the same way Dock does while the cameras are showing. The page no longer gives up before the panel has accepted it, and the robot is sent the latest direction after that answer.
+
 ## [5.0.72] - 2026-11-22
 
 ### Fixed

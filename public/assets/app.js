@@ -18237,24 +18237,21 @@ function noteDriveReply(event, enterManual) {
     if (enterManual) manualModeEntered = true;
 }
 
-async function fetchDrive(linear, angular, enterManual, signal) {
+async function fetchDrive(linear, angular, enterManual) {
     const res = await fetch('/api/drive.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linear, angular, enter_manual: enterManual }),
-        signal,
     });
     return parseJsonResponse(res);
 }
 
 async function sendDrive(linear, angular, enterManual = false) {
     // A held direction is an ordinary request and leaves the pictures open.
-    const signal = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-        ? AbortSignal.timeout(5000)
-        : undefined;
+    // The page waits for the panel to accept it, the same way Dock does.
     const done = linear === 0 && angular === 0;
     try {
-        const data = await fetchDrive(linear, angular, enterManual, signal);
+        const data = await fetchDrive(linear, angular, enterManual);
         if (done) restorePicturesAfterDrive();
         if (!data.ok) {
             showToast(data.error || 'Drive command failed', 'error');
@@ -18269,8 +18266,7 @@ async function sendDrive(linear, angular, enterManual = false) {
         return true;
     } catch (err) {
         if (done) restorePicturesAfterDrive();
-        const timedOut = err && (err.name === 'TimeoutError' || err.name === 'AbortError');
-        showToast(timedOut ? 'Drive did not answer. Hold the direction again.' : (err.message || 'Network error'), 'error');
+        showToast((err && err.message) || 'Network error', 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Error';
         return false;
     }
