@@ -506,6 +506,7 @@ class DriveMotion:
         self._stop = threading.Event()
         self._logged = 0.0
         self._announced: tuple[float, float] | None = None
+        self._edge = 0
         self._thread = threading.Thread(target=self._run, name="yarbo-drive", daemon=True)
         self._thread.start()
 
@@ -597,12 +598,21 @@ class DriveMotion:
                 if held != self._announced:
                     self._announced = held
                     log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-            # The robot stores a direction and moves when the controller
-            # button is turned off. That click publishes through _publish_sync.
-            # Do the same publish here, with every direction, so the finger
-            # does not have to leave the pad for the robot to move.
+            # The robot stores a direction and moves only when the controller
+            # state changes. Connect is the change to awake. Turning it off is
+            # the change to idle. Sitting in either state does nothing, which
+            # is why the pad waited for that button. Flip the state with
+            # every direction.
             self._release_publish("cmd_vel", {"vel": linear, "rev": angular})
-            self._release_publish("set_working_state", {"state": 0})
+            if moving:
+                self._edge = 0 if self._edge else 1
+                if self._edge:
+                    self._release_publish("set_working_state", {"state": 1, "source": "smart_home"})
+                else:
+                    self._release_publish("set_working_state", {"state": 0})
+            else:
+                self._edge = 0
+                self._release_publish("set_working_state", {"state": 0})
             if not moving:
                 zeros_left -= 1
                 if zeros_left == 0:
@@ -627,20 +637,13 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     warning = None
     raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
     if moving:
-        # Leave the controller released. Holding it is what made the robot
-        # wait until the button was turned off, then turn the button back on.
-        state["hold_controller"] = False
-        state["need_controller"] = False
-        state["dock_release"] = True
+        # Do not change the controller button. The pad flips the robot's
+        # own awake state, and reporting that as Connected made the button
+        # drop back to Connect after every press.
         state["work_hold"] = False
         state["work_latched"] = False
-        state["control_session"] = False
         state["manual_drive"] = True
         state["last_keepalive"] = time.time()
-        try:
-            client._controller_acquired = False  # noqa: SLF001
-        except Exception:
-            pass
         warning = dock_block_reason(raw) or motion_fault_warning(raw)
         if warning:
             log(f"Drive warning: {warning}")

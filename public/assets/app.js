@@ -18263,10 +18263,6 @@ async function sendDrive(linear, angular, enterManual = false) {
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
             return false;
         }
-        if (data.hold_controller === false) {
-            applyControllerStateFromStatus(data);
-            updateControllerTile();
-        }
         if (data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
             sessionStorage.setItem('yarbo_drive_dock_warn', '1');
             showToast(data.warning, 'error');
