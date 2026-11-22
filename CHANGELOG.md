@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.76] - 2026-11-22
+
+### Fixed
+
+- The D-pad moves the robot while live view is up. Live view holds the robot in camera check, and in that mode it ignores a direction. A held direction steps out of camera check, the same step Dock needed before it would go home, and live view turns camera check back on when the direction is released.
+
 ## [5.0.75] - 2026-11-22
 
 ### Fixed

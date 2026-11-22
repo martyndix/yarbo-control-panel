@@ -528,6 +528,15 @@ class DriveMotion:
             return
         self.client._publish_sync(cmd, payload, False)
 
+    def _try_publish(self, cmd: str, payload: dict[str, Any]) -> None:
+        try:
+            self._publish(cmd, payload)
+        except Exception as exc:  # noqa: BLE001
+            now = time.time()
+            if now - self._logged > 1.0:
+                self._logged = now
+                log(f"drive {cmd} failed: {exc}")
+
     def _run(self) -> None:
         setup = False
         zeros_left = 0
@@ -552,40 +561,43 @@ class DriveMotion:
             elif zeros_left <= 0:
                 self._stop.wait(0.05)
                 continue
-            try:
-                if not getattr(self.client, "is_connected", True):
-                    self._stop.wait(0.1)
-                    continue
-                if moving and not setup:
-                    raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
-                    self._publish("wireless_charging_cmd", {"cmd": 0})
-                    if charging_status_of(raw) > 0:
-                        self.state["pad_released"] = True
-                        log("Drive: disabled wireless charge so the robot can leave the pad")
-                    self._publish("emergency_unlock", {})
-                    setup = True
-                    self.state["drive_setup_sent"] = True
-                if moving:
-                    # Dock wakes with smart_home. This firmware stays awake for
-                    # about half a second, so every speed command wakes it again.
-                    # One wake at the start of a hold leaves the rest ignored.
-                    self._publish("set_working_state", {"state": 1, "source": "smart_home"})
-                    held = (linear, angular)
-                    if held != self._announced:
-                        self._announced = held
-                        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-                self._publish("cmd_vel", {"vel": linear, "rev": angular})
-                self._publish("cmd_vel", {"vel": linear, "rev": angular})
-                if not moving:
-                    zeros_left -= 1
-                    if zeros_left == 0:
-                        log("Drive: stop")
-                        self._announced = None
-            except Exception as exc:  # noqa: BLE001
-                now = time.time()
-                if now - self._logged > 1.0:
-                    self._logged = now
-                    log(f"drive motion failed: {exc}")
+            if not getattr(self.client, "is_connected", True):
+                self._stop.wait(0.1)
+                continue
+            if moving and not setup:
+                raw = self.state.get("last_raw") if isinstance(self.state.get("last_raw"), dict) else None
+                # Live view holds the robot in manual camera check. In that
+                # mode it ignores the d-pad, the same way it used to ignore
+                # Dock. Step out of it for the hold. The camera heartbeat
+                # turns it back on after the finger comes up.
+                self._try_publish("set_manul_camera_check", {"state": 0, "overtime": 0})
+                self._try_publish("smart_vision_control", {"state": 0})
+                self._try_publish("wireless_charging_cmd", {"cmd": 0})
+                if charging_status_of(raw) > 0:
+                    self.state["pad_released"] = True
+                    log("Drive: disabled wireless charge so the robot can leave the pad")
+                self._try_publish("emergency_unlock", {})
+                self._try_publish("set_working_state", {"state": "manual"})
+                setup = True
+                self.state["drive_setup_sent"] = True
+            if moving:
+                # A late camera heartbeat can put the robot back into
+                # camera check. Keep that mode off for the whole hold.
+                self._try_publish("set_manul_camera_check", {"state": 0, "overtime": 0})
+                # This firmware stays awake for about half a second.
+                # Wake again with every speed command, the same wake Dock uses.
+                self._try_publish("set_working_state", {"state": 1, "source": "smart_home"})
+                held = (linear, angular)
+                if held != self._announced:
+                    self._announced = held
+                    log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
+            self._try_publish("cmd_vel", {"vel": linear, "rev": angular})
+            self._try_publish("cmd_vel", {"vel": linear, "rev": angular})
+            if not moving:
+                zeros_left -= 1
+                if zeros_left == 0:
+                    log("Drive: stop")
+                    self._announced = None
             self._stop.wait(0.1)
 
 

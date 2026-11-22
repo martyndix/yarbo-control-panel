@@ -275,7 +275,11 @@ class YarboCloudControlClient:
         topic = f"snowbot/{self.sn}/app/{cmd}"
         info = chosen.publish(topic, encode_mqtt_payload(payload if payload else {}), qos=0)
         rc = getattr(info, "rc", 0)
-        if rc not in (0, None):
+        try:
+            failed = int(rc) != 0
+        except (TypeError, ValueError):
+            failed = False
+        if failed:
             raise RuntimeError(f"{cmd} was not accepted by the cloud session ({rc})")
 
     async def publish_and_wait(
