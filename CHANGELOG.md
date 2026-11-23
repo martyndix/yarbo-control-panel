@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.90] - 2026-11-23
+
+### Fixed
+
+- A held direction no longer takes the controller again right after Disconnect. That re-arm cancelled the move within about a tenth of a second, so the robot only moved when you toggled Connect by hand. Disconnect is now left alone long enough for the wheels to turn.
+
 ## [5.0.89] - 2026-11-23
 
 ### Fixed

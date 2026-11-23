@@ -120,6 +120,8 @@ $applyFn = substr($agent, (int) $applyAt, (int) $applyEnd - (int) $applyAt);
 assert_true(str_contains($applyFn, 'publish_velocity'), 'a held direction puts the speed on the wire first');
 assert_true(str_contains($applyFn, 'disconnect_after_direction'), 'Disconnect runs only after the speed is published');
 assert_true(str_contains($applyFn, 'sleep_from_control'), 'Disconnect uses the same working_state off as the button');
+assert_true(str_contains($applyFn, 'DRIVE_DISCONNECT_SETTLE_S'), 'Disconnect is left alone long enough for the wheels to turn');
+assert_true(str_contains($applyFn, 'Re-arming here cancelled the move'), 'a later pulse does not take the controller during that settle');
 assert_true(str_contains($agent, 'await carry_out_direction(client, state)'), 'the direction request waits for publish then Disconnect');
 assert_true(str_contains($agent, 'asyncio.create_task(drive_apply_loop'), 'a held direction keeps going while the finger is down');
 assert_true(str_contains($motionFn, 'publish_now') || str_contains($applyFn, 'publish_now'), 'a direction stays on the cloud session that is already up');

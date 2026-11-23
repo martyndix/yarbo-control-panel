@@ -615,22 +615,36 @@ async def disconnect_after_direction(client: Any) -> None:
         pass
 
 
+# After Disconnect, leave the robot alone this long. The next pad pulse used
+# to take the controller again within ~120ms and cancel the move.
+DRIVE_DISCONNECT_SETTLE_S = 1.6
+
+
 async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
     """Publish the held direction, then Disconnect so the robot moves.
 
     Order matters. Disconnect only carries out a speed that is already stored.
-    Camera keep-alives must not turn camera check back on during this.
+    After Disconnect, do not take the controller again until the settle time
+    ends — that re-arm is why the pad needed a manual toggle.
     """
     motion = state.get("motion")
     if not isinstance(motion, DriveMotion):
         return
     linear, angular, _updated = motion._snapshot()
     moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+    now = time.time()
+    since_flush = now - float(state.get("drive_flushed_at") or 0)
+    settling = since_flush < DRIVE_DISCONNECT_SETTLE_S
     if not moving:
         if not state.get("drive_edge_active"):
             return
+        if settling:
+            # Disconnect is still settling. Do not wake the robot again.
+            state["drive_busy_until"] = time.time() + 2.5
+            return
         await publish_velocity(client, 0.0, 0.0)
         await disconnect_after_direction(client)
+        state["drive_flushed_at"] = time.time()
         state["drive_edge_active"] = False
         state["drive_setup_sent"] = False
         state["manual_drive"] = False
@@ -638,27 +652,6 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
         state["control_session"] = True
         log("Drive: stop")
         return
-    # Leave camera check on every pulse. Live view used to turn it back on
-    # between pulses, and the robot only moved after the cameras stopped.
-    await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
-    if not state.get("drive_setup_sent"):
-        await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
-        await publish_quick(client, "emergency_unlock", {})
-        state["drive_setup_sent"] = True
-    # After a Disconnect the controller flag is clear. Take it again only so
-    # this speed can be stored, then Disconnect to carry it out.
-    if not getattr(client, "controller_acquired", False):
-        try:
-            client._controller_acquired = False  # noqa: SLF001
-        except Exception:
-            pass
-        await client.get_controller()
-        await wake_for_control(client)
-    await publish_velocity(client, linear, angular)
-    held = (linear, angular)
-    if state.get("drive_announced") != held:
-        state["drive_announced"] = held
-        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
     state["drive_edge_active"] = True
     state["hold_controller"] = True
     state["control_session"] = True
@@ -666,9 +659,27 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
     state["dock_release"] = False
     state["drive_busy_until"] = time.time() + 2.5
     state["last_keepalive"] = time.time()
-    now = time.time()
-    if now - float(state.get("drive_flushed_at") or 0) < 1.25:
+    if settling:
+        # Leave Disconnect alone. Re-arming here cancelled the move, and the
+        # wheels only turned when the button was toggled by hand.
         return
+    # Leave camera check. Live view used to turn it back on between pulses.
+    await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
+    if not state.get("drive_setup_sent"):
+        await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
+        await publish_quick(client, "emergency_unlock", {})
+        state["drive_setup_sent"] = True
+    try:
+        client._controller_acquired = False  # noqa: SLF001
+    except Exception:
+        pass
+    await client.get_controller()
+    await wake_for_control(client)
+    await publish_velocity(client, linear, angular)
+    held = (linear, angular)
+    if state.get("drive_announced") != held:
+        state["drive_announced"] = held
+        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
     await disconnect_after_direction(client)
     state["drive_flushed_at"] = time.time()
     state["drive_busy_until"] = time.time() + 2.5
@@ -687,17 +698,17 @@ async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any
         if not moving and not state.get("drive_edge_active"):
             await asyncio.sleep(0.05)
             continue
+        since_flush = time.time() - float(state.get("drive_flushed_at") or 0)
+        if since_flush < DRIVE_DISCONNECT_SETTLE_S:
+            await asyncio.sleep(DRIVE_DISCONNECT_SETTLE_S - since_flush)
+            continue
         try:
             async with lock:
                 await carry_out_direction(client, state)
         except Exception as exc:  # noqa: BLE001
             log(f"drive apply failed: {exc}")
             state["drive_error"] = str(exc)
-        # After Disconnect, wait before taking the controller again.
-        if time.time() - float(state.get("drive_flushed_at") or 0) < 1.0:
-            await asyncio.sleep(1.0)
-        else:
-            await asyncio.sleep(0.12)
+        await asyncio.sleep(0.05)
 
 
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
