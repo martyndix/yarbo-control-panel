@@ -581,6 +581,26 @@ async def publish_velocity(client: Any, linear: float, angular: float) -> None:
         await asyncio.to_thread(send_plain, "cmd_vel", payload)
 
 
+def drive_holds_session(state: dict[str, Any]) -> bool:
+    """True while a direction is being carried out.
+
+    Live view keeps sending set_manul_camera_check on. That puts the robot
+    back into camera check, and a held direction only moved after the
+    cameras were stopped. Skip those keep-alives for the hold.
+    """
+    if state.get("manual_drive") or state.get("drive_edge_active"):
+        return True
+    return time.time() < float(state.get("drive_busy_until") or 0)
+
+
+# Live-view keep-alives that put the robot back into camera check / vision.
+VISION_DRIVE_BLOCK_CMDS = frozenset({
+    "set_manul_camera_check",
+    "smart_vision_control",
+    "camera_toggle",
+})
+
+
 async def disconnect_after_direction(client: Any) -> None:
     """Run the robot half of the Disconnect button after cmd_vel is on the wire.
 
@@ -599,6 +619,7 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
     """Publish the held direction, then Disconnect so the robot moves.
 
     Order matters. Disconnect only carries out a speed that is already stored.
+    Camera keep-alives must not turn camera check back on during this.
     """
     motion = state.get("motion")
     if not isinstance(motion, DriveMotion):
@@ -617,8 +638,10 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
         state["control_session"] = True
         log("Drive: stop")
         return
+    # Leave camera check on every pulse. Live view used to turn it back on
+    # between pulses, and the robot only moved after the cameras stopped.
+    await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
     if not state.get("drive_setup_sent"):
-        await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
         await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
         await publish_quick(client, "emergency_unlock", {})
         state["drive_setup_sent"] = True
@@ -641,12 +664,14 @@ async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
     state["control_session"] = True
     state["manual_drive"] = True
     state["dock_release"] = False
+    state["drive_busy_until"] = time.time() + 2.5
     state["last_keepalive"] = time.time()
     now = time.time()
     if now - float(state.get("drive_flushed_at") or 0) < 1.25:
         return
     await disconnect_after_direction(client)
     state["drive_flushed_at"] = time.time()
+    state["drive_busy_until"] = time.time() + 2.5
     log(f"Drive: disconnect after vel={linear:.2f} rev={angular:.2f}")
 
 
@@ -1335,6 +1360,18 @@ async def handle_request(
             # Live view must not call get_controller. That announces
             # "app controller connected" and can pause a running job.
             if session_mode(req) == "vision":
+                # Live view repeats set_manul_camera_check about every 10s.
+                # That puts the robot back into camera check, and a held
+                # direction only moved after the cameras were stopped.
+                if cmd in VISION_DRIVE_BLOCK_CMDS and drive_holds_session(state):
+                    return {
+                        "ok": True,
+                        "op": "publish",
+                        "cmd": cmd,
+                        "session": "vision",
+                        "skipped": "drive",
+                        **state_flags(state, client),
+                    }
                 # A camera keep-alive must not sit on this session while a
                 # direction is waiting, and it must not hold the session for
                 # the whole publish timeout.
@@ -1609,13 +1646,14 @@ async def handle_client(
                     await asyncio.sleep(0.02)
                     waited += 0.02
             try:
-                if vision and (
-                    _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0)
-                ):
+                vision_cmd = str(req.get("cmd") or "") if isinstance(req, dict) else ""
+                if vision and (_drive_waiters > 0 or drive_holds_session(state)):
+                    # Do not take the lock for a camera keep-alive during drive.
+                    # Those keep-alives put the robot back into camera check.
                     resp = {
                         "ok": True,
                         "op": "publish",
-                        "cmd": str(req.get("cmd") or ""),
+                        "cmd": vision_cmd,
                         "session": "vision",
                         "skipped": "drive",
                     }

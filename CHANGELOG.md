@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.89] - 2026-11-23
+
+### Fixed
+
+- Driving with live view on now moves the robot. The camera keep-alive was turning camera check back on about every 10 seconds, which blocked motion until the cameras were stopped. A held direction leaves camera check off and those keep-alives step aside for the hold.
+
 ## [5.0.88] - 2026-11-22
 
 ### Fixed
