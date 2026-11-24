@@ -521,7 +521,8 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
 
 # The page repeats a held direction about eight times a second. A gap this
 # long means the page or its connection is gone, so the robot is stopped.
-DRIVE_STALE_S = 2.0
+# Keep this above the page's short camera-flicker window.
+DRIVE_STALE_S = 3.0
 DRIVE_SEND_S = 0.1
 DRIVE_WAKE_EVERY_S = 2.0
 DRIVE_TRACE_S = 4.0

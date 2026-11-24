@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.96] - 2026-11-24
+
+### Fixed
+
+- A held direction no longer stops after about two seconds when the pictures flicker. Leaving camera check so the robot will move can pause the live view briefly; the page kept that pause as "finger up" and stopped repeating the speed. It now keeps sending the speed through a short picture gap, and Disconnect clears any leftover hold so the robot cannot roll after you release the controller.
+
 ## [5.0.95] - 2026-11-24
 
 ### Fixed

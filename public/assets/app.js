@@ -937,10 +937,14 @@ function updateControlTiles(data) {
 
 async function toggleController(button) {
     if (button.disabled) return;
+    // Drop any held direction before Connect/Disconnect so a leftover pulse
+    // cannot move the robot after the controller is released.
+    drivePointerId = null;
+    drivePointerType = '';
+    await stopDriveIfHeld();
     const viaSocket = cameraControlsOpen();
     if (!viaSocket) await suspendPictures();
     try {
-    await stopDriveIfHeld();
     const nextOn = !holdController;
     const action = nextOn ? 'controller_on' : 'controller_off';
     controllerOffUntil = nextOn ? 0 : Date.now() + 8000;
@@ -18386,17 +18390,21 @@ async function startDrive(direction, button) {
     sendDrivePulse(vector.linear, vector.angular, { why: 'press', pointer: drivePointerType || 'unknown' });
     driveInterval = setInterval(() => {
         if (!driveActive) return;
-        // Leaving camera check for the hold can pause a picture briefly. Do not
-        // end the hold for a short gap; that was cancelling the press on Safari.
+        // Leaving camera check for the hold can pause the pictures. Keep sending
+        // the speed anyway — if we pause the pulses, the robot stops after 2s
+        // even while the finger is still down (seen in Chrome).
         if (!cameraStreamLive()) {
             if (!driveBlindSince) driveBlindSince = Date.now();
-            if (Date.now() - driveBlindSince < 2500) return;
-            drivePointerId = null;
-            drivePointerType = '';
-            stopDriveLoop();
-            sendDrive(0, 0, false, { why: 'blind', pointer: 'none' });
-            if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
-            updateControllerGatedControls();
+            if (Date.now() - driveBlindSince >= 8000) {
+                drivePointerId = null;
+                drivePointerType = '';
+                stopDriveLoop();
+                sendDrive(0, 0, false, { why: 'blind', pointer: 'none' });
+                if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
+                updateControllerGatedControls();
+                return;
+            }
+            sendDrivePulse(vector.linear, vector.angular, { why: 'hold-blind', pointer: drivePointerType || 'unknown' });
             return;
         }
         driveBlindSince = 0;
