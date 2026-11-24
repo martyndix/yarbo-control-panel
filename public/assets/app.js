@@ -795,8 +795,8 @@ function isControllerLive() {
 }
 
 function canDrive() {
-    // A held direction takes the controller. The pad only waits for a picture.
-    return cameraStreamLive();
+    // Only the Connect button takes the controller. The pad needs it and a picture.
+    return cameraStreamLive() && isControllerLive();
 }
 
 function updateControllerTile() {
@@ -835,6 +835,8 @@ function updateControllerTile() {
     if (els.driveControllerNote) {
         if (!cameraStreamLive()) {
             els.driveControllerNote.textContent = 'Drive stays off until a live picture is showing.';
+        } else if (!isControllerLive()) {
+            els.driveControllerNote.textContent = 'Press Connect, then hold a direction to drive.';
         } else {
             els.driveControllerNote.textContent = 'Hold a direction to drive.';
         }
@@ -883,7 +885,8 @@ function updateControllerGatedControls() {
         // Keep the held direction alive. Disabling it releases the press.
         setControlDisabled(btn, !driveOk && !driveActive);
         if (!cameraStreamLive()) btn.title = 'Start live view and wait for a picture';
-        else if (!btn.title || btn.title.includes('picture') || btn.title.includes('controller')) btn.title = '';
+        else if (!live) btn.title = 'Press Connect first';
+        else if (!btn.title || btn.title.includes('picture') || btn.title.includes('Connect')) btn.title = '';
     });
     // Head controls (attached module) also need a controller session.
     [
@@ -1060,26 +1063,6 @@ async function toggleLights(button) {
     } finally {
         if (!viaSocket) resumePictures();
     }
-}
-
-let controllerAutoRequested = false;
-
-function connectControllerOnLoad() {
-    // The robot carries a direction out when Connect is pressed. Do that
-    // when the page opens, so the pad does not wait for the button.
-    if (controllerAutoRequested || holdController) return;
-    if (!document.querySelector('[data-control="controller"]')) return;
-    controllerAutoRequested = true;
-    postPanelJson('/api/command.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: 'action=controller_on',
-    }).then((data) => {
-        if (!data || !data.ok) return;
-        applyControllerStateFromStatus(data);
-        updateControllerTile();
-        updateLightsTile();
-    }).catch(() => {});
 }
 
 function initAppearance() {
@@ -17300,9 +17283,10 @@ function applyLiveStatus(body) {
 
 async function fetchStatus() {
     // Keep polling while Settings is open so Panel health updates and a stale
-    // gateway banner can clear. Skip only for mail/drive focus.
+    // gateway banner can clear. Keep polling while a direction is held so the
+    // map follows the robot; the agent answers this from its cache.
     // The pictures are on their own port, so this poll can finish while they are open.
-    if (polling || mailPageOpen || driveActive) return;
+    if (polling || mailPageOpen) return;
     if (Date.now() < commandQuietUntil) return;
     polling = true;
     if (statusAbort) {
@@ -17320,7 +17304,7 @@ async function fetchStatus() {
         const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
         const data = await parseJsonResponse(res);
         const clientRttMs = Math.round(performance.now() - started);
-        if (mailPageOpen || driveActive) return;
+        if (mailPageOpen) return;
         if (data.ok) {
             hasStatusSnapshot = true;
             setError(null);
@@ -17341,7 +17325,7 @@ async function fetchStatus() {
             }
         }
     } catch (err) {
-        if (mailPageOpen || driveActive) return;
+        if (mailPageOpen) return;
         if (err?.name === 'AbortError') {
             if (timedOut) {
                 if (hasStatusSnapshot) {
@@ -18273,15 +18257,17 @@ async function fetchDrive(linear, angular, enterManual) {
 
 async function sendDrive(linear, angular, enterManual = false) {
     // A held direction is an ordinary request and leaves the pictures open.
-    // The page waits for the panel to accept it, the same way Dock does.
-    // The agent publishes the speed and then Disconnects in that same
-    // request, in that order. A separate Connect/Disconnect call here
-    // used to run before cmd_vel was on the wire.
+    // The agent streams the speed to the robot until the finger comes up.
     const done = linear === 0 && angular === 0;
     try {
         const data = await fetchDrive(linear, angular, enterManual);
         if (done) restorePicturesAfterDrive();
         if (!data.ok) {
+            if (data.needs_controller) {
+                stopDriveLoop();
+                applyControllerStateFromStatus(data);
+                updateControllerTile();
+            }
             showToast(data.error || 'Drive command failed', 'error');
             if (els.driveStatus) els.driveStatus.textContent = 'Error';
             return false;
@@ -18291,9 +18277,6 @@ async function sendDrive(linear, angular, enterManual = false) {
             showToast(data.warning, 'error');
         }
         if (enterManual) manualModeEntered = true;
-        // Disconnect ran on the robot; keep the tile on Connected.
-        holdController = true;
-        updateControllerTile();
         return true;
     } catch (err) {
         if (done) restorePicturesAfterDrive();
@@ -18306,12 +18289,6 @@ async function sendDrive(linear, angular, enterManual = false) {
 async function flushDriveQueue() {
     if (driveInFlight) return;
     driveInFlight = true;
-    // Abort a long status poll so drive can use the single-threaded php -S server.
-    if (statusAbort) {
-        statusAbort.abort();
-        statusAbort = null;
-        polling = false;
-    }
     try {
         while (pendingDrive) {
             const next = pendingDrive;
@@ -18373,6 +18350,11 @@ async function startDrive(direction, button) {
     if (!cameraStreamLive()) {
         showToast('Start live view and wait for a picture before driving', 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Live view required';
+        return;
+    }
+    if (!isControllerLive()) {
+        showToast('Press Connect first, then hold a direction', 'error');
+        if (els.driveStatus) els.driveStatus.textContent = 'Connect first';
         return;
     }
     if (!sessionStorage.getItem('yarbo_drive_ack')) {
@@ -20169,11 +20151,7 @@ initUpdateConfirmModal();
 // Do not wait on settings before the first status poll — that left the dashboard
 // on dashes while /api/settings.php finished, even when companions were ready.
 restoreVestaboardPreviewCache();
-fetchStatus()
-    .catch(() => {})
-    .finally(() => {
-        connectControllerOnLoad();
-    });
+fetchStatus().catch(() => {});
 setInterval(fetchStatus, POLL_INTERVAL_MS);
 loadSettings().catch(() => {});
 bindHomeDashboard();
