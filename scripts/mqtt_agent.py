@@ -553,7 +553,8 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
 # still keep the robot moving until release or this timeout.
 DRIVE_STALE_S = 12.0
 DRIVE_SEND_S = 0.1
-DRIVE_WAKE_EVERY_S = 2.0
+DRIVE_CLAIM_EVERY_S = 3.0
+DRIVE_PUSH_FRESH_S = 5.0
 DRIVE_TRACE_S = 4.0
 DRIVE_MIN_S = 0.4
 
@@ -565,6 +566,20 @@ def trace_robot_reply(state: dict[str, Any], data: dict[str, Any]) -> None:
     topic = str(data.get("topic") or "?")
     body = json.dumps(data, separators=(",", ":"), default=str)
     log(f"Drive trace reply {topic}: {body[:300]}")
+
+
+def robot_gives_app_control(client: Any) -> bool | None:
+    """StateMSG.car_controller from a recent push: does the robot take the app's speed?"""
+    try:
+        raw, at = client.pushed_snapshot()
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(raw, dict) or time.time() - at > DRIVE_PUSH_FRESH_S:
+        return None
+    state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
+    if state_msg.get("car_controller") is None:
+        return None
+    return bool(state_msg.get("car_controller"))
 
 
 def robot_state_line(client: Any) -> str:
@@ -603,6 +618,7 @@ class DriveMotion:
         self._press_until = 0.0
         self._stop = threading.Event()
         self._logged = 0.0
+        self._claimed_at = 0.0
         self._thread = threading.Thread(target=self._run, name="yarbo-drive", daemon=True)
         self._thread.start()
 
@@ -642,15 +658,21 @@ class DriveMotion:
             log(f"drive publish failed: {exc}")
 
     def _start_hold(self, broker: Any) -> None:
-        # Same order as the drive that worked before live view: wake as the
-        # app, release the pad, unlock, then stream. The robot re-latches its
-        # lock after a stop, so unlocking only once per agent run moved it on
-        # the first press and never again.
+        # The SDK's manual drive: get_controller, then working state, then
+        # cmd_vel. Live view leaves the robot reporting car_controller false,
+        # and then it ignores cmd_vel until something else changes its state.
         send = self.client.publish_on
         send(broker, "set_manul_camera_check", {"state": 0, "overtime": 0})
+        if robot_gives_app_control(self.client) is not True:
+            self._claim(broker, "start")
         send(broker, "set_working_state", {"state": 1, "source": "app"})
         send(broker, "wireless_charging_cmd", {"cmd": 0})
         send(broker, "emergency_unlock", {})
+
+    def _claim(self, broker: Any, why: str) -> None:
+        self.client.publish_on(broker, "get_controller", {})
+        self._claimed_at = time.time()
+        log(f"Drive: get_controller ({why}); {robot_state_line(self.client)}")
 
     def _run(self) -> None:
         while not self._stop.is_set():
@@ -664,7 +686,6 @@ class DriveMotion:
         broker: Any = None
         holding = False
         announced: tuple[float, float] | None = None
-        last_wake = 0.0
         last_trace = 0.0
         sent = 0
         zeros_left = 0
@@ -696,14 +717,14 @@ class DriveMotion:
                         log(f"Drive trace start: broker={getattr(broker, '_name', '?')} {robot_state_line(self.client)}")
                         self._start_hold(broker)
                         holding = True
-                        last_wake = now
                         last_trace = now
                         sent = 0
-                    elif now - last_wake >= DRIVE_WAKE_EVERY_S:
-                        self.client.publish_on(broker, "set_manul_camera_check", {"state": 0, "overtime": 0})
+                    elif (
+                        now - self._claimed_at >= DRIVE_CLAIM_EVERY_S
+                        and robot_gives_app_control(self.client) is False
+                    ):
+                        self._claim(broker, "robot says car_controller false")
                         self.client.publish_on(broker, "set_working_state", {"state": 1, "source": "app"})
-                        self.client.publish_on(broker, "emergency_unlock", {})
-                        last_wake = now
                     self.client.publish_on(broker, "cmd_vel", {"vel": linear, "rev": angular})
                     sent += 1
                     zeros_left = 3

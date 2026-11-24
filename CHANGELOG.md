@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.102] - 2026-11-24
+
+### Fixed
+
+- Driving with live view on moves the robot when you click, not only after Disconnect. Live view leaves the robot reporting that the panel is not its controller (`car_controller` false, `machine_controller` 1), and in that state it keeps the speed without moving. Each new direction now does what the Yarbo SDK requires before manual drive: if the robot does not say the panel is the controller, it sends `get_controller` first, and it claims again during a hold if the robot drops it. The extra wake and unlock every 2 seconds are gone. The agent log shows `Drive: get_controller (start)` when this happens.
+
 ## [5.0.101] - 2026-11-24
 
 ### Fixed

@@ -118,6 +118,8 @@ $holdFn = substr($motionFn, (int) $holdAt, (int) strpos($motionFn, 'def _loop', 
 assert_true(str_contains($holdFn, 'set_manul_camera_check", {"state": 0, "overtime": 0}'), 'a direction leaves camera check so the robot will move');
 assert_true(str_contains($holdFn, '"set_working_state", {"state": 1, "source": "app"}'), 'a direction wakes the robot the way the phone app does');
 assert_true(str_contains($holdFn, 'emergency_unlock'), 'every hold unlocks, so the robot moves on the second press too');
+assert_true(str_contains($holdFn, 'robot_gives_app_control(self.client) is not True'), 'a hold claims the controller when the robot says the panel is not the controller');
+assert_true(str_contains($motionFn, 'publish_on(broker, "get_controller"'), 'the claim is the SDK get_controller handshake');
 assert_true(str_contains($motionFn, 'publish_on(broker, "cmd_vel"'), 'the speed streams to the robot while a direction is on');
 assert_true(str_contains($motionFn, 'DRIVE_STALE_S'), 'the robot stops when the page stops repeating the direction');
 assert_true(!str_contains($agent, 'disconnect_after_direction'), 'a direction does not Disconnect the controller, which flashed the lights and stopped the robot');
