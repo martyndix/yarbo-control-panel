@@ -232,7 +232,8 @@ assert_true(str_contains($appJs, 'data.card'), 'the robot card update does not r
 assert_true(str_contains($appJs, 'Pictures open on their own'), 'pictures do not wait for the quiet connection');
 assert_true(!str_contains($appJs, 'attachCommandSocket(() => attachCameraStream())'), 'pictures do not wait for the quiet connection to finish');
 assert_true(str_contains($appJs, "fetch('/api/command.php'") || str_contains($appJs, 'postPanelJson'), 'Connect stays on the panel');
-assert_true(str_contains($proxy, 'Pictures are on the picture port.'), 'the panel port does not hold a picture stream');
+assert_true(str_contains($proxy, 'hits this port for pictures'), 'Funnel picture streams are bridged on the panel port');
+assert_true(str_contains($proxy, 'if not self._websocket_pictures()'), 'the panel port upgrades a Funnel picture websocket');
 assert_true(str_contains($proxy, 'This connection does not call PHP'), 'pictures keep moving without calling the panel');
 assert_true(str_contains($proxy, 'Only one picture sits on this socket'), 'a live view does not keep every picture and fill the machine');
 assert_true(!str_contains($pictureFn, 'status.php?card=1'), 'the picture connection does not ask for the robot card');

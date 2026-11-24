@@ -68,7 +68,7 @@ def main() -> None:
     assert picture_port_stays_open(proxy), "pictures stay open on their own port while a button gets a reply"
     assert proxy.websocket_accept("dGhlIHNhbXBsZSBub25jZQ==") == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
     assert pictures_ignore_press(proxy), "a press on the picture connection is ignored and the pictures keep moving"
-    assert panel_does_not_stream(proxy), "the panel port does not hold a picture stream"
+    assert panel_bridges_frames(proxy), "Funnel-style frames on the panel port upgrade to a picture websocket"
     assert pictures_stay_small(proxy), "a panel page still answers while pictures are streaming"
     assert drive_on_panel(proxy), "a direction is a normal panel request and the pictures stay open"
     assert pictures_skip_php(proxy), "a picture stream does not request PHP"
@@ -675,7 +675,14 @@ def _open_socket(port: int, path: str) -> socket.socket:
     return client
 
 
-def panel_does_not_stream(proxy) -> bool:
+def panel_bridges_frames(proxy) -> bool:
+    """Funnel hits the panel port for pictures; that request becomes a websocket."""
+    pictures_upstream = ThreadingHTTPServer(("127.0.0.1", 0), _Pictures)
+    threading.Thread(target=pictures_upstream.serve_forever, daemon=True).start()
+    status = ROOT / "data" / "camera-live-status.json"
+    status.parent.mkdir(exist_ok=True)
+    previous = status.read_text(encoding="utf-8") if status.is_file() else None
+    status.write_text(json.dumps({"port": pictures_upstream.server_address[1], "state": "live"}), encoding="utf-8")
     panel = ThreadingHTTPServer(("127.0.0.1", 0), proxy.PanelHttpsProxyHandler)
     threading.Thread(target=panel.serve_forever, daemon=True).start()
     body = b""
@@ -684,14 +691,14 @@ def panel_does_not_stream(proxy) -> bool:
         client = socket.create_connection(("127.0.0.1", panel.server_address[1]), timeout=2)
         client.sendall(
             b"GET /api/camera_live.php?action=frames HTTP/1.1\r\n"
-            b"Host: panel.local:8443\r\n"
+            b"Host: panel.local\r\n"
             b"Upgrade: websocket\r\n"
             b"Connection: Upgrade\r\n"
             b"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
             b"Sec-WebSocket-Version: 13\r\n\r\n"
         )
-        client.settimeout(1.0)
-        while b"picture port" not in body:
+        client.settimeout(2.0)
+        while b"\r\n\r\n" not in body:
             part = client.recv(4096)
             if not part:
                 break
@@ -700,8 +707,17 @@ def panel_does_not_stream(proxy) -> bool:
         if client is not None:
             client.close()
         panel.shutdown()
+        pictures_upstream.shutdown()
+        if previous is None:
+            try:
+                status.unlink()
+            except OSError:
+                pass
+        else:
+            status.write_text(previous, encoding="utf-8")
     first = body.split(b"\r\n", 1)[0]
-    return b"101" not in first and b"200" in first and b"picture port" in body
+    return b"101" in first
+
 
 
 def drive_on_panel(proxy) -> bool:
