@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.91] - 2026-11-24
+
+### Fixed
+
+- Live view no longer stops the rest of the robot page. While the cameras ran, the robot stopped answering status reads, the panel took the slow reply for a dead connection and restarted the robot link, and that restart dropped the controller and froze the map. Status, the map and the drive pad now answer straight away while live view is on, and a slow reply no longer restarts the link.
+- The map keeps moving during live view. It now follows the positions the robot pushes on its own instead of waiting for a status read the robot is not answering.
+- The robot link no longer goes silent after it starts. Subscribing before the cloud broker had answered could crash the link's network thread, after which no robot message arrived until the panel was restarted.
+- Holding a direction now drives the robot the way the Yarbo app does: it leaves camera check, wakes the robot and keeps sending the speed about ten times a second while you hold, then stops when you let go. It no longer Disconnects after each press.
+- The controller only connects when you press Connect. Opening the page no longer takes it, and the drive pad asks you to press Connect first.
+
 ## [5.0.90] - 2026-11-23
 
 ### Fixed
