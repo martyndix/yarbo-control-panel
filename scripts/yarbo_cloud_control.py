@@ -50,6 +50,7 @@ class YarboCloudControlClient:
         self._last_cmd_feedback_at = 0.0
         self._cmd_feedback_event = threading.Event()
         self._lock = asyncio.Lock()
+        self.feedback_listener: Any = None
 
     @property
     def is_connected(self) -> bool:
@@ -134,6 +135,12 @@ class YarboCloudControlClient:
     def _on_data_feedback(self, _topic: str, data: Any) -> None:
         if not isinstance(data, dict) or not data:
             return
+        listener = self.feedback_listener
+        if callable(listener):
+            try:
+                listener(data)
+            except Exception:  # noqa: BLE001
+                pass
         response_topic = str(data.get("topic") or "")
         payload = data.get("data") if isinstance(data.get("data"), (dict, str)) else data
         if response_topic in ("get_plan_feedback", "plan_feedback") or _looks_like_plan_feedback(payload):

@@ -524,6 +524,28 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
 DRIVE_STALE_S = 2.0
 DRIVE_SEND_S = 0.1
 DRIVE_WAKE_EVERY_S = 2.0
+DRIVE_TRACE_S = 4.0
+
+
+def trace_robot_reply(state: dict[str, Any], data: dict[str, Any]) -> None:
+    """Log what the robot answers while a direction is held and just after."""
+    if time.time() > float(state.get("drive_trace_until") or 0):
+        return
+    topic = str(data.get("topic") or "?")
+    body = json.dumps(data, separators=(",", ":"), default=str)
+    log(f"Drive trace reply {topic}: {body[:300]}")
+
+
+def robot_state_line(client: Any) -> str:
+    try:
+        raw, at = client.pushed_snapshot()
+    except Exception:  # noqa: BLE001
+        return "no robot push"
+    if not isinstance(raw, dict):
+        return "no robot push yet"
+    state_msg = raw.get("StateMSG") if isinstance(raw.get("StateMSG"), dict) else {}
+    body = json.dumps(state_msg, separators=(",", ":"), default=str)
+    return f"push {time.time() - at:.1f}s old StateMSG={body[:400]}"
 
 
 class DriveMotion:
@@ -581,6 +603,8 @@ class DriveMotion:
         holding = False
         announced: tuple[float, float] | None = None
         last_wake = 0.0
+        last_trace = 0.0
+        sent = 0
         zeros_left = 0
         while not self._stop.is_set():
             linear, angular, updated = self._snapshot()
@@ -602,18 +626,26 @@ class DriveMotion:
                     broker = self.client.drive_broker()
                 if moving:
                     self.state["drive_busy_until"] = now + 1.5
+                    self.state["drive_trace_until"] = now + DRIVE_TRACE_S
                     if not holding:
+                        log(f"Drive trace start: broker={getattr(broker, '_name', '?')} {robot_state_line(self.client)}")
                         self._start_hold(broker)
                         holding = True
                         last_wake = now
+                        last_trace = now
+                        sent = 0
                     elif now - last_wake >= DRIVE_WAKE_EVERY_S:
                         self.client.publish_on(broker, "set_working_state", {"state": 1, "source": "smart_home"})
                         last_wake = now
                     self.client.publish_on(broker, "cmd_vel", {"vel": linear, "rev": angular})
+                    sent += 1
                     zeros_left = 3
                     if announced != (linear, angular):
                         announced = (linear, angular)
                         log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
+                    if now - last_trace >= 1.0:
+                        last_trace = now
+                        log(f"Drive trace hold: {sent} cmd_vel sent; {robot_state_line(self.client)}")
                 else:
                     self.client.publish_on(broker, "cmd_vel", {"vel": 0.0, "rev": 0.0})
                     zeros_left -= 1
@@ -622,7 +654,7 @@ class DriveMotion:
                         broker = None
                         announced = None
                         self.state["manual_drive"] = False
-                        log("Drive: stop")
+                        log(f"Drive: stop after {sent} cmd_vel; {robot_state_line(self.client)}")
             except Exception as exc:  # noqa: BLE001
                 self._log_failure(exc)
                 broker = None
@@ -1118,6 +1150,8 @@ async def handle_request(
 
         if op == "controller":
             on = bool(req.get("on"))
+            state["drive_trace_until"] = time.time() + DRIVE_TRACE_S
+            log(f"Controller {'on' if on else 'off'} trace: {robot_state_line(client)}")
             if on:
                 result = await claim_controller(client)
                 state["hold_controller"] = True
@@ -1739,6 +1773,8 @@ async def amain() -> int:
     }
     client = YarboCloudControlClient(email=email, password=password, sn=serial)
     state["motion"] = DriveMotion(client, state)
+    if hasattr(client, "feedback_listener"):
+        client.feedback_listener = lambda data: trace_robot_reply(state, data)
 
     async def _on_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         await handle_client(reader, writer, client, lock, state)

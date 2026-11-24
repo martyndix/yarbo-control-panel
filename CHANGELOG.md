@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.92] - 2026-11-24
+
+### Changed
+
+- The robot log now records what happens while you drive: each reply the robot sends back to Connect and to a held direction, how many speed commands went out, and the robot's own state once a second during the hold. This is to find out why the robot ignores the drive pad while live view is on.
+
 ## [5.0.91] - 2026-11-24
 
 ### Fixed
