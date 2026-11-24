@@ -91,6 +91,7 @@ class YarboCloudControlClient:
 
         # Establish broker routing + DeviceMSG subscription.
         client.mqtt_connect()
+        self._wait_for_broker(client)
         client.subscribe_device_message(self.sn, self.type_id, self._on_device_message)
         try:
             # Must keep a real callback — plan progress arrives on data_feedback
@@ -106,6 +107,24 @@ class YarboCloudControlClient:
         self._sdk = client
         self._connected = True
         _LOGGER.info("Cloud MQTT ready for SN=%s type_id=%s", self.sn, self.type_id)
+
+    def _wait_for_broker(self, client: Any, timeout: float = 10.0) -> None:
+        """Let the broker connection finish before subscribing.
+
+        Each SDK subscribe reconnects while the broker has not answered yet,
+        and the SDK's connect handler walks the topic list while a subscribe
+        adds to it. That crashed the SDK's network thread, and no robot
+        message (status or acknowledgement) arrived until the agent restarted.
+        """
+        try:
+            mqtt = client._ensure_mqtt_for(self.sn)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("broker route lookup failed: %s", exc)
+            return
+        deadline = time.time() + timeout
+        while not getattr(mqtt, "is_connected", False) and time.time() < deadline:
+            time.sleep(0.05)
+        time.sleep(0.2)
 
     def _on_device_message(self, _topic: str, data: Any) -> None:
         if isinstance(data, dict) and data:
@@ -252,25 +271,24 @@ class YarboCloudControlClient:
         if cmd == "get_controller":
             self._controller_acquired = True
 
-    def publish_now(self, cmd: str, payload: dict[str, Any]) -> None:
-        """Queue a direction on the same session, in the same form, as Dock.
+    def drive_broker(self) -> Any:
+        """The broker connection Dock publishes on. Resolve it once per hold.
 
-        Dock's recharge command is plain JSON. A direction was compressed,
-        and this robot ignores that, so the pad could say Forward while the
-        machine never moved. Stay on the session that is already up.
+        Looking it up can query the cloud for the robot's route, which is
+        too slow to repeat ten times a second.
         """
-        sdk = self._require_sdk()
-        chosen = None
-        for mqtt in (getattr(sdk, "_new_mqtt", None), getattr(sdk, "_legacy_mqtt", None)):
-            if mqtt is not None and getattr(mqtt, "is_connected", False):
-                chosen = mqtt
-                break
-        if chosen is None:
-            chosen = sdk._ensure_mqtt_for(self.sn)
-        topic = f"snowbot/{self.sn}/app/{cmd}"
-        # Same bytes Dock's cmd_recharge uses: plain JSON, not zlib.
-        body = json.dumps(payload if payload else {}, separators=(",", ":")).encode("utf-8")
-        chosen.publish(topic, body)
+        return self._require_sdk()._ensure_mqtt_for(self.sn)
+
+    def publish_on(self, mqtt: Any, cmd: str, payload: dict[str, Any]) -> None:
+        """Publish without waiting, in the same compressed form as Dock."""
+        from yarbo_robot_sdk.codec import encode_mqtt_payload
+
+        mqtt.publish(f"snowbot/{self.sn}/app/{cmd}", encode_mqtt_payload(payload if payload else {}))
+
+    def pushed_snapshot(self) -> tuple[dict[str, Any] | None, float]:
+        """The robot's latest DeviceMSG push and when it arrived."""
+        raw = self._last_raw
+        return (raw if isinstance(raw, dict) else None), float(self._last_raw_at or 0.0)
 
     async def publish_and_wait(
         self,
