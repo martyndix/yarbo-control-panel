@@ -17992,6 +17992,11 @@ function openCameraFrames() {
     closeCameraFrames();
     cameraFramesOpen = true;
     commandSocketMisses = 0;
+    // The quiet controls socket carries a direction. Chrome only allows a few
+    // HTTP requests to the panel at once; while live view is up those slots
+    // stay full, so a drive press sat until Disconnect. This socket is not
+    // in that pool.
+    attachCommandSocket();
     // Pictures open on their own port. They do not share the panel connection.
     attachCameraStream();
 }
@@ -18410,15 +18415,22 @@ function sendDrivePulse(linear, angular, meta = null) {
         if (meta.why) payload.why = String(meta.why).slice(0, 40);
         if (meta.pointer) payload.pointer = String(meta.pointer).slice(0, 16);
     }
-    // Fire-and-forget on the open socket so hold repeats do not wait on HTTP.
+    payload.st = Date.now();
+    // Fire-and-forget on the quiet controls socket. That connection is not
+    // limited by Chrome's few HTTP slots to the panel.
     if (driveSocketSend(payload)) return;
-    pendingDrive = {
-        linear,
-        angular,
-        enterManual: !manualModeEntered,
-        meta: { ...(meta || {}), st: Date.now() },
-    };
-    flushDriveQueue();
+    // Do not await HTTP. A waiting response left every later pulse and the
+    // stop sitting until Disconnect, so the robot only twitched then.
+    try {
+        fetch('/api/drive.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: true,
+        }).catch(() => {});
+    } catch {
+        /* the next pulse tries again */
+    }
 }
 
 function driveLabel(direction) {

@@ -29,6 +29,7 @@ function drive_log_timing(array $input, string $why): void
     $span = static fn (?float $from, ?float $to): string => $from === null || $to === null
         ? '-'
         : (string) (int) round($to - $from) . 'ms';
+    $browserLag = $fetch !== null ? (int) round($php - $fetch) : null;
     $parts = [
         'click→send ' . $span($click, $send),
         'queued ' . $span($send, $fetch),
@@ -36,6 +37,12 @@ function drive_log_timing(array $input, string $why): void
         'proxy→php ' . $span($proxy, $php),
         'php→now ' . $span($php, microtime(true) * 1000),
     ];
+    // Browser and Pi clocks differ, so this is only a clue. A large number
+    // with several presses arriving in the same second means Chrome held the
+    // request until a panel connection freed.
+    if ($browserLag !== null) {
+        $parts[] = 'browser→php(skew) ' . $browserLag . 'ms';
+    }
     $line = sprintf("[%s] Drive timing why=%s: %s\n", gmdate('H:i:s'), $why !== '' ? $why : '-', implode(', ', $parts));
     @file_put_contents(dirname(__DIR__, 2) . '/data/mqtt-agent.log', $line, FILE_APPEND | LOCK_EX);
 }

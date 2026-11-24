@@ -168,6 +168,12 @@ assert_true(str_contains($appJs, 'Connecting…'), 'Connect shows Connecting unt
 assert_true(str_contains($appJs, 'Do not enable the D-pad until Connect has finished'), 'Connect does not enable the D-pad before the agent has the controller');
 assert_true(str_contains($appJs, 'driveReleaseGen'), 'a release cancels hold pulses that were already queued');
 assert_true(str_contains($appJs, 'driveSocketSend'), 'a direction can use the quiet controls socket when it is open');
+assert_true(str_contains($appJs, 'attachCommandSocket();'), 'live view opens the quiet controls socket before the pictures');
+$openAt = strpos($appJs, 'function openCameraFrames');
+$openFn = substr($appJs, (int) $openAt, (int) strpos($appJs, 'function setCameraLiveButtons', (int) $openAt) - (int) $openAt);
+assert_true(str_contains($openFn, 'attachCommandSocket()'), 'openCameraFrames starts the controls socket');
+assert_true(str_contains($appJs, 'keepalive: true'), 'HTTP drive pulses do not wait for an answer when the socket is down');
+
 assert_true(str_contains($agent, 'DRIVE_STALE_S = 12'), 'one press keeps moving when hold repeats cannot get through');
 assert_true(str_contains($agent, '"toggle-off"'), 'click-to-stop halts the drive motion on the agent');
 assert_true(str_contains($agent, 'DRIVE_SEND_S = 0.1'), 'the speed is repeated about ten times a second');

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.104] - 2026-11-24
+
+### Fixed
+
+- Driving with live cameras on reaches the robot while you click, not only when you Disconnect. Chrome only allows a few HTTP requests to the panel at once; with live view up those slots stayed full, so a direction sat in the browser until Disconnect freed one, and then press, stop and Disconnect arrived together. Live view now opens the quiet controls socket on the panel port again and sends each direction on that socket. Hold repeats no longer wait for an HTTP answer when that socket is not open.
+
 ## [5.0.103] - 2026-11-24
 
 ### Added
