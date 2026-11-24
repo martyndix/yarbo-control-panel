@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.99] - 2026-11-24
+
+### Fixed
+
+- Driving no longer depends on holding the D-pad. Chrome and Safari were ending every press in the same second (`press` then `pointerup` in the same log second), so the robot only twitched when you Disconnect. Click a direction to start, click it again or Stop to halt. The first speed command is sent without waiting on HTTP behind live cameras, and Connect keeps the D-pad off until the robot has actually taken the controller so an early click is not refused.
+
 ## [5.0.98] - 2026-11-24
 
 ### Fixed

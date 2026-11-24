@@ -162,12 +162,15 @@ assert_true(str_contains($appJs, 'Press Connect first'), 'the pad asks for Conne
 $padAt = strpos($appJs, 'function setupDrivePad');
 $padEnd = strpos($appJs, 'async function sendCommand', (int) $padAt);
 $padFn = substr($appJs, (int) $padAt, (int) $padEnd - (int) $padAt);
-assert_true(!str_contains($padFn, 'addEventListener(\'lostpointercapture\''), 'a direction does not end when Safari drops pointer capture');
-assert_true(str_contains($padFn, 'touchstart'), 'a finger hold uses touch events so Safari cannot end it with a ghost mouse click');
+assert_true(str_contains($padFn, "addEventListener('click'"), 'a direction starts on click, not on a finger hold');
+assert_true(!str_contains($padFn, "addEventListener('pointerup'"), 'a direction does not end on pointerup, which was cancelling the move in the same second');
+assert_true(str_contains($padFn, 'toggle-off'), 'clicking the same direction again stops the robot');
+assert_true(str_contains($appJs, 'Connecting…'), 'Connect shows Connecting until the robot has the controller');
+assert_true(str_contains($appJs, 'Do not enable the D-pad until Connect has finished'), 'Connect does not enable the D-pad before the agent has the controller');
 assert_true(str_contains($appJs, 'driveReleaseGen'), 'a release cancels hold pulses that were already queued');
 assert_true(str_contains($appJs, 'driveSocketSend'), 'hold repeats use the picture socket so live view cannot block them');
-assert_true(str_contains($padFn, "drivePointerType === 'touch'"), 'a finger hold ignores the mouse click Safari synthesises');
 assert_true(str_contains($agent, 'DRIVE_STALE_S = 12'), 'one press keeps moving when hold repeats cannot get through');
+assert_true(str_contains($agent, '"toggle-off"'), 'click-to-stop halts the drive motion on the agent');
 assert_true(!str_contains($appJs, 'Connect the controller above the cameras first'), 'the pad does not wait for the controller button');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
 assert_true(!str_contains($appJs, 'has not received a picture'), 'the page does not close a picture stream that is still open');

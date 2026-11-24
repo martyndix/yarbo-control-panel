@@ -777,6 +777,8 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
             "blind",
             "force-stop",
             "buttons-up",
+            "toggle-off",
+            "stop",
         }:
             motion.halt()
         else:

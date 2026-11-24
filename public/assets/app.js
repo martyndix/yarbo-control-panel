@@ -451,6 +451,7 @@ let driveInterval = null;
 let driveActive = false;
 let drivePointerId = null;
 let drivePointerType = '';
+let driveDirection = '';
 let driveBlindSince = 0;
 let driveInFlight = false;
 let driveReleaseGen = 0;
@@ -846,9 +847,11 @@ function updateControllerTile() {
         if (!cameraStreamLive()) {
             els.driveControllerNote.textContent = 'Drive stays off until a live picture is showing.';
         } else if (!isControllerLive()) {
-            els.driveControllerNote.textContent = 'Press Connect, then hold a direction to drive.';
+            els.driveControllerNote.textContent = 'Press Connect, then click a direction to drive.';
+        } else if (driveActive) {
+            els.driveControllerNote.textContent = 'Driving — click the same direction or Stop to halt.';
         } else {
-            els.driveControllerNote.textContent = 'Hold a direction to drive.';
+            els.driveControllerNote.textContent = 'Click a direction to drive. Click again or Stop to halt.';
         }
         els.driveControllerNote.classList.toggle('is-ready', canDrive());
     }
@@ -897,7 +900,8 @@ function updateControllerGatedControls() {
         setControlDisabled(btn, !driveOk && !driveActive);
         if (!cameraStreamLive()) btn.title = 'Start live view and wait for a picture';
         else if (!live) btn.title = 'Press Connect first';
-        else if (!btn.title || btn.title.includes('picture') || btn.title.includes('Connect')) btn.title = '';
+        else if (driveActive && driveDirection === btn.dataset.drive) btn.title = 'Click to stop';
+        else btn.title = 'Click to drive';
     });
     // Head controls (attached module) also need a controller session.
     [
@@ -956,14 +960,21 @@ async function toggleController(button) {
     const action = nextOn ? 'controller_on' : 'controller_off';
     controllerOffUntil = nextOn ? 0 : Date.now() + 8000;
     const requestId = ++controllerRequest;
-    holdController = nextOn;
-    try {
-        localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
-    } catch {
-        // ignore
+    // Do not enable the D-pad until Connect has finished on the robot. An
+    // optimistic Connected state let a direction leave before the agent had
+    // the controller, so the press was refused and nothing moved.
+    if (!nextOn) {
+        holdController = false;
+        try {
+            localStorage.setItem(CONTROLLER_HOLD_KEY, '0');
+        } catch {
+            // ignore
+        }
+        updateControllerTile();
+        updateLightsTile();
+    } else if (els.driveStatus) {
+        els.driveStatus.textContent = 'Connecting…';
     }
-    updateControllerTile();
-    updateLightsTile();
     try {
         const data = await postPanelJson('/api/command.php', {
             method: 'POST',
@@ -972,10 +983,19 @@ async function toggleController(button) {
         });
         if (requestId !== controllerRequest) return;
         if (data.ok) {
+            if (nextOn) holdController = true;
+            try {
+                localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
+            } catch {
+                // ignore
+            }
             applyControllerStateFromStatus(data);
             applyLightsStateFromStatus(data);
             updateControllerTile();
             updateLightsTile();
+            if (els.driveStatus && !driveActive) {
+                els.driveStatus.textContent = holdController ? 'Ready' : 'Connect first';
+            }
             if (data.warning) {
                 showToast(data.warning, 'error');
             } else if (holdController) {
@@ -984,6 +1004,7 @@ async function toggleController(button) {
                 showToast('Controller hold released', 'success');
             }
         } else {
+            // Revert: Connect failed → stay disconnected; Disconnect failed → stay connected.
             holdController = !nextOn;
             try {
                 localStorage.setItem(CONTROLLER_HOLD_KEY, holdController ? '1' : '0');
@@ -18432,30 +18453,21 @@ async function startDrive(direction, button) {
     const vector = DRIVE_VECTORS[direction];
     if (!vector) return;
 
-    if (direction === 'stop') {
-        drivePointerId = null;
-        stopDriveLoop();
-        await sendDrive(0, 0, false);
-        if (els.driveStatus) els.driveStatus.textContent = 'Stopped';
-        return;
-    }
-
     if (!cameraStreamLive()) {
         showToast('Start live view and wait for a picture before driving', 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Live view required';
         return;
     }
     if (!isControllerLive()) {
-        showToast('Press Connect first, then hold a direction', 'error');
+        showToast('Press Connect first, then click a direction', 'error');
         if (els.driveStatus) els.driveStatus.textContent = 'Connect first';
         return;
     }
-    // A toast during the press cancels the touch on Safari. Show it after the hold starts.
     if (!sessionStorage.getItem('yarbo_drive_ack')) {
         sessionStorage.setItem('yarbo_drive_ack', '1');
         setTimeout(() => {
-            showToast('Manual drive can move the robot immediately — keep the area clear and release or press Stop to halt.', 'error');
-        }, 700);
+            showToast('Manual drive can move the robot immediately — click Stop or the same direction to halt.', 'error');
+        }, 400);
     }
 
     if (driveReleaseTimer) {
@@ -18465,24 +18477,47 @@ async function startDrive(direction, button) {
     pendingDrive = null;
     driveReleaseGen += 1;
     drivePressAt = Date.now();
-    driveMouseButtons = 1;
+    driveDirection = direction;
     stopDriveLoop();
     driveActive = true;
     driveBlindSince = 0;
     button.classList.add('active');
-    if (els.driveStatus) els.driveStatus.textContent = driveLabel(direction);
+    if (els.driveStatus) {
+        els.driveStatus.textContent = `${driveLabel(direction)} — click again or Stop`;
+    }
+    if (typeof updateControllerTile === 'function') updateControllerTile();
 
-    // Await the first press so Connect-required errors still show. Hold repeats
-    // go fire-and-forget on the picture socket and must not block on HTTP.
-    sendDrive(vector.linear, vector.angular, !manualModeEntered, {
+    // Click-to-drive: one press starts continuous motion. Do not await the first
+    // press on HTTP — with live cameras that request was delayed several seconds,
+    // so a later stop arrived first and the robot never moved.
+    const pressPayload = {
+        linear: vector.linear,
+        angular: vector.angular,
+        enter_manual: !manualModeEntered,
         why: 'press',
-        pointer: drivePointerType || 'unknown',
-    });
+        pointer: drivePointerType || 'click',
+    };
+    driveSocketSend(pressPayload);
+    fetch('/api/drive.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(pressPayload),
+    }).then((res) => parseJsonResponse(res)).then((data) => {
+        if (!driveActive) return;
+        if (data && data.needs_controller) {
+            finishDriveHold('needs-controller');
+            applyControllerStateFromStatus(data);
+            updateControllerTile();
+            showToast(data.error || 'Press Connect first', 'error');
+        } else if (data && data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
+            sessionStorage.setItem('yarbo_drive_dock_warn', '1');
+            showToast(data.warning, 'error');
+        } else if (data && data.ok === false) {
+            showToast(data.error || 'Drive command failed', 'error');
+        }
+    }).catch(() => {});
     driveInterval = setInterval(() => {
         if (!driveActive) return;
-        // Leaving camera check for the hold can pause the pictures. Keep sending
-        // the speed anyway — if we pause the pulses, the robot stops after 2s
-        // even while the finger is still down (seen in Chrome).
         if (!cameraStreamLive()) {
             if (!driveBlindSince) driveBlindSince = Date.now();
             if (Date.now() - driveBlindSince >= 8000) {
@@ -18491,11 +18526,11 @@ async function startDrive(direction, button) {
                 updateControllerGatedControls();
                 return;
             }
-            sendDrivePulse(vector.linear, vector.angular, { why: 'hold-blind', pointer: drivePointerType || 'unknown' });
+            sendDrivePulse(vector.linear, vector.angular, { why: 'hold-blind', pointer: drivePointerType || 'click' });
             return;
         }
         driveBlindSince = 0;
-        sendDrivePulse(vector.linear, vector.angular, { why: 'hold', pointer: drivePointerType || 'unknown' });
+        sendDrivePulse(vector.linear, vector.angular, { why: 'hold', pointer: drivePointerType || 'click' });
     }, DRIVE_REPEAT_MS);
 }
 
@@ -18510,6 +18545,7 @@ function finishDriveHold(why = 'release') {
     drivePointerId = null;
     drivePointerType = '';
     driveMouseButtons = 0;
+    driveDirection = '';
     const wasActive = driveActive;
     if (wasActive) stopDriveLoop();
     const payload = {
@@ -18519,105 +18555,57 @@ function finishDriveHold(why = 'release') {
         why,
         pointer,
     };
-    // Socket first so stop is not queued behind HTTP while live view is open.
     driveSocketSend(payload);
-    sendDrive(0, 0, false, { why, pointer });
-    if (wasActive && els.driveStatus) els.driveStatus.textContent = 'Ready';
-}
-
-function endDriveHold(why = 'release') {
-    // A mouseup in the same instant as mousedown is often a ghost click. Wait
-    // briefly; if the button is still reported down, keep holding.
-    if ((why === 'mouseup' || why === 'pointerup') && drivePointerType === 'mouse' && driveActive) {
-        if (driveReleaseTimer) clearTimeout(driveReleaseTimer);
-        const pressedFor = Date.now() - drivePressAt;
-        if (pressedFor < 280) {
-            driveReleaseTimer = setTimeout(() => {
-                driveReleaseTimer = null;
-                if (!driveActive) return;
-                if ((driveMouseButtons & 1) === 1) return;
-                finishDriveHold(why);
-            }, 120);
-            return;
-        }
+    // Plain HTTP stop with keepalive so a hung picture socket cannot leave the
+    // robot rolling after click-to-stop.
+    try {
+        fetch('/api/drive.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            keepalive: true,
+        }).catch(() => {});
+    } catch {
+        sendDrive(0, 0, false, { why, pointer });
     }
-    finishDriveHold(why);
+    if (wasActive && els.driveStatus) els.driveStatus.textContent = 'Ready';
+    if (typeof updateControllerTile === 'function') updateControllerTile();
 }
 
 function setupDrivePad() {
     const pad = document.getElementById('drive-pad');
     if (!pad || pad.dataset.driveBound) return;
     pad.dataset.driveBound = '1';
+    let lastActivateAt = 0;
 
-    const begin = (direction, button, pointerId, pointerType) => {
-        // Safari fires a synthetic mouse click during a finger hold. That mouse
-        // "up" was ending the hold in the same second while the finger stayed down.
-        if (pointerType === 'mouse' && drivePointerType === 'touch') return;
-        if (pointerType === 'mouse' && driveActive && drivePointerType === 'touch') return;
-        drivePointerId = pointerId;
-        drivePointerType = pointerType || 'mouse';
-        driveMouseButtons = 1;
-        if (direction === 'stop') startDrive('stop', button);
-        else startDrive(direction, button);
+    const activate = (direction, button, pointerType) => {
+        const now = Date.now();
+        // One physical click can deliver two click events. The second used to
+        // toggle off immediately and cancel the move.
+        if (now - lastActivateAt < 400) return;
+        lastActivateAt = now;
+        drivePointerType = pointerType || 'click';
+        if (direction === 'stop') {
+            finishDriveHold('stop');
+            if (els.driveStatus) els.driveStatus.textContent = 'Stopped';
+            return;
+        }
+        // Same direction again toggles off. A different direction switches.
+        if (driveActive && driveDirection === direction) {
+            finishDriveHold('toggle-off');
+            return;
+        }
+        startDrive(direction, button);
     };
 
     pad.querySelectorAll('[data-drive]').forEach((button) => {
         const direction = button.dataset.drive;
-
-        // Touch first: preventDefault stops the ghost mouse click on Safari.
-        button.addEventListener('touchstart', (e) => {
-            if (e.touches.length > 1) return;
+        // Click only. Ending on mouse-up cancelled the move in the same second
+        // as the press, so the robot never got a lasting direction.
+        button.addEventListener('click', (e) => {
             e.preventDefault();
-            begin(direction, button, 'touch', 'touch');
-        }, { passive: false });
-        button.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            if (drivePointerType !== 'touch') return;
-            endDriveHold('touchend');
-        }, { passive: false });
-        button.addEventListener('touchcancel', () => {
-            if (drivePointerType !== 'touch') return;
-            endDriveHold('touchcancel');
+            activate(direction, button, 'click');
         });
-
-        button.addEventListener('pointerdown', (e) => {
-            if (e.pointerType === 'touch' || e.pointerType === 'pen') return;
-            if (typeof e.button === 'number' && e.button !== 0) return;
-            if (drivePointerType === 'touch') return;
-            e.preventDefault();
-            try {
-                button.setPointerCapture(e.pointerId);
-            } catch {
-                /* already released */
-            }
-            begin(direction, button, e.pointerId, 'mouse');
-        });
-        button.addEventListener('pointerup', (e) => {
-            if (drivePointerType !== 'mouse') return;
-            if (drivePointerId !== null && e.pointerId !== drivePointerId) return;
-            driveMouseButtons = e.buttons;
-            endDriveHold('pointerup');
-        });
-        // Do not end when Safari drops pointer capture during a page update;
-        // that was stopping the robot in the same second as the press.
-    });
-
-    window.addEventListener('mousemove', (e) => {
-        driveMouseButtons = e.buttons;
-        if (!driveActive || drivePointerType !== 'mouse') return;
-        if ((e.buttons & 1) === 1 && driveReleaseTimer) {
-            clearTimeout(driveReleaseTimer);
-            driveReleaseTimer = null;
-        }
-    });
-    window.addEventListener('mouseup', (e) => {
-        driveMouseButtons = e.buttons;
-        if (drivePointerType !== 'mouse') return;
-        endDriveHold('mouseup');
-    });
-    window.addEventListener('blur', () => {
-        if (!driveActive) return;
-        endDriveHold('blur');
     });
 }
 
