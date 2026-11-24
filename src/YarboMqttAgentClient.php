@@ -68,11 +68,30 @@ final class YarboMqttAgentClient
     }
 
     /**
+     * Whether something accepts connections on the agent port.
+     */
+    private function listening(): bool
+    {
+        $socket = @stream_socket_client("tcp://{$this->host}:{$this->port}", $errno, $errstr, 0.4);
+        if ($socket === false) {
+            return false;
+        }
+        fclose($socket);
+
+        return true;
+    }
+
+    /**
      * Prefer the cloud Python agent; replace a stale local/PHP agent when needed.
      */
     public function ensurePreferredEngine(): void
     {
         $ping = $this->ping();
+        if (!($ping['ok'] ?? false) && $this->listening()) {
+            // Busy is not gone. Killing a slow agent dropped the controller
+            // and the robot snapshot, and the map and the pad stopped with it.
+            $ping = $this->ping(4.0);
+        }
         $engine = (string) ($ping['engine'] ?? '');
         if (($ping['ok'] ?? false) && ($engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud')) {
             return;
@@ -127,6 +146,9 @@ final class YarboMqttAgentClient
         self::$spawnAttempted = true;
 
         $ping = $this->ping();
+        if (!($ping['ok'] ?? false) && $this->listening()) {
+            return;
+        }
         $engine = (string) ($ping['engine'] ?? '');
         if (($ping['ok'] ?? false) && ($engine === 'yarbo-cloud' || ($ping['transport'] ?? '') === 'cloud')) {
             return;

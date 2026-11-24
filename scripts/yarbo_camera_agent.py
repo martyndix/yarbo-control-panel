@@ -948,8 +948,8 @@ def arm(session: LiveSession) -> None:
 def _wake_once() -> None:
     try:
         agent_request(
-            {"op": "telemetry", "timeout": 8, "wifi": False, "prefer_cache": False},
-            timeout=12,
+            {"op": "telemetry", "timeout": 3, "wifi": False, "prefer_cache": False},
+            timeout=6,
         )
     except Exception:
         pass
