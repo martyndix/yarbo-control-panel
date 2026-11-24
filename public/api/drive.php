@@ -43,6 +43,8 @@ try {
         json_response([
             'ok' => false,
             'error' => (string) ($result['error'] ?? 'Drive command failed'),
+            'needs_controller' => (bool) ($result['needs_controller'] ?? false),
+            'hold_controller' => (bool) ($result['hold_controller'] ?? false),
             'via' => 'agent',
         ], 500);
     }

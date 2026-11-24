@@ -525,6 +525,7 @@ DRIVE_STALE_S = 2.0
 DRIVE_SEND_S = 0.1
 DRIVE_WAKE_EVERY_S = 2.0
 DRIVE_TRACE_S = 4.0
+DRIVE_MIN_S = 0.4
 
 
 def trace_robot_reply(state: dict[str, Any], data: dict[str, Any]) -> None:
@@ -568,19 +569,40 @@ class DriveMotion:
         self._linear = 0.0
         self._angular = 0.0
         self._updated = 0.0
+        self._press = (0.0, 0.0)
+        self._press_until = 0.0
         self._stop = threading.Event()
         self._logged = 0.0
         self._thread = threading.Thread(target=self._run, name="yarbo-drive", daemon=True)
         self._thread.start()
 
     def set_velocity(self, linear: float, angular: float) -> None:
+        now = time.time()
+        moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
         with self._lock:
+            was_moving = abs(self._linear) > 1e-6 or abs(self._angular) > 1e-6
+            if moving and not was_moving:
+                self._press = (float(linear), float(angular))
+                self._press_until = now + DRIVE_MIN_S
+            elif moving:
+                self._press = (float(linear), float(angular))
             self._linear = float(linear)
             self._angular = float(angular)
+            self._updated = now
+
+    def halt(self) -> None:
+        with self._lock:
+            self._press_until = 0.0
+            self._linear = 0.0
+            self._angular = 0.0
             self._updated = time.time()
 
     def _snapshot(self) -> tuple[float, float, float]:
         with self._lock:
+            # A press that is let go before the next send still moves the
+            # robot briefly; otherwise a quick tap never reached it.
+            if self._linear == 0.0 and self._angular == 0.0 and time.time() < self._press_until:
+                return self._press[0], self._press[1], self._updated
             return self._linear, self._angular, self._updated
 
     def _log_failure(self, exc: Exception) -> None:
@@ -599,6 +621,14 @@ class DriveMotion:
         send(broker, "set_working_state", {"state": 1, "source": "smart_home"})
 
     def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self._loop()
+            except Exception:  # noqa: BLE001
+                log("Drive sender failed; restarting it:\n" + traceback.format_exc())
+                self._stop.wait(0.5)
+
+    def _loop(self) -> None:
         broker: Any = None
         holding = False
         announced: tuple[float, float] | None = None
@@ -623,7 +653,10 @@ class DriveMotion:
                 continue
             try:
                 if broker is None:
+                    looked = time.time()
                     broker = self.client.drive_broker()
+                    if time.time() - looked > 0.3:
+                        log(f"Drive: broker lookup took {time.time() - looked:.1f}s")
                 if moving:
                     self.state["drive_busy_until"] = now + 1.5
                     self.state["drive_trace_until"] = now + DRIVE_TRACE_S
@@ -691,9 +724,13 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     angular = float(req.get("angular") or 0)
     moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
     motion = state.get("motion")
+    request = (round(linear, 2), round(angular, 2))
+    if request != state.get("drive_request_seen"):
+        state["drive_request_seen"] = request
+        log(f"Drive request: vel={linear:.2f} rev={angular:.2f} controller={bool(state.get('hold_controller'))}")
     if moving and not state.get("hold_controller"):
         if isinstance(motion, DriveMotion):
-            motion.set_velocity(0.0, 0.0)
+            motion.halt()
         return {
             "ok": False,
             "op": "drive",
@@ -710,8 +747,9 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
         state["manual_drive"] = True
         state["last_keepalive"] = time.time()
         warning = dock_block_reason(raw) or motion_fault_warning(raw)
-        if warning:
+        if warning and warning != state.get("drive_warning_seen"):
             log(f"Drive warning: {warning}")
+        state["drive_warning_seen"] = warning
     # Camera keep-alives must not put the robot back into camera check.
     state["drive_busy_until"] = time.time() + 1.5
     if isinstance(motion, DriveMotion):
@@ -1177,6 +1215,9 @@ async def handle_request(
                     **robot,
                 }
 
+            motion = state.get("motion")
+            if isinstance(motion, DriveMotion):
+                motion.halt()
             # Releasing a lights/drive session returns to idle. A work hold
             # must not send set_working_state 0 — that would stop a running plan.
             had_control_session = bool(
@@ -1257,7 +1298,7 @@ async def handle_request(
         if op == "stop":
             motion = state.get("motion")
             if isinstance(motion, DriveMotion):
-                motion.set_velocity(0.0, 0.0)
+                motion.halt()
             if not getattr(client, "controller_acquired", False):
                 await ensure_controller_role(client)
             state["manual_drive"] = False

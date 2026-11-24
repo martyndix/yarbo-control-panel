@@ -279,17 +279,26 @@ class YarboCloudControlClient:
             self._controller_acquired = True
 
     def drive_broker(self) -> Any:
-        """The broker connection Dock publishes on. Resolve it once per hold.
+        """The broker connection that carries this robot's status.
 
-        Looking it up can query the cloud for the robot's route, which is
-        too slow to repeat ten times a second.
+        The SDK's own lookup can ask the cloud for the robot's route and
+        rebuild the connection, which held a direction back for longer
+        than the press lasted. The connection already subscribed to this
+        robot is the routed one.
         """
-        return self._require_sdk()._ensure_mqtt_for(self.sn)
+        sdk = self._require_sdk()
+        for mqtt in (getattr(sdk, "_new_mqtt", None), getattr(sdk, "_legacy_mqtt", None)):
+            topics = getattr(mqtt, "_callbacks", None) if mqtt is not None else None
+            if isinstance(topics, dict) and any(self.sn in str(topic) for topic in topics):
+                return mqtt
+        return sdk._ensure_mqtt_for(self.sn)
 
     def publish_on(self, mqtt: Any, cmd: str, payload: dict[str, Any]) -> None:
         """Publish without waiting, in the same compressed form as Dock."""
         from yarbo_robot_sdk.codec import encode_mqtt_payload
 
+        if not getattr(mqtt, "is_connected", True):
+            raise RuntimeError(f"{cmd} not sent: the cloud broker is reconnecting")
         mqtt.publish(f"snowbot/{self.sn}/app/{cmd}", encode_mqtt_payload(payload if payload else {}))
 
     def pushed_snapshot(self) -> tuple[dict[str, Any] | None, float]:

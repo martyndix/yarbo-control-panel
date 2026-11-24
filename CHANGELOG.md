@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.93] - 2026-11-24
+
+### Fixed
+
+- A direction is no longer lost before it reaches the robot. The drive sender looked up the cloud connection in a way that could stop to ask Yarbo's servers, and a short press could end before anything was sent. It now uses the connection that already carries the robot's status, and every press moves the robot for at least 0.4 seconds.
+- The robot log now records each direction the page sends and any failure in the drive sender, so a press that does not move the robot can be traced.
+
 ## [5.0.92] - 2026-11-24
 
 ### Changed
