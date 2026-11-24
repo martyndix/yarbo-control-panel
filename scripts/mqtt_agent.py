@@ -34,7 +34,6 @@ ROOT = Path(__file__).resolve().parents[1]
 # Dock, lights, and drive must not wait behind a status read. The camera
 # listener used to ask for status every second and hold this one session.
 _control_waiters = 0
-_drive_waiters = 0
 _CONTROL_OPS = frozenset({
     "controller",
     "lights",
@@ -118,6 +117,40 @@ def store_last_raw(state: dict[str, Any], raw: Any) -> bool:
     state["last_raw_at"] = time.time()
     state["last_telemetry_miss_at"] = 0.0
     return True
+
+
+def adopt_pushed_raw(state: dict[str, Any], client: Any) -> None:
+    """Take the robot's own DeviceMSG push when it is newer than the cache.
+
+    The page reads the cache. Before this, the cache only moved when
+    something asked the robot for a snapshot, so the map sat still.
+    """
+    pushed = getattr(client, "pushed_snapshot", None)
+    if not callable(pushed):
+        return
+    raw, at = pushed()
+    if at > float(state.get("last_raw_at") or 0.0) and telemetry_raw_usable(raw):
+        state["last_raw"] = raw
+        state["last_raw_at"] = at
+        state["last_telemetry_miss_at"] = 0.0
+
+
+def answers_without_lock(req: dict[str, Any], state: dict[str, Any], client: Any) -> bool:
+    """Requests that must not queue behind a robot wait.
+
+    While the cameras are publishing the robot sends no acknowledgements, so
+    a status read can hold the lock for seconds. The panel's ping then timed
+    out and the panel killed this agent, which dropped the controller and
+    the robot snapshot. A ping, a direction, and a cached status read do not
+    wait on the robot.
+    """
+    op = str(req.get("op") or "")
+    if op in ("ping", "drive"):
+        return True
+    if op == "telemetry" and req.get("prefer_cache"):
+        adopt_pushed_raw(state, client)
+        return isinstance(state.get("last_raw"), dict)
+    return False
 
 
 def plan_is_active(raw: Any) -> bool:
@@ -486,14 +519,24 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
         return False
 
 
-class DriveMotion:
-    """Repeat the latest direction about ten times a second.
+# The page repeats a held direction about eight times a second. A gap this
+# long means the page or its connection is gone, so the robot is stopped.
+DRIVE_STALE_S = 2.0
+DRIVE_SEND_S = 0.1
+DRIVE_WAKE_EVERY_S = 2.0
 
-    Dock is one command, so sending it once is enough. This firmware ignores
-    a single cmd_vel. The page can accept the press immediately; this thread
-    keeps publishing the held direction until the finger comes up. It does
-    not use the shared worker pool, which the cameras can fill while they
-    wait for an acknowledgement.
+
+class DriveMotion:
+    """Stream the held direction to the robot about ten times a second.
+
+    The robot only keeps moving while cmd_vel keeps arriving. This thread
+    never takes the agent lock, so a status read or a camera keep-alive
+    waiting on a silent robot cannot hold a direction back.
+
+    A hold leaves camera check (live view keeps the robot in it, and in
+    that mode it ignores a direction) and wakes the robot, then streams
+    cmd_vel on the same broker connection Dock uses. It does not claim the
+    controller; that is the Connect button's job.
     """
 
     def __init__(self, client: Any, state: dict[str, Any]) -> None:
@@ -505,8 +548,6 @@ class DriveMotion:
         self._updated = 0.0
         self._stop = threading.Event()
         self._logged = 0.0
-        self._announced: tuple[float, float] | None = None
-        self._edge = 0
         self._thread = threading.Thread(target=self._run, name="yarbo-drive", daemon=True)
         self._thread.start()
 
@@ -520,65 +561,73 @@ class DriveMotion:
         with self._lock:
             return self._linear, self._angular, self._updated
 
-    def _publish(self, cmd: str, payload: dict[str, Any]) -> None:
-        # publish_now stays on the session Dock already uses. _publish_sync
-        # can close that session while it decides which broker to use.
-        send = getattr(self.client, "publish_now", None)
-        if callable(send):
-            send(cmd, payload)
-            return
-        self.client._publish_sync(cmd, payload, False)
+    def _log_failure(self, exc: Exception) -> None:
+        now = time.time()
+        if now - self._logged > 1.0:
+            self._logged = now
+            log(f"drive publish failed: {exc}")
 
-    def _try_publish(self, cmd: str, payload: dict[str, Any]) -> None:
-        try:
-            self._publish(cmd, payload)
-        except Exception as exc:  # noqa: BLE001
-            now = time.time()
-            if now - self._logged > 1.0:
-                self._logged = now
-                log(f"drive {cmd} failed: {exc}")
+    def _start_hold(self, broker: Any) -> None:
+        send = self.client.publish_on
+        send(broker, "set_manul_camera_check", {"state": 0, "overtime": 0})
+        if not self.state.get("drive_setup_sent"):
+            send(broker, "wireless_charging_cmd", {"cmd": 0})
+            send(broker, "emergency_unlock", {})
+            self.state["drive_setup_sent"] = True
+        send(broker, "set_working_state", {"state": 1, "source": "smart_home"})
 
     def _run(self) -> None:
+        broker: Any = None
+        holding = False
+        announced: tuple[float, float] | None = None
+        last_wake = 0.0
         zeros_left = 0
         while not self._stop.is_set():
             linear, angular, updated = self._snapshot()
+            now = time.time()
             moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-            # The page repeats a held direction about eight times a second.
-            # Pictures can stall that timer. Two seconds is long enough to
-            # ride through a stall, and a real release sends zero itself.
-            if moving and updated > 0.0 and time.time() - updated > 2.0:
-                self.set_velocity(0.0, 0.0)
-                linear = 0.0
-                angular = 0.0
+            if moving and now - updated > DRIVE_STALE_S:
+                with self._lock:
+                    if self._updated == updated:
+                        self._linear = 0.0
+                        self._angular = 0.0
+                linear = angular = 0.0
                 moving = False
-                zeros_left = 3
-            if not moving and not self.state.get("manual_drive"):
-                self._announced = None
-            if moving:
-                zeros_left = 3
-                self.state["drive_busy_until"] = time.time() + 1.5
-                held = (linear, angular)
-                if held != self._announced:
-                    self._announced = held
-                    log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-            elif zeros_left <= 0:
+                log("Drive: the page stopped repeating the direction; stopping")
+            if not moving and zeros_left <= 0:
                 self._stop.wait(0.05)
                 continue
-            else:
-                zeros_left -= 1
-                if zeros_left == 0:
-                    log("Drive: stop")
-                    self._announced = None
-                    self.state["manual_drive"] = False
-            self._stop.wait(0.1)
-
-
-async def publish_velocity(client: Any, linear: float, angular: float) -> None:
-    payload = {"vel": linear, "rev": angular}
-    await publish_quick(client, "cmd_vel", payload)
-    send_plain = getattr(client, "publish_now", None)
-    if callable(send_plain):
-        await asyncio.to_thread(send_plain, "cmd_vel", payload)
+            try:
+                if broker is None:
+                    broker = self.client.drive_broker()
+                if moving:
+                    self.state["drive_busy_until"] = now + 1.5
+                    if not holding:
+                        self._start_hold(broker)
+                        holding = True
+                        last_wake = now
+                    elif now - last_wake >= DRIVE_WAKE_EVERY_S:
+                        self.client.publish_on(broker, "set_working_state", {"state": 1, "source": "smart_home"})
+                        last_wake = now
+                    self.client.publish_on(broker, "cmd_vel", {"vel": linear, "rev": angular})
+                    zeros_left = 3
+                    if announced != (linear, angular):
+                        announced = (linear, angular)
+                        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
+                else:
+                    self.client.publish_on(broker, "cmd_vel", {"vel": 0.0, "rev": 0.0})
+                    zeros_left -= 1
+                    if zeros_left <= 0:
+                        holding = False
+                        broker = None
+                        announced = None
+                        self.state["manual_drive"] = False
+                        log("Drive: stop")
+            except Exception as exc:  # noqa: BLE001
+                self._log_failure(exc)
+                broker = None
+                holding = False
+            self._stop.wait(DRIVE_SEND_S)
 
 
 def drive_holds_session(state: dict[str, Any]) -> bool:
@@ -588,7 +637,7 @@ def drive_holds_session(state: dict[str, Any]) -> bool:
     back into camera check, and a held direction only moved after the
     cameras were stopped. Skip those keep-alives for the hold.
     """
-    if state.get("manual_drive") or state.get("drive_edge_active"):
+    if state.get("manual_drive"):
         return True
     return time.time() < float(state.get("drive_busy_until") or 0)
 
@@ -601,145 +650,38 @@ VISION_DRIVE_BLOCK_CMDS = frozenset({
 })
 
 
-async def disconnect_after_direction(client: Any) -> None:
-    """Run the robot half of the Disconnect button after cmd_vel is on the wire.
-
-    The pad used to answer before cmd_vel was published, then press Connect
-    first. Disconnect then ran against an empty buffer. Publish first, then
-    this, and do not take the controller again until the next pulse needs it.
-    """
-    await sleep_from_control(client)
-    try:
-        client._controller_acquired = False  # noqa: SLF001
-    except Exception:
-        pass
-
-
-# After Disconnect, leave the robot alone this long. The next pad pulse used
-# to take the controller again within ~120ms and cancel the move.
-DRIVE_DISCONNECT_SETTLE_S = 1.6
-
-
-async def carry_out_direction(client: Any, state: dict[str, Any]) -> None:
-    """Publish the held direction, then Disconnect so the robot moves.
-
-    Order matters. Disconnect only carries out a speed that is already stored.
-    After Disconnect, do not take the controller again until the settle time
-    ends — that re-arm is why the pad needed a manual toggle.
-    """
-    motion = state.get("motion")
-    if not isinstance(motion, DriveMotion):
-        return
-    linear, angular, _updated = motion._snapshot()
-    moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-    now = time.time()
-    since_flush = now - float(state.get("drive_flushed_at") or 0)
-    settling = since_flush < DRIVE_DISCONNECT_SETTLE_S
-    if not moving:
-        if not state.get("drive_edge_active"):
-            return
-        if settling:
-            # Disconnect is still settling. Do not wake the robot again.
-            state["drive_busy_until"] = time.time() + 2.5
-            return
-        await publish_velocity(client, 0.0, 0.0)
-        await disconnect_after_direction(client)
-        state["drive_flushed_at"] = time.time()
-        state["drive_edge_active"] = False
-        state["drive_setup_sent"] = False
-        state["manual_drive"] = False
-        state["hold_controller"] = True
-        state["control_session"] = True
-        log("Drive: stop")
-        return
-    state["drive_edge_active"] = True
-    state["hold_controller"] = True
-    state["control_session"] = True
-    state["manual_drive"] = True
-    state["dock_release"] = False
-    state["drive_busy_until"] = time.time() + 2.5
-    state["last_keepalive"] = time.time()
-    if settling:
-        # Leave Disconnect alone. Re-arming here cancelled the move, and the
-        # wheels only turned when the button was toggled by hand.
-        return
-    # Leave camera check. Live view used to turn it back on between pulses.
-    await publish_quick(client, "set_manul_camera_check", {"state": 0, "overtime": 0})
-    if not state.get("drive_setup_sent"):
-        await publish_quick(client, "wireless_charging_cmd", {"cmd": 0})
-        await publish_quick(client, "emergency_unlock", {})
-        state["drive_setup_sent"] = True
-    try:
-        client._controller_acquired = False  # noqa: SLF001
-    except Exception:
-        pass
-    await client.get_controller()
-    await wake_for_control(client)
-    await publish_velocity(client, linear, angular)
-    held = (linear, angular)
-    if state.get("drive_announced") != held:
-        state["drive_announced"] = held
-        log(f"Drive: vel={linear:.2f} rev={angular:.2f}")
-    await disconnect_after_direction(client)
-    state["drive_flushed_at"] = time.time()
-    state["drive_busy_until"] = time.time() + 2.5
-    log(f"Drive: disconnect after vel={linear:.2f} rev={angular:.2f}")
-
-
-async def drive_apply_loop(client: Any, lock: asyncio.Lock, state: dict[str, Any]) -> None:
-    """Keep publishing and flushing while a direction is held."""
-    while True:
-        motion = state.get("motion")
-        if not isinstance(motion, DriveMotion):
-            await asyncio.sleep(0.1)
-            continue
-        linear, angular, _updated = motion._snapshot()
-        moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
-        if not moving and not state.get("drive_edge_active"):
-            await asyncio.sleep(0.05)
-            continue
-        since_flush = time.time() - float(state.get("drive_flushed_at") or 0)
-        if since_flush < DRIVE_DISCONNECT_SETTLE_S:
-            await asyncio.sleep(DRIVE_DISCONNECT_SETTLE_S - since_flush)
-            continue
-        try:
-            async with lock:
-                await carry_out_direction(client, state)
-        except Exception as exc:  # noqa: BLE001
-            log(f"drive apply failed: {exc}")
-            state["drive_error"] = str(exc)
-        await asyncio.sleep(0.05)
-
-
 def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict[str, Any]:
-    """Accept a direction and answer before any publish.
+    """Hand a direction to DriveMotion and answer at once.
 
-    Dock already returns as soon as its command is handed to the session.
-    A direction used to stay on that session until cmd_vel finished, and
-    with the cameras publishing that was long enough for the page to give
-    up. DriveMotion repeats the latest velocity after this answer.
+    A direction needs the controller, and only the Connect button takes it.
     """
     linear = float(req.get("linear") or 0)
     angular = float(req.get("angular") or 0)
     moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
+    motion = state.get("motion")
+    if moving and not state.get("hold_controller"):
+        if isinstance(motion, DriveMotion):
+            motion.set_velocity(0.0, 0.0)
+        return {
+            "ok": False,
+            "op": "drive",
+            "error": "Press Connect first, then hold a direction.",
+            "needs_controller": True,
+            **state_flags(state, client),
+        }
     warning = None
-    raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
     if moving:
-        # Do not change the controller button. The pad flips the robot's
-        # own awake state, and reporting that as Connected made the button
-        # drop back to Connect after every press.
-        state["hold_controller"] = True
-        state["control_session"] = True
+        raw = state.get("last_raw") if isinstance(state.get("last_raw"), dict) else None
         state["work_hold"] = False
         state["work_latched"] = False
+        state["dock_release"] = False
         state["manual_drive"] = True
         state["last_keepalive"] = time.time()
         warning = dock_block_reason(raw) or motion_fault_warning(raw)
         if warning:
             log(f"Drive warning: {warning}")
-    # Camera keep-alives must not sit in front of a held direction.
+    # Camera keep-alives must not put the robot back into camera check.
     state["drive_busy_until"] = time.time() + 1.5
-    motion = state.get("motion")
     if isinstance(motion, DriveMotion):
         motion.set_velocity(linear, angular)
     else:
@@ -912,7 +854,7 @@ async def read_controller_reality(client: Any, state: dict[str, Any]) -> dict[st
 
 async def soft_keepalive(client: Any, state: dict[str, Any]) -> None:
     """Quiet hold: wake (+ lights) without get_controller speech."""
-    if _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0):
+    if time.time() < float(state.get("drive_busy_until") or 0):
         return
     if state.get("work_hold") and not state.get("lights_on") and not state.get("control_session"):
         await wake_for_control(client)
@@ -1020,6 +962,7 @@ async def handle_request(
 
     try:
         if op == "telemetry":
+            adopt_pushed_raw(state, client)
             # A dock / lights / drive click is already waiting. Hand back the
             # last snapshot and let that click use the session.
             if _control_waiters > 0 and telemetry_raw_usable(state.get("last_raw")):
@@ -1278,6 +1221,9 @@ async def handle_request(
             }
 
         if op == "stop":
+            motion = state.get("motion")
+            if isinstance(motion, DriveMotion):
+                motion.set_velocity(0.0, 0.0)
             if not getattr(client, "controller_acquired", False):
                 await ensure_controller_role(client)
             state["manual_drive"] = False
@@ -1304,16 +1250,7 @@ async def handle_request(
             }
 
         if op == "drive":
-            # Publish cmd_vel, then Disconnect, in this request. Answering
-            # first let Disconnect run before the speed was on the wire.
-            out = queue_drive(client, req, state)
-            try:
-                await carry_out_direction(client, state)
-            except Exception as exc:  # noqa: BLE001
-                log(f"drive apply failed: {exc}")
-                out["warning"] = f"Drive did not reach the robot ({exc})"
-            out.update(state_flags(state, client))
-            return out
+            return queue_drive(client, req, state)
 
         if op == "buzzer":
             if not state.get("hold_controller"):
@@ -1586,12 +1523,12 @@ async def controller_keepalive_loop(
         if not due:
             continue
         try:
-            if _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0):
+            if time.time() < float(state.get("drive_busy_until") or 0):
                 continue
             async with lock:
                 if not wants_wakeup(state):
                     continue
-                if _drive_waiters > 0 or time.time() < float(state.get("drive_busy_until") or 0):
+                if time.time() < float(state.get("drive_busy_until") or 0):
                     continue
                 await soft_keepalive(client, state)
                 state["last_keepalive"] = time.time()
@@ -1619,7 +1556,7 @@ async def handle_client(
     lock: asyncio.Lock,
     state: dict[str, Any],
 ) -> None:
-    global _control_waiters, _drive_waiters
+    global _control_waiters
     try:
         while True:
             line = await reader.readline()
@@ -1638,48 +1575,31 @@ async def handle_client(
 
             req_id = req.get("id") if isinstance(req, dict) else None
             op = str(req.get("op") or "") if isinstance(req, dict) else ""
-            control = op in _CONTROL_OPS
-            driving = op in {"drive", "stop"}
             vision = isinstance(req, dict) and op == "publish" and str(req.get("session") or "") == "vision"
-            counted = False
-            if driving:
-                _drive_waiters += 1
-                _control_waiters += 1
-                counted = True
-                # Camera keep-alives must not sit in front of a held direction.
-                state["drive_busy_until"] = time.time() + 1.0
-            elif control and not (vision and _drive_waiters > 0):
-                _control_waiters += 1
-                counted = True
-            elif not control:
-                waited = 0.0
-                while (_control_waiters > 0 or _drive_waiters > 0) and waited < 2.0:
-                    await asyncio.sleep(0.02)
-                    waited += 0.02
-            try:
-                vision_cmd = str(req.get("cmd") or "") if isinstance(req, dict) else ""
-                if vision and (_drive_waiters > 0 or drive_holds_session(state)):
-                    # Do not take the lock for a camera keep-alive during drive.
-                    # Those keep-alives put the robot back into camera check.
-                    resp = {
-                        "ok": True,
-                        "op": "publish",
-                        "cmd": vision_cmd,
-                        "session": "vision",
-                        "skipped": "drive",
-                    }
+            if not isinstance(req, dict):
+                resp = {"ok": False, "error": "Invalid JSON"}
+            elif answers_without_lock(req, state, client):
+                resp = await handle_request(client, req, state)
+            elif vision:
+                # A camera keep-alive can wait 1.5s for an acknowledgement
+                # the robot does not send while the cameras publish. It must
+                # not hold Connect, Dock, or the panel's ping behind it.
+                resp = await handle_request(client, req, state)
+            else:
+                control = op in _CONTROL_OPS
+                if control:
+                    _control_waiters += 1
                 else:
+                    waited = 0.0
+                    while _control_waiters > 0 and waited < 2.0:
+                        await asyncio.sleep(0.02)
+                        waited += 0.02
+                try:
                     async with lock:
-                        if not isinstance(req, dict):
-                            resp = {"ok": False, "error": "Invalid JSON"}
-                        else:
-                            resp = await handle_request(client, req, state)
-            finally:
-                if driving:
-                    _drive_waiters -= 1
-                    _control_waiters -= 1
-                elif counted:
-                    _control_waiters -= 1
+                        resp = await handle_request(client, req, state)
+                finally:
+                    if control:
+                        _control_waiters -= 1
             if req_id is not None:
                 resp["id"] = req_id
             writer.write((json.dumps(resp, separators=(",", ":")) + "\n").encode())
@@ -1835,7 +1755,6 @@ async def amain() -> int:
     asyncio.create_task(connect_mqtt(client))
     asyncio.create_task(plan_feedback_loop(client, state))
     asyncio.create_task(controller_keepalive_loop(client, lock, state))
-    asyncio.create_task(drive_apply_loop(client, lock, state))
     asyncio.create_task(vestaboard_tick_loop())
 
     async with server:
