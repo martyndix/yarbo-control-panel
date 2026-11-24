@@ -762,7 +762,23 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     # Camera keep-alives must not put the robot back into camera check.
     state["drive_busy_until"] = time.time() + 1.5
     if isinstance(motion, DriveMotion):
-        motion.set_velocity(linear, angular)
+        why = str(req.get("why") or "")
+        # An explicit release must clear the short-press latch. Otherwise a
+        # zero that races with a leftover hold can restart motion, and the
+        # robot only twitches when Disconnect runs.
+        if (not moving) and why in {
+            "mouseup",
+            "pointerup",
+            "touchend",
+            "touchcancel",
+            "blur",
+            "blind",
+            "force-stop",
+            "buttons-up",
+        }:
+            motion.halt()
+        else:
+            motion.set_velocity(linear, angular)
     else:
         log("drive has no motion sender")
     out: dict[str, Any] = {

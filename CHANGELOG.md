@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.97] - 2026-11-24
+
+### Fixed
+
+- A short D-pad press no longer leaves a leftover speed command that only runs when you Disconnect. Releasing the pad cancels any hold pulses that were still queued, and an early ghost mouse-up is ignored if the button is still down, so the robot keeps moving for the whole hold instead of twitching when the controller is released.
+
 ## [5.0.96] - 2026-11-24
 
 ### Fixed

@@ -450,7 +450,11 @@ let drivePointerId = null;
 let drivePointerType = '';
 let driveBlindSince = 0;
 let driveInFlight = false;
-/** @type {{ linear: number, angular: number, enterManual: boolean }|null} */
+let driveReleaseGen = 0;
+let driveMouseButtons = 0;
+let driveReleaseTimer = null;
+let drivePressAt = 0;
+/** @type {{ linear: number, angular: number, enterManual: boolean, meta?: object }|null} */
 let pendingDrive = null;
 let manualModeEntered = false;
 
@@ -18302,21 +18306,32 @@ async function sendDrive(linear, angular, enterManual = false, meta = null) {
 async function flushDriveQueue() {
     if (driveInFlight) return;
     driveInFlight = true;
+    const gen = driveReleaseGen;
     try {
         while (pendingDrive) {
+            // A release must cancel holds that were queued before the finger came up.
+            // Those leftovers were restarting motion after stop, so the robot only
+            // twitched when Disconnect ran.
+            if (gen !== driveReleaseGen) {
+                pendingDrive = null;
+                break;
+            }
             const next = pendingDrive;
             pendingDrive = null;
+            const moving = Math.abs(next.linear) > 1e-6 || Math.abs(next.angular) > 1e-6;
+            if (moving && !driveActive) continue;
             await sendDrive(next.linear, next.angular, next.enterManual, next.meta || null);
         }
     } finally {
         driveInFlight = false;
-        if (pendingDrive) {
+        if (pendingDrive && gen === driveReleaseGen) {
             flushDriveQueue();
         }
     }
 }
 
 function sendDrivePulse(linear, angular, meta = null) {
+    if (!driveActive) return;
     pendingDrive = {
         linear,
         angular,
@@ -18345,10 +18360,19 @@ function stopDriveLoop() {
 }
 
 async function stopDriveIfHeld() {
-    if (!driveActive) return;
+    pendingDrive = null;
+    driveReleaseGen += 1;
+    if (driveReleaseTimer) {
+        clearTimeout(driveReleaseTimer);
+        driveReleaseTimer = null;
+    }
+    if (!driveActive) {
+        await sendDrive(0, 0, false, { why: 'force-stop', pointer: drivePointerType || 'none' });
+        return;
+    }
     stopDriveLoop();
     if (els.driveStatus) els.driveStatus.textContent = 'Ready';
-    await sendDrive(0, 0, false);
+    await sendDrive(0, 0, false, { why: 'force-stop', pointer: drivePointerType || 'none' });
 }
 
 async function startDrive(direction, button) {
@@ -18381,6 +18405,14 @@ async function startDrive(direction, button) {
         }, 700);
     }
 
+    if (driveReleaseTimer) {
+        clearTimeout(driveReleaseTimer);
+        driveReleaseTimer = null;
+    }
+    pendingDrive = null;
+    driveReleaseGen += 1;
+    drivePressAt = Date.now();
+    driveMouseButtons = 1;
     stopDriveLoop();
     driveActive = true;
     driveBlindSince = 0;
@@ -18396,10 +18428,7 @@ async function startDrive(direction, button) {
         if (!cameraStreamLive()) {
             if (!driveBlindSince) driveBlindSince = Date.now();
             if (Date.now() - driveBlindSince >= 8000) {
-                drivePointerId = null;
-                drivePointerType = '';
-                stopDriveLoop();
-                sendDrive(0, 0, false, { why: 'blind', pointer: 'none' });
+                finishDriveHold('blind');
                 if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
                 updateControllerGatedControls();
                 return;
@@ -18412,14 +18441,43 @@ async function startDrive(direction, button) {
     }, DRIVE_REPEAT_MS);
 }
 
-function endDriveHold(why = 'release') {
+function finishDriveHold(why = 'release') {
     const pointer = drivePointerType || '';
+    if (driveReleaseTimer) {
+        clearTimeout(driveReleaseTimer);
+        driveReleaseTimer = null;
+    }
+    pendingDrive = null;
+    driveReleaseGen += 1;
     drivePointerId = null;
     drivePointerType = '';
-    if (!driveActive) return;
+    driveMouseButtons = 0;
+    if (!driveActive) {
+        sendDrive(0, 0, false, { why, pointer: pointer || 'none' });
+        return;
+    }
     stopDriveLoop();
-    sendDrive(0, 0, false, { why, pointer });
+    sendDrive(0, 0, false, { why, pointer: pointer || 'none' });
     if (els.driveStatus) els.driveStatus.textContent = 'Ready';
+}
+
+function endDriveHold(why = 'release') {
+    // A mouseup in the same instant as mousedown is often a ghost click. Wait
+    // briefly; if the button is still reported down, keep holding.
+    if ((why === 'mouseup' || why === 'pointerup') && drivePointerType === 'mouse' && driveActive) {
+        if (driveReleaseTimer) clearTimeout(driveReleaseTimer);
+        const pressedFor = Date.now() - drivePressAt;
+        if (pressedFor < 280) {
+            driveReleaseTimer = setTimeout(() => {
+                driveReleaseTimer = null;
+                if (!driveActive) return;
+                if ((driveMouseButtons & 1) === 1) return;
+                finishDriveHold(why);
+            }, 120);
+            return;
+        }
+    }
+    finishDriveHold(why);
 }
 
 function setupDrivePad() {
@@ -18434,6 +18492,7 @@ function setupDrivePad() {
         if (pointerType === 'mouse' && driveActive && drivePointerType === 'touch') return;
         drivePointerId = pointerId;
         drivePointerType = pointerType || 'mouse';
+        driveMouseButtons = 1;
         if (direction === 'stop') startDrive('stop', button);
         else startDrive(direction, button);
     };
@@ -18457,15 +18516,38 @@ function setupDrivePad() {
             endDriveHold('touchcancel');
         });
 
-        button.addEventListener('mousedown', (e) => {
-            if (e.button !== 0) return;
-            // A real mouse only. Ignore the click Safari synthesizes after touch.
+        button.addEventListener('pointerdown', (e) => {
+            if (e.pointerType === 'touch' || e.pointerType === 'pen') return;
+            if (typeof e.button === 'number' && e.button !== 0) return;
             if (drivePointerType === 'touch') return;
-            begin(direction, button, 'mouse', 'mouse');
+            e.preventDefault();
+            try {
+                button.setPointerCapture(e.pointerId);
+            } catch {
+                /* already released */
+            }
+            begin(direction, button, e.pointerId, 'mouse');
         });
+        button.addEventListener('pointerup', (e) => {
+            if (drivePointerType !== 'mouse') return;
+            if (drivePointerId !== null && e.pointerId !== drivePointerId) return;
+            driveMouseButtons = e.buttons;
+            endDriveHold('pointerup');
+        });
+        // Do not end when Safari drops pointer capture during a page update;
+        // that was stopping the robot in the same second as the press.
     });
 
-    window.addEventListener('mouseup', () => {
+    window.addEventListener('mousemove', (e) => {
+        driveMouseButtons = e.buttons;
+        if (!driveActive || drivePointerType !== 'mouse') return;
+        if ((e.buttons & 1) === 1 && driveReleaseTimer) {
+            clearTimeout(driveReleaseTimer);
+            driveReleaseTimer = null;
+        }
+    });
+    window.addEventListener('mouseup', (e) => {
+        driveMouseButtons = e.buttons;
         if (drivePointerType !== 'mouse') return;
         endDriveHold('mouseup');
     });

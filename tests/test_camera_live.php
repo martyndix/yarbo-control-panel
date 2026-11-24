@@ -162,9 +162,9 @@ assert_true(str_contains($appJs, 'Press Connect first'), 'the pad asks for Conne
 $padAt = strpos($appJs, 'function setupDrivePad');
 $padEnd = strpos($appJs, 'async function sendCommand', (int) $padAt);
 $padFn = substr($appJs, (int) $padAt, (int) $padEnd - (int) $padAt);
-assert_true(!str_contains($padFn, 'setPointerCapture'), 'a direction does not use pointer capture, which Safari drops mid-hold');
-assert_true(!str_contains($padFn, 'lostpointercapture'), 'a direction does not end when Safari drops pointer capture');
+assert_true(!str_contains($padFn, 'addEventListener(\'lostpointercapture\''), 'a direction does not end when Safari drops pointer capture');
 assert_true(str_contains($padFn, 'touchstart'), 'a finger hold uses touch events so Safari cannot end it with a ghost mouse click');
+assert_true(str_contains($appJs, 'driveReleaseGen'), 'a release cancels hold pulses that were already queued');
 assert_true(str_contains($padFn, "drivePointerType === 'touch'"), 'a finger hold ignores the mouse click Safari synthesises');
 assert_true(!str_contains($appJs, 'Connect the controller above the cameras first'), 'the pad does not wait for the controller button');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
