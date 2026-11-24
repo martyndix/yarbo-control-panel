@@ -147,6 +147,12 @@ class YarboCloudControlClient:
             fb = _unwrap_plan_feedback(payload if isinstance(payload, dict) else data)
             if fb:
                 self._store_plan_feedback(fb)
+        if response_topic == "get_device_msg" and isinstance(payload, dict) and payload:
+            # A status asked for without waiting (live view) is only kept here.
+            snapshot = _unwrap_device_msg(payload)
+            if any(k in snapshot for k in ("StateMSG", "BatteryMSG", "CombinedOdom", "RTKMSG")):
+                self._last_raw = snapshot
+                self._last_raw_at = time.time()
         if response_topic:
             self._last_cmd_feedback = data
             self._last_cmd_feedback_topic = response_topic

@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.101] - 2026-11-24
+
+### Fixed
+
+- A clicked direction keeps the robot moving until you click it again or press Stop. Only the first press reached the robot: the repeats went out on the picture connection, and that port throws away anything the page sends, so the panel stopped the robot after 12 seconds. Repeats now go to the panel as ordinary requests. The Disconnect step from 5.0.100 is gone (that is what flashed the lights on and off), and every new direction unlocks and wakes the robot the way the phone app does, so a second press moves it too.
+- The robot status tile keeps updating while live view is on. The robot stops sending its status while the cameras run, so the panel now asks for it every few seconds and keeps the answer. If the robot still sends nothing, the agent log says `Status: live view on and the robot's last status is …s old`.
+
 ## [5.0.100] - 2026-11-24
 
 ### Fixed

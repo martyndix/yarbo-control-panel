@@ -17717,19 +17717,15 @@ function cameraControlsOpen() {
     return !!source && typeof source.send === 'function' && source.readyState === 1;
 }
 
+// The picture connection is on its own port and that proxy throws away
+// anything the page sends, so a press there never reached the robot.
 function commandTransport() {
-    // Connect needs the answer back. Safari reads the picture connection
-    // while the cameras are moving, so the answer comes back on that one.
-    if (cameraPicturesOpen()) return cameraLiveSource;
     if (cameraControlsOpen()) return cameraCommandSocket;
     return null;
 }
 
 function driveTransport() {
-    // A direction does not have to wait for the answer. The quiet connection
-    // is not full of pictures, so the press can leave while the view stays up.
     if (cameraControlsOpen()) return cameraCommandSocket;
-    if (cameraPicturesOpen()) return cameraLiveSource;
     return null;
 }
 
