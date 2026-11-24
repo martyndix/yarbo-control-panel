@@ -223,10 +223,32 @@ def main() -> int:
     spec = {d["id"]: d for d in agent.flatten_nodes({"nodes": [white, ambiance, rgb]})}
     if spec.get("40:1", {}).get("colorable") or spec.get("40:1", {}).get("color_ct"):
         raise SystemExit(f"dimmable white must not show colour {spec.get('40:1')}")
+    if not spec.get("40:1", {}).get("dimmable"):
+        raise SystemExit(f"dimmable white must be dimmable {spec.get('40:1')}")
     if not spec.get("41:1", {}).get("color_ct") or spec.get("41:1", {}).get("colorable"):
         raise SystemExit(f"white ambiance must be CT only {spec.get('41:1')}")
     if not spec.get("42:1", {}).get("colorable"):
         raise SystemExit(f"extended colour must stay colourable {spec.get('42:1')}")
+
+    # IKEA DUBBELKISEL: Matter dimmable LED driver (0x0101). LevelControl may
+    # be listed before CurrentLevel has been read — still show a brightness slider.
+    dubbelkisel = {
+        "node_id": 77,
+        "available": True,
+        "attributes": {
+            "0/40/1": "IKEA of Sweden",
+            "0/40/3": "DUBBELKISEL",
+            "1/29/0": [{"deviceType": 0x0101, "revision": 1}],
+            "1/29/1": [3, 4, 5, 6, 8, 29],
+            "1/6/0": False,
+        },
+    }
+    ikea = {d["id"]: d for d in agent.flatten_nodes({"nodes": [dubbelkisel]})}
+    row77 = ikea.get("77:1") or {}
+    if row77.get("kind") != "light" or not row77.get("dimmable"):
+        raise SystemExit(f"DUBBELKISEL must be a dimmable light {row77}")
+    if row77.get("colorable") or row77.get("color_ct") or row77.get("color_hs"):
+        raise SystemExit(f"DUBBELKISEL must not show colour {row77}")
 
     mill_split = {
         "node_id": 26,

@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 123
+AGENT_VERSION = 124
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -11227,8 +11227,14 @@ def flatten_nodes(raw: Any) -> list[dict[str, Any]]:
                 "bridge": is_bridge or len(ep_ids) > 3,
                 "on": on,
                 "brightness": brightness,
+                # LevelControl in the server list is enough for a dimmable
+                # slider. Waiting only on CurrentLevel hid IKEA DUBBELKISEL
+                # (and similar) until the first level read landed.
                 "dimmable": is_light
-                and attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None,
+                and (
+                    attr_raw(attributes, endpoint, LEVEL_CONTROL, ATTR_CURRENT_LEVEL) is not None
+                    or endpoint_has_cluster(attributes, endpoint, LEVEL_CONTROL)
+                ),
                 "has_on_off": bool(has_on_off),
                 "available": available,
                 **color,

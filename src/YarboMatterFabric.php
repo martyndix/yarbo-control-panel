@@ -606,7 +606,10 @@ final class YarboMatterFabric
                     'bridge' => $isBridge || count($epIds) > 3,
                     'on' => $on,
                     'brightness' => $brightness,
-                    'dimmable' => $isLight && self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null,
+                    'dimmable' => $isLight && (
+                        self::attrRaw($attributes, $endpoint, self::LEVEL_CONTROL, self::ATTR_CURRENT_LEVEL) !== null
+                        || self::endpointHasCluster($attributes, $endpoint, self::LEVEL_CONTROL)
+                    ),
                     'has_on_off' => $hasOnOff,
                     'available' => $available,
                 ] + ($isLight

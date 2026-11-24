@@ -6,6 +6,13 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.100] - 2026-11-24
+
+### Fixed
+
+- Driving with live view on moves the robot again. Streaming speed alone was not enough on this firmware — the wheels only turn when Disconnect carries out a stored speed. A clicked direction now arms the controller, publishes the speed, Disconnects, then settles before the next pulse, while Connect stays on for the pad. Click a direction to start; click again or Stop to halt.
+- IKEA DUBBELKISEL Matter LED drivers show as dimmable lights (on/off and brightness, no colour). LevelControl alone is enough for the brightness slider, and the Home pairing hint covers these drivers.
+
 ## [5.0.99] - 2026-11-24
 
 ### Fixed
