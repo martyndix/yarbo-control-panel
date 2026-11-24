@@ -1,6 +1,9 @@
 const POLL_INTERVAL_MS = 5000;
 const SNAPSHOT_INTERVAL_MS = 2000;
-const DRIVE_REPEAT_MS = 120;
+// Keepalives only. One press starts motion on the agent; repeats refresh it when
+// a browser connection is free. Live cameras often block HTTP, so repeats are
+// best-effort over the picture socket.
+const DRIVE_REPEAT_MS = 400;
 const LINEAR_SPEED = 0.35;
 const ANGULAR_SPEED = 0.55;
 const COMMAND_QUIET_MS = 4000;
@@ -1017,7 +1020,6 @@ async function toggleLights(button) {
     const viaSocket = cameraControlsOpen();
     if (!viaSocket) await suspendPictures();
     try {
-    await stopDriveIfHeld();
     const nextOn = !lightsOn;
     const action = nextOn ? 'lights_on' : 'lights_off';
     const requestId = ++lightsRequest;
@@ -17715,9 +17717,25 @@ function failCameraCommands(err) {
     cameraCommandWaiters.clear();
 }
 
+function driveSocketSend(payload) {
+    const socket = driveTransport();
+    if (!socket || socket.readyState !== 1) return false;
+    try {
+        socket.send(JSON.stringify({
+            op: 'drive',
+            id: ++cameraCommandSeq,
+            json: payload,
+        }));
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 function cameraSocketRequest(path, body, timeoutMs = 12000) {
     return new Promise((resolve, reject) => {
-        const socket = commandTransport();
+        const preferDrive = path.endsWith('drive.php');
+        const socket = preferDrive ? (driveTransport() || commandTransport()) : commandTransport();
         if (!socket) {
             reject(new Error('The robot did not answer. Press it again.'));
             return;
@@ -18264,6 +18282,30 @@ async function fetchDrive(linear, angular, enterManual, meta = null) {
         if (meta.why) body.why = String(meta.why).slice(0, 40);
         if (meta.pointer) body.pointer = String(meta.pointer).slice(0, 16);
     }
+    // Prefer the picture/control socket so drive is not queued behind HTTP
+    // picture and status requests (browser connection limit with live view).
+    if (driveTransport()) {
+        try {
+            const event = await cameraSocketRequest(
+                '/api/drive.php',
+                JSON.stringify(body),
+                Math.abs(linear) > 1e-6 || Math.abs(angular) > 1e-6 ? 4000 : 6000,
+            );
+            if (event && typeof event.body === 'string') {
+                try {
+                    return JSON.parse(event.body);
+                } catch {
+                    /* fall through */
+                }
+            }
+            if (event && event.json && typeof event.json === 'object') return event.json;
+            if (event && event.status >= 200 && event.status < 300) {
+                return { ok: true, linear, angular, hold_controller: holdController };
+            }
+        } catch {
+            /* fall through to HTTP */
+        }
+    }
     const res = await fetch('/api/drive.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -18332,6 +18374,17 @@ async function flushDriveQueue() {
 
 function sendDrivePulse(linear, angular, meta = null) {
     if (!driveActive) return;
+    const payload = {
+        linear,
+        angular,
+        enter_manual: !manualModeEntered,
+    };
+    if (meta && typeof meta === 'object') {
+        if (meta.why) payload.why = String(meta.why).slice(0, 40);
+        if (meta.pointer) payload.pointer = String(meta.pointer).slice(0, 16);
+    }
+    // Fire-and-forget on the open socket so hold repeats do not wait on HTTP.
+    if (driveSocketSend(payload)) return;
     pendingDrive = {
         linear,
         angular,
@@ -18366,13 +18419,13 @@ async function stopDriveIfHeld() {
         clearTimeout(driveReleaseTimer);
         driveReleaseTimer = null;
     }
-    if (!driveActive) {
-        await sendDrive(0, 0, false, { why: 'force-stop', pointer: drivePointerType || 'none' });
-        return;
-    }
+    drivePointerId = null;
+    drivePointerType = '';
+    driveMouseButtons = 0;
+    if (!driveActive) return;
     stopDriveLoop();
     if (els.driveStatus) els.driveStatus.textContent = 'Ready';
-    await sendDrive(0, 0, false, { why: 'force-stop', pointer: drivePointerType || 'none' });
+    await sendDrive(0, 0, false, { why: 'force-stop', pointer: 'none' });
 }
 
 async function startDrive(direction, button) {
@@ -18419,7 +18472,12 @@ async function startDrive(direction, button) {
     button.classList.add('active');
     if (els.driveStatus) els.driveStatus.textContent = driveLabel(direction);
 
-    sendDrivePulse(vector.linear, vector.angular, { why: 'press', pointer: drivePointerType || 'unknown' });
+    // Await the first press so Connect-required errors still show. Hold repeats
+    // go fire-and-forget on the picture socket and must not block on HTTP.
+    sendDrive(vector.linear, vector.angular, !manualModeEntered, {
+        why: 'press',
+        pointer: drivePointerType || 'unknown',
+    });
     driveInterval = setInterval(() => {
         if (!driveActive) return;
         // Leaving camera check for the hold can pause the pictures. Keep sending
@@ -18442,7 +18500,7 @@ async function startDrive(direction, button) {
 }
 
 function finishDriveHold(why = 'release') {
-    const pointer = drivePointerType || '';
+    const pointer = drivePointerType || 'none';
     if (driveReleaseTimer) {
         clearTimeout(driveReleaseTimer);
         driveReleaseTimer = null;
@@ -18452,13 +18510,19 @@ function finishDriveHold(why = 'release') {
     drivePointerId = null;
     drivePointerType = '';
     driveMouseButtons = 0;
-    if (!driveActive) {
-        sendDrive(0, 0, false, { why, pointer: pointer || 'none' });
-        return;
-    }
-    stopDriveLoop();
-    sendDrive(0, 0, false, { why, pointer: pointer || 'none' });
-    if (els.driveStatus) els.driveStatus.textContent = 'Ready';
+    const wasActive = driveActive;
+    if (wasActive) stopDriveLoop();
+    const payload = {
+        linear: 0,
+        angular: 0,
+        enter_manual: false,
+        why,
+        pointer,
+    };
+    // Socket first so stop is not queued behind HTTP while live view is open.
+    driveSocketSend(payload);
+    sendDrive(0, 0, false, { why, pointer });
+    if (wasActive && els.driveStatus) els.driveStatus.textContent = 'Ready';
 }
 
 function endDriveHold(why = 'release') {
@@ -18561,7 +18625,10 @@ async function sendCommand(action, button) {
     const viaSocket = cameraControlsOpen();
     if (!viaSocket) await suspendPictures();
     try {
-    await stopDriveIfHeld();
+    // Buzzer/lights must not cancel a held direction. Only Stop and Dock do.
+    if (action === 'return_to_dock' || action === 'stop') {
+        await stopDriveIfHeld();
+    }
     try {
         const data = await postPanelJson('/api/command.php', {
             method: 'POST',

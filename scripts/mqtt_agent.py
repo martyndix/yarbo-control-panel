@@ -519,10 +519,10 @@ async def publish_quick(client: Any, cmd: str, payload: dict[str, Any], timeout:
         return False
 
 
-# The page repeats a held direction about eight times a second. A gap this
-# long means the page or its connection is gone, so the robot is stopped.
-# Keep this above the page's short camera-flicker window.
-DRIVE_STALE_S = 3.0
+# The page repeats a held direction while the finger is down. Live cameras can
+# fill the browser's connections so those repeats never arrive; one press must
+# still keep the robot moving until release or this timeout.
+DRIVE_STALE_S = 12.0
 DRIVE_SEND_S = 0.1
 DRIVE_WAKE_EVERY_S = 2.0
 DRIVE_TRACE_S = 4.0
@@ -759,8 +759,10 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
         if warning and warning != state.get("drive_warning_seen"):
             log(f"Drive warning: {warning}")
         state["drive_warning_seen"] = warning
-    # Camera keep-alives must not put the robot back into camera check.
-    state["drive_busy_until"] = time.time() + 1.5
+    # Camera keep-alives must not put the robot back into camera check for
+    # the whole hold, even when the page cannot refresh the direction.
+    state["drive_busy_until"] = time.time() + max(1.5, DRIVE_STALE_S)
+
     if isinstance(motion, DriveMotion):
         why = str(req.get("why") or "")
         # An explicit release must clear the short-press latch. Otherwise a

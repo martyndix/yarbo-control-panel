@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.98] - 2026-11-24
+
+### Fixed
+
+- A held direction no longer dies after about three seconds when live view fills the browser's connections. One press now keeps the robot moving for up to 12 seconds even if the page cannot send hold repeats, those repeats go on the picture socket when it is open, and the buzzer no longer cancels a hold. Letting go still stops the robot.
+
 ## [5.0.97] - 2026-11-24
 
 ### Fixed
