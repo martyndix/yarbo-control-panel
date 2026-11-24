@@ -17551,11 +17551,18 @@ function avcCDescription(sps, pps) {
 }
 
 function cameraPictureUrl() {
-    if (location.protocol === 'https:' && location.port) {
-        const port = Number(location.port) + 1;
-        if (port > 0) {
-            return `https://${location.hostname}:${port}/api/camera_live.php?action=frames`;
+    if (location.protocol === 'https:') {
+        // Explicit panel port (usually 8443): pictures are on the next port.
+        if (location.port) {
+            const port = Number(location.port) + 1;
+            if (port > 0) {
+                return `https://${location.hostname}:${port}/api/camera_live.php?action=frames`;
+            }
         }
+        // Funnel / default https (no port in the URL): the picture process still
+        // listens on 8444 on the machine. Prefer that so the picture socket is
+        // not on the same origin as drive/status (Chrome's connection limit).
+        return `https://${location.hostname}:8444/api/camera_live.php?action=frames`;
     }
     return '/api/camera_live.php?action=frames';
 }
@@ -17903,6 +17910,28 @@ function commandSocketUrl() {
     return `${scheme}//${location.host}/api/camera_live.php?action=controls`;
 }
 
+function reportControlsSocket(event, detail) {
+    try {
+        const body = JSON.stringify({
+            linear: 0,
+            angular: 0,
+            enter_manual: false,
+            why: `socket-${event}`.slice(0, 40),
+            via: 'http',
+            st: Date.now(),
+            note: String(detail || '').slice(0, 120),
+        });
+        fetch('/api/drive.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            keepalive: true,
+        }).catch(() => {});
+    } catch {
+        /* ignore */
+    }
+}
+
 function attachCommandSocket(onReady) {
     // This connection carries a direction. The pictures open on their own.
     // Waiting for this socket left the tiles on "waiting" when it did not finish.
@@ -17910,7 +17939,15 @@ function attachCommandSocket(onReady) {
         if (typeof onReady === 'function' && cameraCommandSocket.readyState === 1) onReady();
         return cameraCommandSocket;
     }
-    const socket = new WebSocket(commandSocketUrl());
+    const url = commandSocketUrl();
+    let socket;
+    try {
+        socket = new WebSocket(url);
+    } catch (err) {
+        reportControlsSocket('error', err && err.message);
+        if (typeof onReady === 'function') onReady();
+        return null;
+    }
     cameraCommandSocket = socket;
     let opened = false;
     socket.onopen = () => {
@@ -17939,11 +17976,14 @@ function attachCommandSocket(onReady) {
         failCameraCommands(new Error('Picture connection closed'));
         if (cameraCommandSocket !== socket) return;
         cameraCommandSocket = null;
-        if (!cameraFramesOpen) return;
         if (!opened) {
             commandSocketMisses += 1;
+            if (commandSocketMisses <= 3) {
+                reportControlsSocket('close', url);
+            }
             if (commandSocketMisses >= 3 && typeof onReady === 'function' && !cameraLiveSource) onReady();
         }
+        if (!cameraFramesOpen) return;
         const again = cameraLiveSource ? undefined : onReady;
         setTimeout(() => {
             if (!cameraFramesOpen || cameraCommandSocket) return;
@@ -17992,15 +18032,16 @@ async function suspendPictures() {
     picturePauseDepth += 1;
     const source = cameraLiveSource;
     if (picturePauseDepth !== 1 || !source) return;
-    // The picture socket carries Dock and the direction itself. Closing it
-    // was what dropped the view, and fetching beside it never left Safari.
-    if (typeof WebSocket === 'function' && source instanceof WebSocket) {
-        picturePauseDepth -= 1;
-        return;
-    }
+    // Close the picture stream so an HTTP press can use a Chrome connection.
+    // The controls socket (when open) keeps drive off that limit; this path
+    // is for when that socket did not connect.
     cameraLiveSource = null;
-    source.close();
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    try {
+        source.close();
+    } catch {
+        /* already closed */
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
 }
 
 function resumePictures() {
@@ -18562,6 +18603,15 @@ async function startDrive(direction, button) {
         if (els.driveStatus) {
             els.driveStatus.textContent = `${driveLabel(direction)} — HTTP`;
         }
+        // Controls socket did not connect. Close the picture stream so Chrome
+        // has a free slot to the panel — otherwise the press sits ~15s and
+        // arrives with Disconnect.
+        await stepPicturesAside();
+        noteCommandQuiet(20000);
+        if (statusAbort) {
+            try { statusAbort.abort(); } catch { /* ignore */ }
+        }
+        polling = false;
         driveHttpSend(pressPayload, { keepalive: false, timeoutMs: 4000 }).then((data) => {
             if (!driveActive) return;
             if (data && data.needs_controller) {
@@ -18628,6 +18678,7 @@ function finishDriveHold(why = 'release') {
     }
     if (wasActive && els.driveStatus) els.driveStatus.textContent = 'Ready';
     if (typeof updateControllerTile === 'function') updateControllerTile();
+    restorePicturesAfterDrive();
 }
 
 function setupDrivePad() {

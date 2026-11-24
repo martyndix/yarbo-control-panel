@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.106] - 2026-11-24
+
+### Fixed
+
+- Driving when the controls socket cannot connect (your log showed every press as `via=http` with a ~15s delay). The page now closes the live picture stream for the hold, pauses status polls, and sends the direction over HTTP — the same idea as Connect. Pictures open again when you stop. If the controls socket fails to open, the agent log gets a `socket-close` / `socket-error` timing line with the URL. On Funnel-style HTTPS with no port in the address bar, pictures prefer port 8444 so they are not on the same origin as drive.
+
 ## [5.0.105] - 2026-11-24
 
 ### Fixed

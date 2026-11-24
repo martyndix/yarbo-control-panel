@@ -173,6 +173,8 @@ $openAt = strpos($appJs, 'function openCameraFrames');
 $openFn = substr($appJs, (int) $openAt, (int) strpos($appJs, 'function setCameraLiveButtons', (int) $openAt) - (int) $openAt);
 assert_true(str_contains($openFn, 'attachCommandSocket()'), 'openCameraFrames starts the controls socket');
 assert_true(str_contains($appJs, 'ensureControlsSocket'), 'a direction waits briefly for the controls socket');
+assert_true(str_contains($appJs, 'stepPicturesAside'), 'HTTP drive closes the pictures so Chrome has a free slot');
+assert_true(str_contains($appJs, 'reportControlsSocket'), 'a failed controls socket is reported in the drive log');
 assert_true(str_contains($appJs, "via: 'socket'"), 'socket drive is labelled for the timing log');
 assert_true(str_contains($appJs, 'keepalive: true'), 'HTTP drive pulses do not wait for an answer when the socket is down');
 

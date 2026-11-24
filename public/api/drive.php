@@ -44,12 +44,14 @@ function drive_log_timing(array $input, string $why): void
         $parts[] = 'browser→php(skew) ' . $browserLag . 'ms';
     }
     $via = preg_replace('/[^a-z]/', '', strtolower((string) ($input['via'] ?? ''))) ?: '-';
+    $note = substr(preg_replace('/[^\x20-\x7e]/', '', (string) ($input['note'] ?? '')), 0, 120);
     $line = sprintf(
-        "[%s] Drive timing why=%s via=%s: %s\n",
+        "[%s] Drive timing why=%s via=%s: %s%s\n",
         gmdate('H:i:s'),
         $why !== '' ? $why : '-',
         $via,
         implode(', ', $parts),
+        $note !== '' ? ('; note=' . $note) : '',
     );
     @file_put_contents(dirname(__DIR__, 2) . '/data/mqtt-agent.log', $line, FILE_APPEND | LOCK_EX);
 }
@@ -83,6 +85,10 @@ drive_log_timing($input, $why);
 
 $linear = max(-MAX_LINEAR, min(MAX_LINEAR, $linear));
 $angular = max(-MAX_ANGULAR, min(MAX_ANGULAR, $angular));
+
+if (str_starts_with($why, 'socket-')) {
+    json_response(['ok' => true, 'linear' => 0, 'angular' => 0, 'via' => 'socket-probe']);
+}
 
 try {
     $agent = YarboMqttAgentClient::fromEnv();
