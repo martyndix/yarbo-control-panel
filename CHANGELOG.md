@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.94] - 2026-11-24
+
+### Fixed
+
+- Holding a direction on Safari no longer ends in the same second as the press. The pad was capturing the pointer and ending the hold when Safari dropped that capture during a page update, so only a few speed commands went out. The hold now lasts until you lift your finger, and a short camera flicker no longer stops it.
+
 ## [5.0.93] - 2026-11-24
 
 ### Fixed

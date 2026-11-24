@@ -159,6 +159,12 @@ assert_true(!str_contains($agent, 'Connect the Controller first, then use the dr
 $appJs = (string) file_get_contents($root . '/public/assets/app.js');
 assert_true(!str_contains($appJs, 'connectControllerOnLoad'), 'the page does not connect the controller when it opens');
 assert_true(str_contains($appJs, 'Press Connect first'), 'the pad asks for Connect before driving');
+$padAt = strpos($appJs, 'function setupDrivePad');
+$padEnd = strpos($appJs, 'async function sendCommand', (int) $padAt);
+$padFn = substr($appJs, (int) $padAt, (int) $padEnd - (int) $padAt);
+assert_true(!str_contains($padFn, 'setPointerCapture'), 'a direction does not use pointer capture, which Safari drops mid-hold');
+assert_true(!str_contains($padFn, 'lostpointercapture'), 'a direction does not end when Safari drops pointer capture');
+assert_true(str_contains($padFn, 'drivePointerId'), 'a direction only ends for the finger that pressed it');
 assert_true(!str_contains($appJs, 'Connect the controller above the cameras first'), 'the pad does not wait for the controller button');
 assert_true(!str_contains($appJs, 'cameraFrameAt'), 'the page does not drop pictures the decoder still needs');
 assert_true(!str_contains($appJs, 'has not received a picture'), 'the page does not close a picture stream that is still open');

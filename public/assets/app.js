@@ -446,6 +446,8 @@ const ZONE_TYPE_LABELS = {
 
 let driveInterval = null;
 let driveActive = false;
+let drivePointerId = null;
+let driveBlindSince = 0;
 let driveInFlight = false;
 /** @type {{ linear: number, angular: number, enterManual: boolean }|null} */
 let pendingDrive = null;
@@ -852,6 +854,7 @@ function cameraStreamLive() {
 
 function releaseDriveIfBlind() {
     if (typeof driveActive === 'undefined' || !driveActive) return;
+    drivePointerId = null;
     stopDriveLoop();
     sendDrive(0, 0, false);
     if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
@@ -18326,6 +18329,7 @@ function stopDriveLoop() {
     clearInterval(driveInterval);
     driveInterval = null;
     driveActive = false;
+    driveBlindSince = 0;
     document.querySelectorAll('.btn-drive.active').forEach((btn) => btn.classList.remove('active'));
 }
 
@@ -18341,6 +18345,7 @@ async function startDrive(direction, button) {
     if (!vector) return;
 
     if (direction === 'stop') {
+        drivePointerId = null;
         stopDriveLoop();
         await sendDrive(0, 0, false);
         if (els.driveStatus) els.driveStatus.textContent = 'Stopped';
@@ -18357,71 +18362,82 @@ async function startDrive(direction, button) {
         if (els.driveStatus) els.driveStatus.textContent = 'Connect first';
         return;
     }
+    // A toast during the press cancels the touch on Safari. Show it after the hold starts.
     if (!sessionStorage.getItem('yarbo_drive_ack')) {
         sessionStorage.setItem('yarbo_drive_ack', '1');
-        showToast('Manual drive can move the robot immediately — keep the area clear and release or press Stop to halt.', 'error');
+        setTimeout(() => {
+            showToast('Manual drive can move the robot immediately — keep the area clear and release or press Stop to halt.', 'error');
+        }, 700);
     }
 
     stopDriveLoop();
     driveActive = true;
+    driveBlindSince = 0;
     button.classList.add('active');
     if (els.driveStatus) els.driveStatus.textContent = driveLabel(direction);
 
     sendDrivePulse(vector.linear, vector.angular);
     driveInterval = setInterval(() => {
         if (!driveActive) return;
+        // Leaving camera check for the hold can pause a picture briefly. Do not
+        // end the hold for a short gap; that was cancelling the press on Safari.
         if (!cameraStreamLive()) {
+            if (!driveBlindSince) driveBlindSince = Date.now();
+            if (Date.now() - driveBlindSince < 2500) return;
+            drivePointerId = null;
             stopDriveLoop();
             sendDrive(0, 0, false);
             if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
             updateControllerGatedControls();
             return;
         }
+        driveBlindSince = 0;
         sendDrivePulse(vector.linear, vector.angular);
     }, DRIVE_REPEAT_MS);
 }
 
+function endDriveHold() {
+    drivePointerId = null;
+    if (!driveActive) return;
+    stopDriveLoop();
+    sendDrive(0, 0, false);
+    if (els.driveStatus) els.driveStatus.textContent = 'Ready';
+}
+
 function setupDrivePad() {
     const pad = document.getElementById('drive-pad');
-    if (!pad) return;
+    if (!pad || pad.dataset.driveBound) return;
+    pad.dataset.driveBound = '1';
 
     pad.querySelectorAll('[data-drive]').forEach((button) => {
         const direction = button.dataset.drive;
 
-        const endDrive = async () => {
-            if (!driveActive || button.dataset.drive === 'stop') return;
-            stopDriveLoop();
-            await sendDrive(0, 0, false);
-            if (els.driveStatus) els.driveStatus.textContent = 'Ready';
-        };
-
         button.addEventListener('pointerdown', (e) => {
+            if (typeof e.button === 'number' && e.button !== 0) return;
             e.preventDefault();
-            button.setPointerCapture(e.pointerId);
+            // Do not capture the pointer. On Safari the capture is often lost
+            // as soon as the page updates (toast, class, status), which ended
+            // the hold in the same second as the press.
+            drivePointerId = e.pointerId;
             if (direction === 'stop') {
                 startDrive('stop', button);
             } else {
                 startDrive(direction, button);
             }
-        });
-
-        button.addEventListener('pointerup', endDrive);
-        button.addEventListener('pointercancel', endDrive);
-        button.addEventListener('lostpointercapture', endDrive);
+        }, { passive: false });
     });
 
-    if (!pad.dataset.releaseBound) {
-        pad.dataset.releaseBound = '1';
-        const release = () => {
-            if (!driveActive) return;
-            stopDriveLoop();
-            sendDrive(0, 0, false);
-            if (els.driveStatus) els.driveStatus.textContent = 'Ready';
-        };
-        window.addEventListener('pointerup', release);
-        window.addEventListener('pointercancel', release);
-        window.addEventListener('blur', release);
-    }
+    const onPointerEnd = (e) => {
+        if (drivePointerId === null) return;
+        if (e.pointerId !== drivePointerId) return;
+        endDriveHold();
+    };
+    window.addEventListener('pointerup', onPointerEnd);
+    window.addEventListener('pointercancel', onPointerEnd);
+    window.addEventListener('blur', () => {
+        if (drivePointerId === null && !driveActive) return;
+        endDriveHold();
+    });
 }
 
 async function sendCommand(action, button) {
