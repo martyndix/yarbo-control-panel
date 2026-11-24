@@ -324,6 +324,7 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         self._proxy()
 
     def _proxy(self) -> None:
+        received_at = time.time()
         length = int(self.headers.get("Content-Length", "0") or "0")
         body = self.rfile.read(length) if length > 0 else None
 
@@ -379,6 +380,7 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
         headers["Host"] = self.headers.get("Host") or f"{self.upstream_host}:{self.upstream_port}"
         headers["X-Forwarded-Proto"] = "https"
         headers["X-Forwarded-For"] = self.client_address[0]
+        headers["X-Panel-Proxy-At"] = f"{received_at:.3f}"
         headers["Connection"] = "close"
 
         conn = None

@@ -17336,7 +17336,7 @@ async function fetchStatus() {
     }, 15000);
     const started = performance.now();
     try {
-        const res = await fetch('/api/status.php', { signal, headers: clientTimezoneHeaders() });
+        const res = await fetch(`/api/status.php?st=${Date.now()}`, { signal, headers: clientTimezoneHeaders() });
         const data = await parseJsonResponse(res);
         const clientRttMs = Math.round(performance.now() - started);
         if (mailPageOpen) return;
@@ -17708,6 +17708,14 @@ function decodeCameraFrame(event) {
 }
 
 let cameraCommandSeq = 0;
+let driveClickAt = 0;
+
+function eventEpochMs(event) {
+    const stamp = Number(event && event.timeStamp);
+    if (!Number.isFinite(stamp) || stamp <= 0) return Date.now();
+    const origin = performance.timeOrigin || (Date.now() - performance.now());
+    return Math.round(stamp > 1e12 ? stamp : origin + stamp);
+}
 const cameraCommandWaiters = new Map();
 let cameraCommandSocket = null;
 let commandSocketMisses = 0;
@@ -18298,7 +18306,9 @@ async function fetchDrive(linear, angular, enterManual, meta = null) {
     if (meta && typeof meta === 'object') {
         if (meta.why) body.why = String(meta.why).slice(0, 40);
         if (meta.pointer) body.pointer = String(meta.pointer).slice(0, 16);
+        if (meta.st) body.st = meta.st;
     }
+    body.ft = Date.now();
     // Prefer the picture/control socket so drive is not queued behind HTTP
     // picture and status requests (browser connection limit with live view).
     if (driveTransport()) {
@@ -18406,7 +18416,7 @@ function sendDrivePulse(linear, angular, meta = null) {
         linear,
         angular,
         enterManual: !manualModeEntered,
-        meta,
+        meta: { ...(meta || {}), st: Date.now() },
     };
     flushDriveQueue();
 }
@@ -18492,6 +18502,8 @@ async function startDrive(direction, button) {
         enter_manual: !manualModeEntered,
         why: 'press',
         pointer: drivePointerType || 'click',
+        ct: driveClickAt,
+        st: Date.now(),
     };
     driveSocketSend(pressPayload);
     fetch('/api/drive.php', {
@@ -18550,6 +18562,8 @@ function finishDriveHold(why = 'release') {
         enter_manual: false,
         why,
         pointer,
+        ct: why === 'toggle-off' || why === 'stop' ? driveClickAt : 0,
+        st: Date.now(),
     };
     driveSocketSend(payload);
     // Plain HTTP stop with keepalive so a hung picture socket cannot leave the
@@ -18574,12 +18588,13 @@ function setupDrivePad() {
     pad.dataset.driveBound = '1';
     let lastActivateAt = 0;
 
-    const activate = (direction, button, pointerType) => {
+    const activate = (direction, button, pointerType, clickAt) => {
         const now = Date.now();
         // One physical click can deliver two click events. The second used to
         // toggle off immediately and cancel the move.
         if (now - lastActivateAt < 400) return;
         lastActivateAt = now;
+        driveClickAt = clickAt || now;
         drivePointerType = pointerType || 'click';
         if (direction === 'stop') {
             finishDriveHold('stop');
@@ -18600,7 +18615,7 @@ function setupDrivePad() {
         // as the press, so the robot never got a lasting direction.
         button.addEventListener('click', (e) => {
             e.preventDefault();
-            activate(direction, button, 'click');
+            activate(direction, button, 'click', eventEpochMs(e));
         });
     });
 }

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.103] - 2026-11-24
+
+### Added
+
+- Drive and status timing in `data/mqtt-agent.log`. With live view on, a whole test's clicks reached the panel in the same second, together with Disconnect, so the robot only got a moment of speed. Each direction now logs where its time went (`Drive timing why=press: click→send, queued, send→proxy, proxy→php`), and a status poll that is held up for a second or more logs `Status timing`. Nothing about driving changes in this version.
+
 ## [5.0.102] - 2026-11-24
 
 ### Fixed

@@ -23,6 +23,25 @@ use Yarbo\YarboWifi;
 
 /** @var float */
 $statusStartedAt = microtime(true);
+
+$statusProxyAt = $_SERVER['HTTP_X_PANEL_PROXY_AT'] ?? null;
+if (is_numeric($statusProxyAt)) {
+    $statusWaitMs = (int) round(((float) ($_SERVER['REQUEST_TIME_FLOAT'] ?? $statusStartedAt) - (float) $statusProxyAt) * 1000);
+    $statusSentAt = $_GET['st'] ?? null;
+    $statusTravelMs = is_numeric($statusSentAt) ? (int) round((float) $statusProxyAt * 1000 - (float) $statusSentAt) : null;
+    if ($statusWaitMs >= 1000 || ($statusTravelMs !== null && $statusTravelMs >= 1000)) {
+        @file_put_contents(
+            dirname(__DIR__, 2) . '/data/mqtt-agent.log',
+            sprintf(
+                "[%s] Status timing: send→proxy %s, proxy→php %dms\n",
+                gmdate('H:i:s'),
+                $statusTravelMs === null ? '-' : $statusTravelMs . 'ms',
+                $statusWaitMs,
+            ),
+            FILE_APPEND | LOCK_EX,
+        );
+    }
+}
 /** @var array{ping_ms:?int,telemetry_ms:?int,extras_ms:?int,total_ms:int} */
 $statusTiming = [
     'ping_ms' => null,
