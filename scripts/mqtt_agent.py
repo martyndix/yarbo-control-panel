@@ -724,10 +724,18 @@ def queue_drive(client: Any, req: dict[str, Any], state: dict[str, Any]) -> dict
     angular = float(req.get("angular") or 0)
     moving = abs(linear) > 1e-6 or abs(angular) > 1e-6
     motion = state.get("motion")
-    request = (round(linear, 2), round(angular, 2))
+    request = (round(linear, 2), round(angular, 2), str(req.get("why") or ""), str(req.get("pointer") or ""))
     if request != state.get("drive_request_seen"):
         state["drive_request_seen"] = request
-        log(f"Drive request: vel={linear:.2f} rev={angular:.2f} controller={bool(state.get('hold_controller'))}")
+        why = str(req.get("why") or "")
+        pointer = str(req.get("pointer") or "")
+        extra = ""
+        if why or pointer:
+            extra = f" why={why or '-'} pointer={pointer or '-'}"
+        log(
+            f"Drive request: vel={linear:.2f} rev={angular:.2f} "
+            f"controller={bool(state.get('hold_controller'))}{extra}"
+        )
     if moving and not state.get("hold_controller"):
         if isinstance(motion, DriveMotion):
             motion.halt()

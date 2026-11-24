@@ -32,13 +32,15 @@ if (!isset($input['linear'], $input['angular'])) {
 $linear = (float) $input['linear'];
 $angular = (float) $input['angular'];
 $enterManual = filter_var($input['enter_manual'] ?? false, FILTER_VALIDATE_BOOLEAN);
+$why = substr(preg_replace('/[^a-z0-9_\-]/i', '', (string) ($input['why'] ?? '')) ?: '', 0, 40);
+$pointer = substr(preg_replace('/[^a-z0-9_\-]/i', '', (string) ($input['pointer'] ?? '')) ?: '', 0, 16);
 
 $linear = max(-MAX_LINEAR, min(MAX_LINEAR, $linear));
 $angular = max(-MAX_ANGULAR, min(MAX_ANGULAR, $angular));
 
 try {
     $agent = YarboMqttAgentClient::fromEnv();
-    $result = $agent->drive($linear, $angular, $enterManual);
+    $result = $agent->drive($linear, $angular, $enterManual, $why, $pointer);
     if (!($result['ok'] ?? false)) {
         json_response([
             'ok' => false,

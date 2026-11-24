@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.95] - 2026-11-24
+
+### Fixed
+
+- Holding a direction on Safari no longer ends when Safari invents a mouse click during the finger hold. The pad now uses touch events for a finger and ignores that ghost mouse click, so the hold lasts until you lift your finger.
+
 ## [5.0.94] - 2026-11-24
 
 ### Fixed

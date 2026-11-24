@@ -447,6 +447,7 @@ const ZONE_TYPE_LABELS = {
 let driveInterval = null;
 let driveActive = false;
 let drivePointerId = null;
+let drivePointerType = '';
 let driveBlindSince = 0;
 let driveInFlight = false;
 /** @type {{ linear: number, angular: number, enterManual: boolean }|null} */
@@ -18249,21 +18250,26 @@ function noteDriveReply(event, enterManual) {
     if (enterManual) manualModeEntered = true;
 }
 
-async function fetchDrive(linear, angular, enterManual) {
+async function fetchDrive(linear, angular, enterManual, meta = null) {
+    const body = { linear, angular, enter_manual: enterManual };
+    if (meta && typeof meta === 'object') {
+        if (meta.why) body.why = String(meta.why).slice(0, 40);
+        if (meta.pointer) body.pointer = String(meta.pointer).slice(0, 16);
+    }
     const res = await fetch('/api/drive.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ linear, angular, enter_manual: enterManual }),
+        body: JSON.stringify(body),
     });
     return parseJsonResponse(res);
 }
 
-async function sendDrive(linear, angular, enterManual = false) {
+async function sendDrive(linear, angular, enterManual = false, meta = null) {
     // A held direction is an ordinary request and leaves the pictures open.
     // The agent streams the speed to the robot until the finger comes up.
     const done = linear === 0 && angular === 0;
     try {
-        const data = await fetchDrive(linear, angular, enterManual);
+        const data = await fetchDrive(linear, angular, enterManual, meta);
         if (done) restorePicturesAfterDrive();
         if (!data.ok) {
             if (data.needs_controller) {
@@ -18296,7 +18302,7 @@ async function flushDriveQueue() {
         while (pendingDrive) {
             const next = pendingDrive;
             pendingDrive = null;
-            await sendDrive(next.linear, next.angular, next.enterManual);
+            await sendDrive(next.linear, next.angular, next.enterManual, next.meta || null);
         }
     } finally {
         driveInFlight = false;
@@ -18306,11 +18312,12 @@ async function flushDriveQueue() {
     }
 }
 
-function sendDrivePulse(linear, angular) {
+function sendDrivePulse(linear, angular, meta = null) {
     pendingDrive = {
         linear,
         angular,
         enterManual: !manualModeEntered,
+        meta,
     };
     flushDriveQueue();
 }
@@ -18376,7 +18383,7 @@ async function startDrive(direction, button) {
     button.classList.add('active');
     if (els.driveStatus) els.driveStatus.textContent = driveLabel(direction);
 
-    sendDrivePulse(vector.linear, vector.angular);
+    sendDrivePulse(vector.linear, vector.angular, { why: 'press', pointer: drivePointerType || 'unknown' });
     driveInterval = setInterval(() => {
         if (!driveActive) return;
         // Leaving camera check for the hold can pause a picture briefly. Do not
@@ -18385,22 +18392,25 @@ async function startDrive(direction, button) {
             if (!driveBlindSince) driveBlindSince = Date.now();
             if (Date.now() - driveBlindSince < 2500) return;
             drivePointerId = null;
+            drivePointerType = '';
             stopDriveLoop();
-            sendDrive(0, 0, false);
+            sendDrive(0, 0, false, { why: 'blind', pointer: 'none' });
             if (els.driveStatus) els.driveStatus.textContent = 'Stopped — live view ended';
             updateControllerGatedControls();
             return;
         }
         driveBlindSince = 0;
-        sendDrivePulse(vector.linear, vector.angular);
+        sendDrivePulse(vector.linear, vector.angular, { why: 'hold', pointer: drivePointerType || 'unknown' });
     }, DRIVE_REPEAT_MS);
 }
 
-function endDriveHold() {
+function endDriveHold(why = 'release') {
+    const pointer = drivePointerType || '';
     drivePointerId = null;
+    drivePointerType = '';
     if (!driveActive) return;
     stopDriveLoop();
-    sendDrive(0, 0, false);
+    sendDrive(0, 0, false, { why, pointer });
     if (els.driveStatus) els.driveStatus.textContent = 'Ready';
 }
 
@@ -18409,34 +18419,51 @@ function setupDrivePad() {
     if (!pad || pad.dataset.driveBound) return;
     pad.dataset.driveBound = '1';
 
+    const begin = (direction, button, pointerId, pointerType) => {
+        // Safari fires a synthetic mouse click during a finger hold. That mouse
+        // "up" was ending the hold in the same second while the finger stayed down.
+        if (pointerType === 'mouse' && drivePointerType === 'touch') return;
+        if (pointerType === 'mouse' && driveActive && drivePointerType === 'touch') return;
+        drivePointerId = pointerId;
+        drivePointerType = pointerType || 'mouse';
+        if (direction === 'stop') startDrive('stop', button);
+        else startDrive(direction, button);
+    };
+
     pad.querySelectorAll('[data-drive]').forEach((button) => {
         const direction = button.dataset.drive;
 
-        button.addEventListener('pointerdown', (e) => {
-            if (typeof e.button === 'number' && e.button !== 0) return;
+        // Touch first: preventDefault stops the ghost mouse click on Safari.
+        button.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 1) return;
             e.preventDefault();
-            // Do not capture the pointer. On Safari the capture is often lost
-            // as soon as the page updates (toast, class, status), which ended
-            // the hold in the same second as the press.
-            drivePointerId = e.pointerId;
-            if (direction === 'stop') {
-                startDrive('stop', button);
-            } else {
-                startDrive(direction, button);
-            }
+            begin(direction, button, 'touch', 'touch');
         }, { passive: false });
+        button.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            if (drivePointerType !== 'touch') return;
+            endDriveHold('touchend');
+        }, { passive: false });
+        button.addEventListener('touchcancel', () => {
+            if (drivePointerType !== 'touch') return;
+            endDriveHold('touchcancel');
+        });
+
+        button.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            // A real mouse only. Ignore the click Safari synthesizes after touch.
+            if (drivePointerType === 'touch') return;
+            begin(direction, button, 'mouse', 'mouse');
+        });
     });
 
-    const onPointerEnd = (e) => {
-        if (drivePointerId === null) return;
-        if (e.pointerId !== drivePointerId) return;
-        endDriveHold();
-    };
-    window.addEventListener('pointerup', onPointerEnd);
-    window.addEventListener('pointercancel', onPointerEnd);
+    window.addEventListener('mouseup', () => {
+        if (drivePointerType !== 'mouse') return;
+        endDriveHold('mouseup');
+    });
     window.addEventListener('blur', () => {
-        if (drivePointerId === null && !driveActive) return;
-        endDriveHold();
+        if (!driveActive) return;
+        endDriveHold('blur');
     });
 }
 

@@ -283,17 +283,30 @@ final class YarboMqttAgentClient
     /**
      * @return array<string, mixed>
      */
-    public function drive(float $linear, float $angular, bool $enterManual): array
-    {
+    public function drive(
+        float $linear,
+        float $angular,
+        bool $enterManual,
+        string $why = '',
+        string $pointer = '',
+    ): array {
         // A direction has to come back while the cameras are publishing.
         // Restarting the agent, or waiting out a slow acknowledgement, is
         // what made the page say the drive did not answer.
-        return $this->request([
+        $payload = [
             'op' => 'drive',
             'linear' => $linear,
             'angular' => $angular,
             'enter_manual' => $enterManual,
-        ], 12.0, false);
+        ];
+        if ($why !== '') {
+            $payload['why'] = $why;
+        }
+        if ($pointer !== '') {
+            $payload['pointer'] = $pointer;
+        }
+
+        return $this->request($payload, 12.0, false);
     }
 
     /**
