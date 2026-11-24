@@ -17769,7 +17769,9 @@ function ensureControlsSocket(waitMs = 800) {
             resolve(true);
             return;
         }
-        if (location.protocol !== 'https:' || typeof WebSocket !== 'function') {
+        // Funnel never keeps the controls socket. Do not wait a second for it —
+        // go straight to HTTP with pictures stepped aside.
+        if (isFunnelOrigin() || location.protocol !== 'https:' || typeof WebSocket !== 'function') {
             resolve(false);
             return;
         }
