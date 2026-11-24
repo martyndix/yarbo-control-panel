@@ -354,20 +354,16 @@ class PanelHttpsProxyHandler(BaseHTTPRequestHandler):
             return
 
         if self.command == "GET" and is_camera_frames(path):
-            # Pictures are on their own port and their own process. A stream
-            # on this port held the panel, so another device could not load it.
-            body = b'{"ok":false,"error":"Pictures are on the picture port."}'
-            self.close_connection = True
-            try:
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Cache-Control", "no-store")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Connection", "close")
-                self.end_headers()
-                self.wfile.write(body)
-            except Exception:
-                pass
+            # Funnel (https with no :8444) hits this port for pictures. Bridge
+            # to the local picture process so live view works, then step aside
+            # for an HTTP direction the same way Connect does.
+            upgrade = (self.headers.get("Upgrade") or "").lower()
+            if "websocket" in upgrade:
+                if not self._websocket_pictures():
+                    self._camera_unavailable()
+                return
+            if not self._relay_pictures():
+                self._camera_unavailable()
             return
 
         headers = {}

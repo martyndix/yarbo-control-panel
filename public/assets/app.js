@@ -17551,19 +17551,16 @@ function avcCDescription(sps, pps) {
 }
 
 function cameraPictureUrl() {
-    if (location.protocol === 'https:') {
-        // Explicit panel port (usually 8443): pictures are on the next port.
-        if (location.port) {
-            const port = Number(location.port) + 1;
-            if (port > 0) {
-                return `https://${location.hostname}:${port}/api/camera_live.php?action=frames`;
-            }
+    if (location.protocol === 'https:' && location.port) {
+        // LAN/panel HTTPS (usually :8443): pictures are on the next port so
+        // drive and status keep their own connections on the panel port.
+        const port = Number(location.port) + 1;
+        if (port > 0) {
+            return `https://${location.hostname}:${port}/api/camera_live.php?action=frames`;
         }
-        // Funnel / default https (no port in the URL): the picture process still
-        // listens on 8444 on the machine. Prefer that so the picture socket is
-        // not on the same origin as drive/status (Chrome's connection limit).
-        return `https://${location.hostname}:8444/api/camera_live.php?action=frames`;
     }
+    // Funnel / https without a port: same origin. The panel HTTPS proxy
+    // bridges this to the local picture process.
     return '/api/camera_live.php?action=frames';
 }
 
@@ -18612,6 +18609,11 @@ async function startDrive(direction, button) {
             try { statusAbort.abort(); } catch { /* ignore */ }
         }
         polling = false;
+        // Keep the camera agent from ending the session while pictures are
+        // stepped aside for an HTTP direction (Funnel has no separate picture port).
+        try {
+            fetch('/api/camera_live.php?action=status', { cache: 'no-store' }).catch(() => {});
+        } catch { /* ignore */ }
         driveHttpSend(pressPayload, { keepalive: false, timeoutMs: 4000 }).then((data) => {
             if (!driveActive) return;
             if (data && data.needs_controller) {

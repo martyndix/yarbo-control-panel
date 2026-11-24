@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.107] - 2026-11-24
+
+### Fixed
+
+- Live view through Tailscale Funnel (`https://….ts.net` / custom domain with no `:8443` in the URL) works again. 5.0.106 sent pictures to port 8444, which Funnel does not expose, so the cameras stayed off and the agent said the page closed. Pictures on Funnel use the same origin again, and the panel HTTPS proxy bridges that stream to the local picture process. The controls socket still cannot stay open through Funnel (`socket-close` in the log); a direction then closes the pictures briefly, drives over HTTP, and opens the pictures again when you stop.
+
 ## [5.0.106] - 2026-11-24
 
 ### Fixed
