@@ -17746,15 +17746,61 @@ function driveSocketSend(payload) {
     const socket = driveTransport();
     if (!socket || socket.readyState !== 1) return false;
     try {
+        const body = { ...(payload || {}), via: 'socket' };
         socket.send(JSON.stringify({
             op: 'drive',
             id: ++cameraCommandSeq,
-            json: payload,
+            json: body,
         }));
         return true;
     } catch {
         return false;
     }
+}
+
+function ensureControlsSocket(waitMs = 800) {
+    return new Promise((resolve) => {
+        if (cameraControlsOpen()) {
+            resolve(true);
+            return;
+        }
+        if (location.protocol !== 'https:' || typeof WebSocket !== 'function') {
+            resolve(false);
+            return;
+        }
+        attachCommandSocket(() => resolve(cameraControlsOpen()));
+        const started = Date.now();
+        const poll = setInterval(() => {
+            if (cameraControlsOpen()) {
+                clearInterval(poll);
+                resolve(true);
+                return;
+            }
+            if (Date.now() - started >= waitMs) {
+                clearInterval(poll);
+                resolve(cameraControlsOpen());
+            }
+        }, 50);
+    });
+}
+
+function driveHttpSend(payload, { keepalive = true, timeoutMs = 2500 } = {}) {
+    const body = { ...(payload || {}), via: 'http' };
+    const controller = typeof AbortController === 'function' && !keepalive ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    return fetch('/api/drive.php', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        keepalive: !!keepalive,
+        signal: controller ? controller.signal : undefined,
+    }).then((res) => {
+        if (timer) clearTimeout(timer);
+        return parseJsonResponse(res);
+    }).catch((err) => {
+        if (timer) clearTimeout(timer);
+        throw err;
+    });
 }
 
 function cameraSocketRequest(path, body, timeoutMs = 12000) {
@@ -18416,21 +18462,12 @@ function sendDrivePulse(linear, angular, meta = null) {
         if (meta.pointer) payload.pointer = String(meta.pointer).slice(0, 16);
     }
     payload.st = Date.now();
-    // Fire-and-forget on the quiet controls socket. That connection is not
-    // limited by Chrome's few HTTP slots to the panel.
     if (driveSocketSend(payload)) return;
-    // Do not await HTTP. A waiting response left every later pulse and the
-    // stop sitting until Disconnect, so the robot only twitched then.
-    try {
-        fetch('/api/drive.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            keepalive: true,
-        }).catch(() => {});
-    } catch {
-        /* the next pulse tries again */
-    }
+    // Socket was down. Do not leave a hung HTTP request occupying Chrome's
+    // few panel slots for 15s — that is what flushed press+stop together
+    // on Disconnect. Abort quickly; the next pulse retries.
+    if (!cameraControlsOpen()) attachCommandSocket();
+    driveHttpSend(payload, { keepalive: false, timeoutMs: 2000 }).catch(() => {});
 }
 
 function driveLabel(direction) {
@@ -18505,9 +18542,8 @@ async function startDrive(direction, button) {
     }
     if (typeof updateControllerTile === 'function') updateControllerTile();
 
-    // Click-to-drive: one press starts continuous motion. Do not await the first
-    // press on HTTP — with live cameras that request was delayed several seconds,
-    // so a later stop arrived first and the robot never moved.
+    // Prefer the quiet controls socket. A parallel HTTP press used to sit in
+    // Chrome for ~15s and then arrive with the stop on Disconnect.
     const pressPayload = {
         linear: vector.linear,
         angular: vector.angular,
@@ -18517,25 +18553,30 @@ async function startDrive(direction, button) {
         ct: driveClickAt,
         st: Date.now(),
     };
-    driveSocketSend(pressPayload);
-    fetch('/api/drive.php', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pressPayload),
-    }).then((res) => parseJsonResponse(res)).then((data) => {
-        if (!driveActive) return;
-        if (data && data.needs_controller) {
-            finishDriveHold('needs-controller');
-            applyControllerStateFromStatus(data);
-            updateControllerTile();
-            showToast(data.error || 'Press Connect first', 'error');
-        } else if (data && data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
-            sessionStorage.setItem('yarbo_drive_dock_warn', '1');
-            showToast(data.warning, 'error');
-        } else if (data && data.ok === false) {
-            showToast(data.error || 'Drive command failed', 'error');
+    const socketReady = await ensureControlsSocket(cameraStreamLive() ? 1000 : 0);
+    if (socketReady && driveSocketSend(pressPayload)) {
+        if (els.driveStatus) {
+            els.driveStatus.textContent = `${driveLabel(direction)} — controls socket`;
         }
-    }).catch(() => {});
+    } else {
+        if (els.driveStatus) {
+            els.driveStatus.textContent = `${driveLabel(direction)} — HTTP`;
+        }
+        driveHttpSend(pressPayload, { keepalive: false, timeoutMs: 4000 }).then((data) => {
+            if (!driveActive) return;
+            if (data && data.needs_controller) {
+                finishDriveHold('needs-controller');
+                applyControllerStateFromStatus(data);
+                updateControllerTile();
+                showToast(data.error || 'Press Connect first', 'error');
+            } else if (data && data.warning && !sessionStorage.getItem('yarbo_drive_dock_warn')) {
+                sessionStorage.setItem('yarbo_drive_dock_warn', '1');
+                showToast(data.warning, 'error');
+            } else if (data && data.ok === false) {
+                showToast(data.error || 'Drive command failed', 'error');
+            }
+        }).catch(() => {});
+    }
     driveInterval = setInterval(() => {
         if (!driveActive) return;
         if (!cameraStreamLive()) {
@@ -18577,18 +18618,13 @@ function finishDriveHold(why = 'release') {
         ct: why === 'toggle-off' || why === 'stop' ? driveClickAt : 0,
         st: Date.now(),
     };
-    driveSocketSend(payload);
-    // Plain HTTP stop with keepalive so a hung picture socket cannot leave the
-    // robot rolling after click-to-stop.
-    try {
-        fetch('/api/drive.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            keepalive: true,
-        }).catch(() => {});
-    } catch {
-        sendDrive(0, 0, false, { why, pointer });
+    if (!driveSocketSend(payload)) {
+        // Socket down — short HTTP stop. Keepalive so the tab can close.
+        try {
+            driveHttpSend(payload, { keepalive: true }).catch(() => {});
+        } catch {
+            sendDrive(0, 0, false, { why, pointer });
+        }
     }
     if (wasActive && els.driveStatus) els.driveStatus.textContent = 'Ready';
     if (typeof updateControllerTile === 'function') updateControllerTile();
@@ -18598,6 +18634,11 @@ function setupDrivePad() {
     const pad = document.getElementById('drive-pad');
     if (!pad || pad.dataset.driveBound) return;
     pad.dataset.driveBound = '1';
+    // Open the quiet controls socket early on HTTPS so the first direction
+    // does not fall back to HTTP behind live view.
+    if (location.protocol === 'https:' && typeof WebSocket === 'function') {
+        attachCommandSocket();
+    }
     let lastActivateAt = 0;
 
     const activate = (direction, button, pointerType, clickAt) => {

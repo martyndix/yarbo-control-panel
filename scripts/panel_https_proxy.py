@@ -914,7 +914,10 @@ class PictureProxyHandler(PanelHttpsProxyHandler):
         request_id = incoming.get("id")
         if op == "drive":
             path = "/api/drive.php"
-            body = json.dumps(incoming.get("json") if isinstance(incoming.get("json"), dict) else {}).encode("utf-8")
+            payload = incoming.get("json") if isinstance(incoming.get("json"), dict) else {}
+            if "via" not in payload:
+                payload = {**payload, "via": "socket"}
+            body = json.dumps(payload).encode("utf-8")
             content_type = "application/json"
         elif op == "command":
             path = "/api/command.php"

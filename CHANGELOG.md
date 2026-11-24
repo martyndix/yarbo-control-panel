@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.105] - 2026-11-24
+
+### Fixed
+
+- A direction with live view on no longer sits in Chrome for ~15 seconds and then arrives together with Disconnect. Timing logs showed `browser→php(skew) 15858ms` with every hold flushed in one second — the page was still sending HTTP as well as the controls socket, and hung HTTP requests filled Chrome's few panel slots. Drive now uses the controls socket alone when it is open, opens that socket as soon as the page loads on HTTPS, waits briefly for it before the first press, and aborts a fallback HTTP attempt after 2 seconds so slots cannot pile up. Each timing line now includes `via=socket` or `via=http`.
+
 ## [5.0.104] - 2026-11-24
 
 ### Fixed

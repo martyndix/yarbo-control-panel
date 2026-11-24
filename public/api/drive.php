@@ -43,7 +43,14 @@ function drive_log_timing(array $input, string $why): void
     if ($browserLag !== null) {
         $parts[] = 'browser→php(skew) ' . $browserLag . 'ms';
     }
-    $line = sprintf("[%s] Drive timing why=%s: %s\n", gmdate('H:i:s'), $why !== '' ? $why : '-', implode(', ', $parts));
+    $via = preg_replace('/[^a-z]/', '', strtolower((string) ($input['via'] ?? ''))) ?: '-';
+    $line = sprintf(
+        "[%s] Drive timing why=%s via=%s: %s\n",
+        gmdate('H:i:s'),
+        $why !== '' ? $why : '-',
+        $via,
+        implode(', ', $parts),
+    );
     @file_put_contents(dirname(__DIR__, 2) . '/data/mqtt-agent.log', $line, FILE_APPEND | LOCK_EX);
 }
 

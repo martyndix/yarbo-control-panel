@@ -172,6 +172,8 @@ assert_true(str_contains($appJs, 'attachCommandSocket();'), 'live view opens the
 $openAt = strpos($appJs, 'function openCameraFrames');
 $openFn = substr($appJs, (int) $openAt, (int) strpos($appJs, 'function setCameraLiveButtons', (int) $openAt) - (int) $openAt);
 assert_true(str_contains($openFn, 'attachCommandSocket()'), 'openCameraFrames starts the controls socket');
+assert_true(str_contains($appJs, 'ensureControlsSocket'), 'a direction waits briefly for the controls socket');
+assert_true(str_contains($appJs, "via: 'socket'"), 'socket drive is labelled for the timing log');
 assert_true(str_contains($appJs, 'keepalive: true'), 'HTTP drive pulses do not wait for an answer when the socket is down');
 
 assert_true(str_contains($agent, 'DRIVE_STALE_S = 12'), 'one press keeps moving when hold repeats cannot get through');
