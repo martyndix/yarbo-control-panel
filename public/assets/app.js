@@ -17713,6 +17713,7 @@ function decodeCameraFrame(event) {
 
 let cameraCommandSeq = 0;
 let driveClickAt = 0;
+let driveHttpPulseBusy = false;
 
 function eventEpochMs(event) {
     const stamp = Number(event && event.timeStamp);
@@ -17902,28 +17903,22 @@ function attachCameraSocket() {
     };
 }
 
+function isFunnelOrigin() {
+    // Tailscale Funnel / https://host with no :8443 — WebSockets for controls
+    // do not stay open, and each retry was queuing HTTP that blocked drive.
+    return location.protocol === 'https:' && !location.port;
+}
+
 function commandSocketUrl() {
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${scheme}//${location.host}/api/camera_live.php?action=controls`;
 }
 
 function reportControlsSocket(event, detail) {
+    // Do not POST to the panel. On Funnel those probes sat in Chrome's queue
+    // for minutes and delayed every real direction.
     try {
-        const body = JSON.stringify({
-            linear: 0,
-            angular: 0,
-            enter_manual: false,
-            why: `socket-${event}`.slice(0, 40),
-            via: 'http',
-            st: Date.now(),
-            note: String(detail || '').slice(0, 120),
-        });
-        fetch('/api/drive.php', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body,
-            keepalive: true,
-        }).catch(() => {});
+        console.warn('[yarbo] controls socket', event, detail || '');
     } catch {
         /* ignore */
     }
@@ -17932,9 +17927,18 @@ function reportControlsSocket(event, detail) {
 function attachCommandSocket(onReady) {
     // This connection carries a direction. The pictures open on their own.
     // Waiting for this socket left the tiles on "waiting" when it did not finish.
+    if (isFunnelOrigin()) {
+        // Funnel closes this socket immediately. Do not open or retry it.
+        if (typeof onReady === 'function') onReady();
+        return null;
+    }
     if (cameraCommandSocket && (cameraCommandSocket.readyState === 0 || cameraCommandSocket.readyState === 1)) {
         if (typeof onReady === 'function' && cameraCommandSocket.readyState === 1) onReady();
         return cameraCommandSocket;
+    }
+    if (commandSocketMisses >= 5) {
+        if (typeof onReady === 'function') onReady();
+        return null;
     }
     const url = commandSocketUrl();
     let socket;
@@ -17942,6 +17946,7 @@ function attachCommandSocket(onReady) {
         socket = new WebSocket(url);
     } catch (err) {
         reportControlsSocket('error', err && err.message);
+        commandSocketMisses += 1;
         if (typeof onReady === 'function') onReady();
         return null;
     }
@@ -18076,12 +18081,8 @@ function openCameraFrames() {
     closeCameraFrames();
     cameraFramesOpen = true;
     commandSocketMisses = 0;
-    // The quiet controls socket carries a direction. Chrome only allows a few
-    // HTTP requests to the panel at once; while live view is up those slots
-    // stay full, so a drive press sat until Disconnect. This socket is not
-    // in that pool.
-    attachCommandSocket();
-    // Pictures open on their own port. They do not share the panel connection.
+    // LAN HTTPS: quiet controls socket. Funnel cannot keep it open.
+    if (!isFunnelOrigin()) attachCommandSocket();
     attachCameraStream();
 }
 
@@ -18501,11 +18502,13 @@ function sendDrivePulse(linear, angular, meta = null) {
     }
     payload.st = Date.now();
     if (driveSocketSend(payload)) return;
-    // Socket was down. Do not leave a hung HTTP request occupying Chrome's
-    // few panel slots for 15s — that is what flushed press+stop together
-    // on Disconnect. Abort quickly; the next pulse retries.
-    if (!cameraControlsOpen()) attachCommandSocket();
-    driveHttpSend(payload, { keepalive: false, timeoutMs: 2000 }).catch(() => {});
+    // One HTTP pulse at a time. Firing every 400ms while Funnel was busy
+    // filled Chrome's queue; they all arrived together on Disconnect.
+    if (driveHttpPulseBusy) return;
+    driveHttpPulseBusy = true;
+    driveHttpSend(payload, { keepalive: false, timeoutMs: 5000 })
+        .catch(() => {})
+        .finally(() => { driveHttpPulseBusy = false; });
 }
 
 function driveLabel(direction) {
@@ -18604,17 +18607,14 @@ async function startDrive(direction, button) {
         // has a free slot to the panel — otherwise the press sits ~15s and
         // arrives with Disconnect.
         await stepPicturesAside();
-        noteCommandQuiet(20000);
+        noteCommandQuiet(30000);
         if (statusAbort) {
             try { statusAbort.abort(); } catch { /* ignore */ }
         }
         polling = false;
-        // Keep the camera agent from ending the session while pictures are
-        // stepped aside for an HTTP direction (Funnel has no separate picture port).
-        try {
-            fetch('/api/camera_live.php?action=status', { cache: 'no-store' }).catch(() => {});
-        } catch { /* ignore */ }
-        driveHttpSend(pressPayload, { keepalive: false, timeoutMs: 4000 }).then((data) => {
+        // Let Chrome and Funnel drop the picture connection before the press.
+        await new Promise((resolve) => setTimeout(resolve, 350));
+        driveHttpSend(pressPayload, { keepalive: false, timeoutMs: 8000 }).then((data) => {
             if (!driveActive) return;
             if (data && data.needs_controller) {
                 finishDriveHold('needs-controller');
@@ -18687,9 +18687,9 @@ function setupDrivePad() {
     const pad = document.getElementById('drive-pad');
     if (!pad || pad.dataset.driveBound) return;
     pad.dataset.driveBound = '1';
-    // Open the quiet controls socket early on HTTPS so the first direction
-    // does not fall back to HTTP behind live view.
-    if (location.protocol === 'https:' && typeof WebSocket === 'function') {
+    // Open the quiet controls socket early on LAN HTTPS. Funnel cannot keep
+    // that socket open, so skip it there.
+    if (location.protocol === 'https:' && location.port && typeof WebSocket === 'function') {
         attachCommandSocket();
     }
     let lastActivateAt = 0;

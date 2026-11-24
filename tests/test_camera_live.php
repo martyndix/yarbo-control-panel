@@ -174,7 +174,8 @@ $openFn = substr($appJs, (int) $openAt, (int) strpos($appJs, 'function setCamera
 assert_true(str_contains($openFn, 'attachCommandSocket()'), 'openCameraFrames starts the controls socket');
 assert_true(str_contains($appJs, 'ensureControlsSocket'), 'a direction waits briefly for the controls socket');
 assert_true(str_contains($appJs, 'stepPicturesAside'), 'HTTP drive closes the pictures so Chrome has a free slot');
-assert_true(str_contains($appJs, 'reportControlsSocket'), 'a failed controls socket is reported in the drive log');
+assert_true(str_contains($appJs, 'isFunnelOrigin'), 'Funnel skips the controls socket that cannot stay open');
+assert_true(str_contains($appJs, 'driveHttpPulseBusy'), 'Funnel HTTP drive sends one pulse at a time');
 assert_true(str_contains($appJs, "via: 'socket'"), 'socket drive is labelled for the timing log');
 assert_true(str_contains($appJs, 'keepalive: true'), 'HTTP drive pulses do not wait for an answer when the socket is down');
 

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.108] - 2026-11-24
+
+### Fixed
+
+- Driving through Tailscale Funnel no longer queues for many seconds. The controls socket cannot stay open on Funnel (`socket-close` to `wss://28lpc.mjdix.ch/.../controls`); retries and diagnostic posts were filling Chrome's HTTP queue, so a real direction arrived ~10s late with Disconnect. Funnel now skips that socket, closes the pictures, waits briefly, sends one HTTP direction at a time, and opens the pictures again when you stop.
+
 ## [5.0.107] - 2026-11-24
 
 ### Fixed
