@@ -192,4 +192,18 @@ assert_true(str_contains($change, '## [4.0.379]'), 'changelog 4.0.379');
 assert_true(str_contains($js, 'Outside °C'), 'chart labels the outside line');
 assert_true(str_contains($change, '## [5.0.67]'), 'changelog 5.0.67');
 
+$runAt = $now + 10000;
+$before = count($hist->load('unifi:sensor:living')['samples'] ?? []);
+$first = $hist->sampleOnce($runAt);
+assert_true(($first['sampled'] ?? 0) >= 1, 'first run samples sources');
+assert_true($hist->lastRunAt() === $runAt, 'run time recorded');
+$afterFirst = $hist->load('unifi:sensor:living')['samples'];
+assert_true(count($afterFirst) === $before + 1, 'run added one sample');
+$second = $hist->sampleOnce($runAt + 120);
+assert_true(($second['throttled'] ?? false) === true, 'run inside the gap is skipped');
+assert_true(count($hist->load('unifi:sensor:living')['samples']) === count($afterFirst), 'skipped run writes nothing');
+$third = $hist->sampleOnce($runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S);
+assert_true(($third['throttled'] ?? false) === false, 'run after the gap is not skipped');
+assert_true($hist->lastRunAt() === $runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S, 'later run recorded');
+
 echo "ok: sensor history\n";

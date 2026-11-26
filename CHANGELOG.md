@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.112] - 2026-11-26
+
+### Fixed
+
+- Sensor history: a sampling run stamps every sensor with one time and runs at most every 25 minutes, whether it comes from the background loop or opening the chart. Sensor temperature and humidity no longer land a couple of minutes apart.
+
 ## [5.0.111] - 2026-11-26
 
 ### Fixed

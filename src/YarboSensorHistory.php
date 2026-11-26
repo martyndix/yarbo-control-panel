@@ -353,9 +353,41 @@ final class YarboSensorHistory
      *
      * @return array{ok: bool, sampled: int, skipped: int, sources: int}
      */
+    public function lastRunAt(): int
+    {
+        $path = $this->dir() . '/.last-run';
+        if (!is_file($path)) {
+            return 0;
+        }
+        $raw = trim((string) file_get_contents($path));
+        if ($raw !== '' && ctype_digit($raw)) {
+            return (int) $raw;
+        }
+        $mtime = @filemtime($path);
+
+        return is_int($mtime) ? $mtime : 0;
+    }
+
+    private function markRunAt(int $now): void
+    {
+        if (!is_dir($this->dir())) {
+            @mkdir($this->dir(), 0755, true);
+        }
+        @file_put_contents($this->dir() . '/.last-run', $now . "\n", LOCK_EX);
+    }
+
+    /**
+     * One run stamps every sensor with the same time, so a sensor's temperature
+     * and humidity files stay aligned. Runs from the page or background loop
+     * closer together than SAMPLE_MIN_GAP_S are skipped as a whole.
+     */
     public function sampleOnce(?int $now = null): array
     {
         $now ??= time();
+        $last = $this->lastRunAt();
+        if ($last > 0 && ($now - $last) < self::SAMPLE_MIN_GAP_S) {
+            return ['ok' => true, 'sampled' => 0, 'skipped' => 0, 'sources' => 0, 'throttled' => true];
+        }
         try {
             $hub = new YarboHub($this->projectRoot);
             if ($hub->enabled(YarboHub::MODULE_UNIFI)) {
@@ -386,6 +418,9 @@ final class YarboSensorHistory
             }
         }
         $this->pruneOrphans(array_map(static fn (array $s): string => $s['id'], $sources));
+        if ($sampled > 0) {
+            $this->markRunAt($now);
+        }
 
         return [
             'ok' => true,

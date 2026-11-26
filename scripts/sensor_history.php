@@ -5,8 +5,9 @@
  * Sample temperature, humidity, and plug watts / volts / amps every ~30 minutes.
  * Started by scripts/panel.sh. Use --once for a single pass (panel update).
  *
- * Wakes often and only records a successful run when at least one sample is
- * written, so a restart during SAMPLE_MIN_GAP does not burn another full 30 min.
+ * Wakes often. The last run time lives in YarboSensorHistory::lastRunAt(), so a
+ * restart or a page-triggered sample inside SAMPLE_MIN_GAP_S does not start a
+ * second run.
  */
 
 declare(strict_types=1);
@@ -26,7 +27,6 @@ use Yarbo\YarboSensorHistory;
 
 $once = in_array('--once', $argv, true);
 $history = new YarboSensorHistory($root);
-$lastRunPath = $history->dir() . '/.last-run';
 
 $startedAt = time();
 $watchFiles = [
@@ -48,38 +48,12 @@ function sensor_history_sources_changed(array $paths, int $startedAt): bool
     return false;
 }
 
-function sensor_history_last_run(string $path): int
-{
-    if (!is_file($path)) {
-        return 0;
-    }
-    $raw = trim((string) file_get_contents($path));
-    if ($raw !== '' && ctype_digit($raw)) {
-        return (int) $raw;
-    }
-    $mtime = @filemtime($path);
-
-    return is_int($mtime) ? $mtime : 0;
-}
-
-function sensor_history_mark_run(string $path, int $now): void
-{
-    $dir = dirname($path);
-    if (!is_dir($dir)) {
-        @mkdir($dir, 0755, true);
-    }
-    @file_put_contents($path, (string) $now . "\n", LOCK_EX);
-}
-
-function sensor_history_run(YarboSensorHistory $history, string $lastRunPath): void
+function sensor_history_run(YarboSensorHistory $history): void
 {
     try {
         $history->sampleOutside();
         $result = $history->sampleOnce();
         $sampled = (int) ($result['sampled'] ?? 0);
-        if ($sampled > 0) {
-            sensor_history_mark_run($lastRunPath, time());
-        }
         $line = sprintf(
             'sensor_history: sampled=%d skipped=%d sources=%d',
             $sampled,
@@ -93,7 +67,7 @@ function sensor_history_run(YarboSensorHistory $history, string $lastRunPath): v
 }
 
 if ($once) {
-    sensor_history_run($history, $lastRunPath);
+    sensor_history_run($history);
     exit(0);
 }
 
@@ -105,9 +79,9 @@ while (true) {
         exit(0);
     }
     $now = time();
-    $last = sensor_history_last_run($lastRunPath);
+    $last = $history->lastRunAt();
     if ($last <= 0 || ($now - $last) >= $dueAfter) {
-        sensor_history_run($history, $lastRunPath);
+        sensor_history_run($history);
     }
     for ($i = 0; $i < $wakeEvery; $i++) {
         if (sensor_history_sources_changed($watchFiles, $startedAt)) {
