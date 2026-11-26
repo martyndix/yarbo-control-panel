@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.110] - 2026-11-26
+
+### Fixed
+
+- Power plug history (watts, volts, amps) uses the same live source as the climate sensors. The sampler asks the Matter agent for the newest meter readings on each 30-minute pass, instead of the Home cache file that only refreshes while Home is open. Cached values are still used when the agent is down.
+
 ## [5.0.109] - 2026-11-26
 
 ### Fixed

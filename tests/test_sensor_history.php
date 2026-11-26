@@ -136,7 +136,7 @@ assert_true(abs((float) ($daily['points'][0]['outside'] ?? 0) - 3.75) < 0.02, 'd
 $hist->pruneOrphans(['unifi:sensor:living']);
 assert_true(is_file($hist->pathFor(YarboSensorHistory::OUTSIDE_ID)), 'outside history is kept');
 
-$merged = YarboSensorHistory::applyAgentClimate(
+$merged = YarboSensorHistory::applyAgentReadings(
     [
         'matter:7' => ['id' => 'matter:7', 'name' => 'Hall', 'kind' => 'sensor', 'temperature' => 19.0, 'humidity' => 40.0],
         'unifi:sensor:living' => ['id' => 'unifi:sensor:living', 'name' => 'Living', 'kind' => 'sensor', 'temperature' => 18.5, 'humidity' => 47.0],
@@ -152,6 +152,18 @@ assert_true(($merged['matter:7']['temperature'] ?? null) === 21.4, 'agent readin
 assert_true(($merged['matter:7']['humidity'] ?? null) === 40.0, 'missing agent humidity keeps the cached value');
 assert_true(($merged['matter:9']['temperature'] ?? null) === 3.2, 'agent-only sensor is sampled');
 assert_true(($merged['unifi:sensor:living']['temperature'] ?? null) === 18.5, 'UniFi reading is not replaced by the agent');
+$plugMerged = YarboSensorHistory::applyAgentReadings(
+    [
+        'matter:12' => ['id' => 'matter:12', 'name' => 'Heater plug', 'kind' => 'plug', 'temperature' => null, 'humidity' => null, 'power_w' => 5.0, 'voltage_v' => 230.0, 'current_a' => 0.02],
+    ],
+    [
+        ['id' => 'matter:12', 'name' => 'Heater plug', 'kind' => 'plug', 'temperature' => null, 'humidity' => null, 'power_w' => 1043.6, 'voltage_v' => 229.4, 'current_a' => 4.56],
+        ['id' => 'matter:13', 'name' => 'Lamp plug', 'kind' => 'plug', 'temperature' => null, 'humidity' => null, 'power_w' => 12.0, 'voltage_v' => 229.0, 'current_a' => 0.05],
+    ],
+);
+assert_true(($plugMerged['matter:12']['power_w'] ?? null) === 1043.6, 'agent watts override cached plug watts');
+assert_true(abs((float) ($plugMerged['matter:12']['current_a'] ?? 0) - 4.56) < 0.001, 'agent amps override cached plug amps');
+assert_true(($plugMerged['matter:13']['power_w'] ?? null) === 12.0, 'agent-only plug is sampled');
 
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboSensorHistory.php');
 $api = (string) file_get_contents(__DIR__ . '/../public/api/home.php');

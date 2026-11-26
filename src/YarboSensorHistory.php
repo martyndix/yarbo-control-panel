@@ -107,7 +107,6 @@ final class YarboSensorHistory
             }
             $byId[$id] = $row;
         }
-        $byId = self::applyAgentClimate($byId, $this->agentClimateRows(), $unifiIds);
         foreach ($this->homeMeterRows() as $row) {
             $id = $row['id'];
             if (!isset($byId[$id])) {
@@ -118,6 +117,7 @@ final class YarboSensorHistory
             $byId[$id]['voltage_v'] = $row['voltage_v'];
             $byId[$id]['current_a'] = $row['current_a'];
         }
+        $byId = self::applyAgentReadings($byId, $this->agentReadingRows(), $unifiIds);
 
         return array_values($byId);
     }
@@ -126,9 +126,9 @@ final class YarboSensorHistory
      * The Matter agent holds the newest readings in memory. The home cache file
      * is only rewritten while a browser is loading Home, so the sampler asks the agent.
      *
-     * @return list<array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}>
+     * @return list<array<string, mixed>>
      */
-    private function agentClimateRows(): array
+    private function agentReadingRows(): array
     {
         try {
             $result = YarboMatterAgentClient::fromEnv()->request(['op' => 'states'], 2.5, false);
@@ -143,9 +143,13 @@ final class YarboSensorHistory
             if (!is_array($row)) {
                 continue;
             }
-            $mapped = $this->mapClimateRow($row);
-            if ($mapped !== null) {
-                $out[] = $mapped;
+            $climate = $this->mapClimateRow($row);
+            if ($climate !== null) {
+                $out[] = $climate;
+            }
+            $meter = $this->mapMeterRow($row);
+            if ($meter !== null) {
+                $out[] = $meter;
             }
         }
 
@@ -153,15 +157,18 @@ final class YarboSensorHistory
     }
 
     /**
-     * @param array<string, array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}> $byId
-     * @param list<array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}> $agentRows
+     * Newest agent value wins for each reading it reports. Missing readings keep the cached value.
+     *
+     * @param array<string, array<string, mixed>> $byId
+     * @param list<array<string, mixed>> $agentRows
      * @param array<string, bool> $unifiIds
-     * @return array<string, array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}>
+     * @return array<string, array<string, mixed>>
      */
-    public static function applyAgentClimate(array $byId, array $agentRows, array $unifiIds = []): array
+    public static function applyAgentReadings(array $byId, array $agentRows, array $unifiIds = []): array
     {
+        $fields = ['temperature', 'humidity', 'power_w', 'voltage_v', 'current_a'];
         foreach ($agentRows as $row) {
-            $id = $row['id'];
+            $id = (string) $row['id'];
             if (isset($unifiIds[$id])) {
                 continue;
             }
@@ -169,11 +176,10 @@ final class YarboSensorHistory
                 $byId[$id] = $row;
                 continue;
             }
-            if ($row['temperature'] !== null) {
-                $byId[$id]['temperature'] = $row['temperature'];
-            }
-            if ($row['humidity'] !== null) {
-                $byId[$id]['humidity'] = $row['humidity'];
+            foreach ($fields as $field) {
+                if (array_key_exists($field, $row) && $row[$field] !== null) {
+                    $byId[$id][$field] = $row[$field];
+                }
             }
         }
 
