@@ -376,18 +376,144 @@ final class YarboSensorHistory
         @file_put_contents($this->dir() . '/.last-run', $now . "\n", LOCK_EX);
     }
 
+    public function beatPath(): string
+    {
+        return $this->dir() . '/.sampler-beat';
+    }
+
+    /**
+     * What the chart shows about background sampling: when the last run saved,
+     * who ran it, and whether the background loop has checked in lately.
+     *
+     * @return array{last_run_at: int, last_by: string, last_error: string, background_seen_at: int, background_running: bool}
+     */
+    public function samplerStatus(?int $now = null): array
+    {
+        $now ??= time();
+        $raw = @file_get_contents($this->dir() . '/.status.json');
+        $status = is_string($raw) ? json_decode($raw, true) : null;
+        $status = is_array($status) ? $status : [];
+        clearstatcache(true, $this->beatPath());
+        $beat = is_file($this->beatPath()) ? (int) @filemtime($this->beatPath()) : 0;
+
+        return [
+            'last_run_at' => $this->lastRunAt(),
+            'last_by' => (string) ($status['by'] ?? ''),
+            'last_error' => (string) ($status['error'] ?? ''),
+            'background_seen_at' => $beat,
+            'background_running' => $beat > 0 && ($now - $beat) < 180,
+        ];
+    }
+
+    private function writeStatus(array $status): void
+    {
+        if (!is_dir($this->dir())) {
+            @mkdir($this->dir(), 0755, true);
+        }
+        @file_put_contents($this->dir() . '/.status.json', json_encode($status, JSON_UNESCAPED_SLASHES) . "\n", LOCK_EX);
+    }
+
+    /**
+     * Start a one-shot sampling pass in the background when the last run is
+     * 30 minutes old. Called from the Home automations runner, so samples keep
+     * coming even when the sampler loop in panel.sh is not running.
+     */
+    public function kickSamplerIfDue(?int $now = null): bool
+    {
+        $now ??= time();
+        $last = $this->lastRunAt();
+        if ($last > 0 && ($now - $last) < self::SAMPLE_INTERVAL_S) {
+            return false;
+        }
+        $kick = $this->dir() . '/.kick';
+        clearstatcache(true, $kick);
+        if (is_file($kick) && ($now - (int) @filemtime($kick)) < 120) {
+            return false;
+        }
+        $script = rtrim($this->projectRoot, '/') . '/scripts/sensor_history.php';
+        if (!is_file($script)) {
+            return false;
+        }
+        if (!is_dir($this->dir())) {
+            @mkdir($this->dir(), 0755, true);
+        }
+        @touch($kick, $now);
+        $php = PHP_BINARY !== '' ? PHP_BINARY : 'php';
+        $log = rtrim($this->projectRoot, '/') . '/data/sensor-history.log';
+        $limit = is_executable('/usr/bin/timeout') ? '/usr/bin/timeout 150 ' : '';
+        $command = sprintf(
+            'cd %s && %s%s %s --once --by=automations >> %s 2>&1 < /dev/null &',
+            escapeshellarg($this->projectRoot),
+            $limit,
+            escapeshellarg($php),
+            escapeshellarg($script),
+            escapeshellarg($log)
+        );
+        $process = @proc_open(['bash', '-c', $command], [
+            0 => ['file', '/dev/null', 'r'],
+            1 => ['file', '/dev/null', 'a'],
+            2 => ['file', '/dev/null', 'a'],
+        ], $pipes, $this->projectRoot);
+        if (!is_resource($process)) {
+            return false;
+        }
+        proc_close($process);
+
+        return true;
+    }
+
     /**
      * One run stamps every sensor with the same time, so a sensor's temperature
      * and humidity files stay aligned. Runs from the page or background loop
      * closer together than SAMPLE_MIN_GAP_S are skipped as a whole.
      */
-    public function sampleOnce(?int $now = null): array
+    public function sampleOnce(?int $now = null, string $by = 'page'): array
     {
         $now ??= time();
         $last = $this->lastRunAt();
         if ($last > 0 && ($now - $last) < self::SAMPLE_MIN_GAP_S) {
             return ['ok' => true, 'sampled' => 0, 'skipped' => 0, 'sources' => 0, 'throttled' => true];
         }
+        if (!is_dir($this->dir())) {
+            @mkdir($this->dir(), 0755, true);
+        }
+        $lock = @fopen($this->dir() . '/.sample.lock', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX | LOCK_NB)) {
+            if (is_resource($lock)) {
+                fclose($lock);
+            }
+
+            return ['ok' => true, 'sampled' => 0, 'skipped' => 0, 'sources' => 0, 'throttled' => true];
+        }
+        try {
+            $last = $this->lastRunAt();
+            if ($last > 0 && ($now - $last) < self::SAMPLE_MIN_GAP_S) {
+                return ['ok' => true, 'sampled' => 0, 'skipped' => 0, 'sources' => 0, 'throttled' => true];
+            }
+            $result = $this->sampleLocked($now);
+            $this->writeStatus([
+                'at' => $now,
+                'by' => $by,
+                'sampled' => $result['sampled'],
+                'sources' => $result['sources'],
+                'error' => $result['sampled'] > 0 ? '' : ($result['sources'] > 0 ? 'nothing new to save' : 'no sensors found'),
+            ]);
+
+            return $result;
+        } catch (\Throwable $e) {
+            $this->writeStatus(['at' => $now, 'by' => $by, 'sampled' => 0, 'sources' => 0, 'error' => $e->getMessage()]);
+            throw $e;
+        } finally {
+            flock($lock, LOCK_UN);
+            fclose($lock);
+        }
+    }
+
+    /**
+     * @return array{ok: bool, sampled: int, skipped: int, sources: int}
+     */
+    private function sampleLocked(int $now): array
+    {
         try {
             $hub = new YarboHub($this->projectRoot);
             if ($hub->enabled(YarboHub::MODULE_UNIFI)) {
@@ -721,6 +847,7 @@ final class YarboSensorHistory
             'has_outside' => $hasOutside,
             'points' => $points,
             'trends' => $this->trends($points, $hasHumidity),
+            'sampler' => $this->samplerStatus(),
         ];
     }
 

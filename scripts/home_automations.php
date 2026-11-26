@@ -24,6 +24,7 @@ require $autoload;
 
 use Yarbo\YarboDockLights;
 use Yarbo\YarboHomeAutomations;
+use Yarbo\YarboSensorHistory;
 
 $once = in_array('--once', $argv, true);
 $root = dirname(__DIR__);
@@ -42,6 +43,14 @@ $engine = new YarboHomeAutomations($root);
 function home_automations_tick(YarboHomeAutomations $engine, string $root): void
 {
     static $failStreak = 0;
+    static $sensorHistoryCheckAt = 0;
+    if (time() - $sensorHistoryCheckAt >= 60) {
+        $sensorHistoryCheckAt = time();
+        try {
+            (new YarboSensorHistory($root))->kickSamplerIfDue();
+        } catch (Throwable) {
+        }
+    }
     try {
         // Powerwall/Yarbo keepalive first — a slow Home tick must not starve Tesla.
         if ($engine->consumeRunnerNudge()) {

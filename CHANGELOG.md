@@ -6,6 +6,16 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.114] - 2026-11-27
+
+### Fixed
+
+- Sensor history saves every 30 minutes with no browser open. The Home automations runner now starts a sampling pass when the last one is 30 minutes old, as a backup to the sampler loop. Each loop pass runs as its own process with a 150 s limit, so a stuck read cannot stop sampling, and a Pi that boots before its clock is set no longer reloads the loop forever.
+
+### Added
+
+- The sensor chart shows when history was last saved, what saved it, and whether the background sampler is running.
+
 ## [5.0.113] - 2026-11-26
 
 ### Fixed

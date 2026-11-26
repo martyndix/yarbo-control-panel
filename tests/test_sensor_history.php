@@ -206,4 +206,24 @@ $third = $hist->sampleOnce($runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S);
 assert_true(($third['throttled'] ?? false) === false, 'run after the gap is not skipped');
 assert_true($hist->lastRunAt() === $runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S, 'later run recorded');
 
+$status = $hist->samplerStatus($runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S);
+assert_true($status['last_by'] === 'page', 'status records who sampled');
+assert_true($status['background_running'] === false, 'no background heartbeat yet');
+touch($hist->beatPath(), $runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S);
+$status = $hist->samplerStatus($runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S + 30);
+assert_true($status['background_running'] === true, 'fresh heartbeat reads as running');
+assert_true(!$hist->kickSamplerIfDue($runAt + YarboSensorHistory::SAMPLE_MIN_GAP_S + 60), 'no kick before 30 minutes');
+
+$held = fopen($hist->dir() . '/.sample.lock', 'c');
+flock($held, LOCK_EX);
+$locked = $hist->sampleOnce($runAt + 10 * YarboSensorHistory::SAMPLE_INTERVAL_S, 'background');
+assert_true(($locked['throttled'] ?? false) === true, 'a second pass waits for the one already running');
+flock($held, LOCK_UN);
+fclose($held);
+$bg = $hist->sampleOnce($runAt + 10 * YarboSensorHistory::SAMPLE_INTERVAL_S, 'background');
+assert_true(($bg['sampled'] ?? 0) >= 1, 'pass runs once the lock is free');
+assert_true($hist->samplerStatus()['last_by'] === 'background', 'background pass recorded');
+$withStatus = $hist->series('unifi:sensor:living', $now - 3600, $runAt + 20 * YarboSensorHistory::SAMPLE_INTERVAL_S, '30m');
+assert_true(is_array($withStatus['sampler'] ?? null), 'series reports sampler status');
+
 echo "ok: sensor history\n";

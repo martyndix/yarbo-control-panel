@@ -2333,6 +2333,35 @@ async function loadSensorHistoryChart() {
     }
 }
 
+function sensorHistorySamplerText(sampler) {
+    if (!sampler || typeof sampler !== 'object') return '';
+    const fmt = (sec) => new Date(Number(sec) * 1000).toLocaleString(undefined, {
+        day: 'numeric',
+        month: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+    const who = {
+        background: 'background',
+        automations: 'automations runner',
+        page: 'this page',
+        update: 'update',
+    }[sampler.last_by] || sampler.last_by || '';
+    const parts = [];
+    if (Number(sampler.last_run_at) > 0) {
+        parts.push(`Last saved ${fmt(sampler.last_run_at)}${who ? ` by ${who}` : ''}`);
+    }
+    if (sampler.background_running) {
+        parts.push('background sampler running');
+    } else if (Number(sampler.background_seen_at) > 0) {
+        parts.push(`background sampler not seen since ${fmt(sampler.background_seen_at)}`);
+    } else {
+        parts.push('background sampler not seen');
+    }
+    if (sampler.last_error) parts.push(`last pass: ${sampler.last_error}`);
+    return parts.join(' · ');
+}
+
 function renderSensorHistoryChart(data) {
     const points = Array.isArray(data.points) ? data.points : [];
     const hasHumidity = Boolean(data.has_humidity);
@@ -2367,9 +2396,12 @@ function renderSensorHistoryChart(data) {
     if (els.sensorHistorySummary) {
         const n = points.length;
         const res = data.bucket === '1d' ? 'daily averages' : '30-minute samples';
-        els.sensorHistorySummary.textContent = n
+        const base = n
             ? `${n} ${res} · kept for up to 1 year`
             : 'No samples in this range yet — history builds every 30 minutes.';
+        const sampler = sensorHistorySamplerText(data.sampler);
+        els.sensorHistorySummary.textContent = sampler ? `${base}\n${sampler}` : base;
+        els.sensorHistorySummary.style.whiteSpace = 'pre-line';
     }
     const trendBits = [];
     if (electrical) {
