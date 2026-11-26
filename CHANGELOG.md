@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.109] - 2026-11-26
+
+### Fixed
+
+- Temperature and humidity history is recorded from the Matter agent's live readings, not the Home cache file. That cache was only rewritten while a browser had Home open, so with the page closed the 30-minute sampler saved the last readings from when someone last looked, or none at all. The sampler now asks the agent on every pass, and UniFi readings still take priority for UniFi sensors. If the agent is down, it falls back to the cache as before.
+
 ## [5.0.108] - 2026-11-24
 
 ### Fixed

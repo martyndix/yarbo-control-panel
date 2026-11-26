@@ -66,6 +66,7 @@ final class YarboSensorHistory
     public function listSources(): array
     {
         $byId = [];
+        $unifiIds = [];
 
         try {
             $unifi = new YarboUnifi($this->projectRoot);
@@ -86,6 +87,7 @@ final class YarboSensorHistory
                 if ($id === '') {
                     continue;
                 }
+                $unifiIds[$id] = true;
                 $byId[$id] = [
                     'id' => $id,
                     'name' => (string) ($row['name'] ?? $id),
@@ -105,6 +107,7 @@ final class YarboSensorHistory
             }
             $byId[$id] = $row;
         }
+        $byId = self::applyAgentClimate($byId, $this->agentClimateRows(), $unifiIds);
         foreach ($this->homeMeterRows() as $row) {
             $id = $row['id'];
             if (!isset($byId[$id])) {
@@ -117,6 +120,64 @@ final class YarboSensorHistory
         }
 
         return array_values($byId);
+    }
+
+    /**
+     * The Matter agent holds the newest readings in memory. The home cache file
+     * is only rewritten while a browser is loading Home, so the sampler asks the agent.
+     *
+     * @return list<array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}>
+     */
+    private function agentClimateRows(): array
+    {
+        try {
+            $result = YarboMatterAgentClient::fromEnv()->request(['op' => 'states'], 2.5, false);
+        } catch (\Throwable) {
+            return [];
+        }
+        if (($result['ok'] ?? false) !== true || !is_array($result['devices'] ?? null)) {
+            return [];
+        }
+        $out = [];
+        foreach ($result['devices'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $mapped = $this->mapClimateRow($row);
+            if ($mapped !== null) {
+                $out[] = $mapped;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}> $byId
+     * @param list<array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}> $agentRows
+     * @param array<string, bool> $unifiIds
+     * @return array<string, array{id: string, name: string, kind: string, temperature: ?float, humidity: ?float}>
+     */
+    public static function applyAgentClimate(array $byId, array $agentRows, array $unifiIds = []): array
+    {
+        foreach ($agentRows as $row) {
+            $id = $row['id'];
+            if (isset($unifiIds[$id])) {
+                continue;
+            }
+            if (!isset($byId[$id])) {
+                $byId[$id] = $row;
+                continue;
+            }
+            if ($row['temperature'] !== null) {
+                $byId[$id]['temperature'] = $row['temperature'];
+            }
+            if ($row['humidity'] !== null) {
+                $byId[$id]['humidity'] = $row['humidity'];
+            }
+        }
+
+        return $byId;
     }
 
     /**

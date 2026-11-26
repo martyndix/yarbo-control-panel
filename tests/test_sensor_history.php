@@ -136,6 +136,23 @@ assert_true(abs((float) ($daily['points'][0]['outside'] ?? 0) - 3.75) < 0.02, 'd
 $hist->pruneOrphans(['unifi:sensor:living']);
 assert_true(is_file($hist->pathFor(YarboSensorHistory::OUTSIDE_ID)), 'outside history is kept');
 
+$merged = YarboSensorHistory::applyAgentClimate(
+    [
+        'matter:7' => ['id' => 'matter:7', 'name' => 'Hall', 'kind' => 'sensor', 'temperature' => 19.0, 'humidity' => 40.0],
+        'unifi:sensor:living' => ['id' => 'unifi:sensor:living', 'name' => 'Living', 'kind' => 'sensor', 'temperature' => 18.5, 'humidity' => 47.0],
+    ],
+    [
+        ['id' => 'matter:7', 'name' => 'Hall', 'kind' => 'sensor', 'temperature' => 21.4, 'humidity' => null],
+        ['id' => 'matter:9', 'name' => 'Porch', 'kind' => 'sensor', 'temperature' => 3.2, 'humidity' => 80.0],
+        ['id' => 'unifi:sensor:living', 'name' => 'Living', 'kind' => 'sensor', 'temperature' => 30.0, 'humidity' => 10.0],
+    ],
+    ['unifi:sensor:living' => true],
+);
+assert_true(($merged['matter:7']['temperature'] ?? null) === 21.4, 'agent reading overrides a stale cached temperature');
+assert_true(($merged['matter:7']['humidity'] ?? null) === 40.0, 'missing agent humidity keeps the cached value');
+assert_true(($merged['matter:9']['temperature'] ?? null) === 3.2, 'agent-only sensor is sampled');
+assert_true(($merged['unifi:sensor:living']['temperature'] ?? null) === 18.5, 'UniFi reading is not replaced by the agent');
+
 $php = (string) file_get_contents(__DIR__ . '/../src/YarboSensorHistory.php');
 $api = (string) file_get_contents(__DIR__ . '/../public/api/home.php');
 $js = (string) file_get_contents(__DIR__ . '/../public/assets/app.js');
