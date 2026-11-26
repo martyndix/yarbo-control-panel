@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.113] - 2026-11-26
+
+### Fixed
+
+- Matter sensors: a temperature poll or report with no valid reading no longer clears the temperature already on the row, so the IKEA sensor temperature stays on the card.
+
 ## [5.0.112] - 2026-11-26
 
 ### Fixed

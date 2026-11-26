@@ -51,6 +51,17 @@ def main() -> None:
     timed_out = run_poll(agent, {"ok": False, "error": "Timed out waiting for response"})
     assert len(timed_out) == 1, f"a timed-out temperature read ends the pass, got {timed_out}"
 
+    patches: list[tuple[str, dict]] = []
+    agent.patch_live_device = lambda device_id, fields, **kw: patches.append((device_id, dict(fields)))
+    agent.live_row = lambda device_id: {"id": device_id, "kind": "sensor"}
+    agent.current_live_devices = lambda: []
+    agent.climate_canonical_id = lambda node_id, endpoint, device_id: device_id
+    agent.apply_attribute_event([2042, f"1/{temp_cluster}/{temp_attr}", None])
+    agent.apply_attribute_event([2042, f"2/{temp_cluster}/{temp_attr}", {"status": "unsupported"}])
+    assert patches == [], f"a null or invalid temperature must not write the row, got {patches}"
+    agent.apply_attribute_event([2042, f"1/{temp_cluster}/{temp_attr}", 1950])
+    assert patches and patches[-1][1].get("temperature") == 19.5, f"valid temperature still applies, got {patches}"
+
     print("ok: matter climate poll reads temperature")
 
 

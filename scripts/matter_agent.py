@@ -6997,6 +6997,10 @@ def apply_attribute_event(data: Any) -> None:
             fields["system_mode"] = int(event_number(value) or 0)
     elif cluster == TEMP_MEASUREMENT and attr == ATTR_MEASURED_TEMP:
         celsius = matter_celsius(value)
+        # A poll of an endpoint without a temperature cluster, or an invalid
+        # reading, must not wipe a temperature already on the row.
+        if celsius is None:
+            return
         fields["local_temperature"] = celsius
         fields["temperature"] = celsius
     elif cluster == HUMIDITY_MEASUREMENT and attr == ATTR_MEASURED_HUMIDITY:
