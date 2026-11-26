@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.111] - 2026-11-26
+
+### Fixed
+
+- Matter climate sensors: each 20 s poll now also reads the temperature attribute, so battery temperature sensors no longer lag behind humidity in the history charts.
+
 ## [5.0.110] - 2026-11-26
 
 ### Fixed

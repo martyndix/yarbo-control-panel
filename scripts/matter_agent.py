@@ -8376,6 +8376,13 @@ def poll_climate_attributes() -> None:
         return
     node_id, endpoints, device_id = ready[_climate_cursor % len(ready)]
     _climate_cursor += 1
+    # Battery sensors only send a temperature when it moves, so a poll reads it
+    # too. Humidity alone left the temperature line behind the humidity line.
+    temp_paths = [attr_key(endpoint, TEMP_MEASUREMENT, ATTR_MEASURED_TEMP) for endpoint in endpoints]
+    if poll_paused():
+        return
+    if _poll_note_result(node_id, _poll_read(node_id, temp_paths, CLIMATE_POLL_TIMEOUT)):
+        return
     hard = 0
     for endpoint in endpoints:
         if poll_paused():
