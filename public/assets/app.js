@@ -260,6 +260,7 @@ const els = {
     settingsError: document.getElementById('settings-error'),
     settingsSave: document.getElementById('settings-save'),
     settingsUpdateStatus: document.getElementById('settings-update-status'),
+    settingsServiceNotice: document.getElementById('settings-service-notice'),
     settingsUpdateNotes: document.getElementById('settings-update-notes'),
     settingsUpdateResult: document.getElementById('settings-update-result'),
     settingsUpdateCheck: document.getElementById('settings-update-check'),
@@ -16826,6 +16827,7 @@ async function refreshUpdateBadge() {
         if (data?.ok) {
             lastUpdateStatus = data;
         }
+        renderServiceNotice(data?.service);
         applyUpdateAvailability(lastUpdateStatus);
         return lastUpdateStatus;
     } catch {
@@ -16836,6 +16838,25 @@ async function refreshUpdateBadge() {
         }
         return lastUpdateStatus;
     }
+}
+
+function renderServiceNotice(service) {
+    const box = els.settingsServiceNotice;
+    if (!box) return;
+    if (!service?.needs_install) {
+        box.replaceChildren();
+        box.classList.add('hidden');
+        return;
+    }
+    const text = document.createElement('div');
+    text.textContent = service.message || 'Run this once on the Pi:';
+    const cmd = document.createElement('code');
+    cmd.textContent = service.command || 'sudo ./scripts/install.sh';
+    cmd.style.display = 'block';
+    cmd.style.marginTop = '6px';
+    cmd.style.userSelect = 'all';
+    box.replaceChildren(text, cmd);
+    box.classList.remove('hidden');
 }
 
 function formatUpdateStatus(data) {
@@ -16900,6 +16921,7 @@ async function loadUpdateStatus() {
         const data = await parseJsonResponse(res);
         lastUpdateStatus = data;
         els.settingsUpdateStatus.textContent = formatUpdateStatus(data);
+        renderServiceNotice(data?.service);
         applyUpdateAvailability(data);
         if (isUpdateAvailable(data)) {
             els.settingsUpdateSection?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });

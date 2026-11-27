@@ -11,8 +11,37 @@ final class YarboUpdate
     /** @var list<string> */
     private const ACTIVE_PROGRESS_STATES = ['running', 'pulling', 'composer', 'restarting'];
 
+    public const SERVICE_UNIT = '/etc/systemd/system/yarbo-panel.service';
+
     public function __construct(private readonly string $projectRoot)
     {
+    }
+
+    /**
+     * An install from before panel.sh starts php -S straight from systemd, so
+     * the background loops (sensor history, Vestaboard watcher, firmware builds)
+     * never run. Updates cannot rewrite the unit without root, so tell the owner.
+     *
+     * @return array{needs_install: bool, command: string, message: string}
+     */
+    public function serviceCheck(string $unitPath = self::SERVICE_UNIT): array
+    {
+        $ok = ['needs_install' => false, 'command' => '', 'message' => ''];
+        if (!is_file($unitPath) || !is_readable($unitPath)) {
+            return $ok;
+        }
+        $unit = (string) @file_get_contents($unitPath);
+        if ($unit === '' || str_contains($unit, 'scripts/panel.sh')) {
+            return $ok;
+        }
+
+        return [
+            'needs_install' => true,
+            'command' => sprintf('cd %s && sudo ./scripts/install.sh', $this->projectRoot),
+            'message' => 'The yarbo-panel service starts PHP directly instead of scripts/panel.sh, so background jobs '
+                . '(sensor history, Vestaboard watcher, firmware builds) do not run and updates cannot restart the panel. '
+                . 'Run this once on the Pi:',
+        ];
     }
 
     /**

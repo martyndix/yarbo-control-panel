@@ -30,7 +30,7 @@ if ($method === 'GET') {
     }
 
     (new YarboUnifi($projectRoot))->stopLivePictures();
-    json_response($update->status(true));
+    json_response(array_merge($update->status(true), ['service' => $update->serviceCheck()]));
 }
 
 if ($method !== 'POST') {

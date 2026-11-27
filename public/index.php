@@ -2330,6 +2330,7 @@ $config = require dirname(__DIR__) . '/config.php';
                             <h3 class="settings-subtitle">Panel updates</h3>
                             <p class="hint">Pull the latest code from GitHub. <code>config.php</code> and logins in <code>data/</code> (Powerwall, Lymow, UniFi, Vestaboard) are copied aside and restored after the pull.</p>
                             <p id="settings-update-status" class="hint">Checking for updates…</p>
+                            <div id="settings-service-notice" class="settings-cloud-result error hidden" role="status"></div>
                             <div id="settings-update-notes" class="settings-update-notes hidden" aria-live="polite"></div>
                             <p id="settings-update-result" class="settings-cloud-result hidden" role="status"></p>
                             <div class="settings-update-actions">

@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.115] - 2026-11-27
+
+### Added
+
+- Settings → Panel updates warns when the yarbo-panel service still starts PHP directly instead of `scripts/panel.sh`, and shows the one-time `sudo ./scripts/install.sh` command to fix it. Without it, background jobs such as sensor history and the Vestaboard watcher do not run, and updates cannot restart the panel.
+
 ## [5.0.114] - 2026-11-27
 
 ### Fixed
