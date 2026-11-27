@@ -109,6 +109,7 @@ final class YarboHome
             'last_trigger' => [],
             'open_changed' => [],
             'open_changed_dps_v' => 0,
+            'motion_changed' => [],
             'contact_kind' => [],
             'doors_overview_off' => [],
             'doors_section_order' => ['doors', 'windows', 'control'],
@@ -251,6 +252,7 @@ final class YarboHome
             'last_trigger' => $this->normalizeLastTrigger($decoded['last_trigger'] ?? null),
             'open_changed' => $this->normalizeOpenChanged($decoded['open_changed'] ?? null),
             'open_changed_dps_v' => max(0, (int) ($decoded['open_changed_dps_v'] ?? 0)),
+            'motion_changed' => $this->normalizeMotionChanged($decoded['motion_changed'] ?? null),
             'contact_kind' => $this->normalizeContactKind($decoded['contact_kind'] ?? null),
             'doors_overview_off' => $this->normalizeIdList(is_array($decoded['doors_overview_off'] ?? null) ? $decoded['doors_overview_off'] : []),
             'doors_section_order' => self::normalizeDoorSectionOrder($decoded['doors_section_order'] ?? null),
@@ -818,6 +820,12 @@ final class YarboHome
         }
         $devices = self::dropUnavailableNameDuplicates($devices);
         $devices = $this->applyIdOrder($devices, $store['device_order'] ?? []);
+        // Last motion captions for PIR / occupancy / floodlight motion (and cameras with
+        // has_motion). Reloads store in case applyOpenChanged already ran via doors.
+        $store = $this->load();
+        $devices = $this->applyMotionChanged($devices, $store);
+        $store = $this->load();
+        $hiddenDevices = $this->applyMotionChanged($hiddenDevices, $store);
         $auto = new YarboHomeAutomations($this->projectRoot);
         $auto->adoptClientTimezone();
 
@@ -3132,6 +3140,22 @@ final class YarboHome
     }
 
     /**
+     * Tiny Home-tile caption for motion sensors: "Last motion 14:32".
+     */
+    public static function motionChangedText(int $at, string $timezone = 'Europe/Zurich'): string
+    {
+        if ($at <= 0) {
+            return '';
+        }
+        $when = self::lastTriggerClock($at, $timezone);
+        if ($when === '') {
+            return '';
+        }
+
+        return 'Last motion ' . $when;
+    }
+
+    /**
      * Compact PaperMono ACCESS caption — clock only, no "Last change" prefix.
      * Today: "14:32". Earlier this year: "2 Nov". Older: "2 Nov 25".
      */
@@ -3283,6 +3307,140 @@ final class YarboHome
             $fresh = $this->load();
             $fresh['open_changed'] = $all;
             $fresh['open_changed_dps_v'] = 1;
+            $this->write($fresh);
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array<string, array{motion: bool, at: int}>
+     */
+    private function normalizeMotionChanged(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $id => $row) {
+            $id = trim((string) $id);
+            if ($id === '' || !is_array($row)) {
+                continue;
+            }
+            if (!array_key_exists('motion', $row)
+                || ($row['motion'] !== true && $row['motion'] !== false && $row['motion'] !== 0 && $row['motion'] !== 1
+                    && $row['motion'] !== '0' && $row['motion'] !== '1')) {
+                continue;
+            }
+            $at = isset($row['at']) && is_numeric($row['at']) ? (int) $row['at'] : 0;
+            if ($at < 0) {
+                $at = 0;
+            }
+            $out[$id] = [
+                'motion' => (bool) $row['motion'],
+                'at' => $at,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Last motion time for Home tiles (PIR, occupancy, floodlight motion, cameras).
+     * Prefer controller motion_at / lastMotion. When that is missing (Matter occupancy
+     * only reports live occupancy), remember the rising edge between polls and keep the
+     * stamp after motion clears so "Last motion …" stays visible.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @param array<string, mixed> $store
+     * @return list<array<string, mixed>>
+     */
+    private function applyMotionChanged(array $rows, array $store): array
+    {
+        $all = is_array($store['motion_changed'] ?? null) ? $store['motion_changed'] : [];
+        $tz = $this->triggerTimezone();
+        $now = time();
+        $dirty = false;
+        foreach ($rows as &$row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if (empty($row['has_motion'])) {
+                continue;
+            }
+            $id = trim((string) ($row['id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $motion = $row['motion'] ?? null;
+            if ($motion !== true && $motion !== false) {
+                // Cameras may only expose motion_at / detect stamps without a live boolean.
+                $motion = null;
+            }
+            $reported = isset($row['motion_at']) && is_numeric($row['motion_at'])
+                ? (int) $row['motion_at']
+                : 0;
+            if ($reported < 0) {
+                $reported = 0;
+            }
+            $prev = is_array($all[$id] ?? null) ? $all[$id] : null;
+            $prevAt = (int) ($prev['at'] ?? 0);
+            $prevMotion = array_key_exists('motion', $prev ?? []) ? (bool) $prev['motion'] : null;
+
+            if ($reported > 0) {
+                if ($prev === null) {
+                    $all[$id] = ['motion' => $motion === true, 'at' => $reported];
+                    $dirty = true;
+                } elseif ($motion === true && $prevMotion !== true) {
+                    // Rising edge — take the controller stamp.
+                    $all[$id] = ['motion' => true, 'at' => $reported];
+                    $dirty = true;
+                } elseif ($motion === false && ($prevMotion !== false || $prevAt !== $reported)) {
+                    // Idle: UniFi lastMotion stays authoritative after clear.
+                    $all[$id] = ['motion' => false, 'at' => $reported];
+                    $dirty = true;
+                } elseif ($motion === null && $prevAt !== $reported) {
+                    $all[$id] = ['motion' => (bool) ($prev['motion'] ?? false), 'at' => $reported];
+                    $dirty = true;
+                } elseif ($motion === true && $prevMotion === true && $prevAt <= 0) {
+                    $all[$id] = ['motion' => true, 'at' => $reported];
+                    $dirty = true;
+                }
+                // While motion stays true, keep the first stamp (Matter re-stamps every poll).
+            } elseif ($motion === true) {
+                if ($prev === null || $prevMotion !== true || $prevAt <= 0) {
+                    $all[$id] = ['motion' => true, 'at' => $now];
+                    $dirty = true;
+                }
+            } elseif ($prev === null) {
+                $all[$id] = ['motion' => false, 'at' => 0];
+                $dirty = true;
+            } elseif ($prevMotion !== false) {
+                $all[$id] = ['motion' => false, 'at' => $prevAt];
+                $dirty = true;
+            }
+
+            $at = (int) ($all[$id]['at'] ?? 0);
+            if ($at > 0) {
+                $row['motion_changed_at'] = $at;
+                $row['motion_changed_text'] = self::motionChangedText($at, $tz);
+                // Keep motion_at filled when the live source cleared it (Matter idle).
+                if ($reported < 1) {
+                    $row['motion_at'] = $at;
+                }
+            } else {
+                unset($row['motion_changed_at'], $row['motion_changed_text']);
+            }
+        }
+        unset($row);
+        if ($dirty) {
+            if (count($all) > 400) {
+                uasort($all, static fn (array $a, array $b): int => ((int) ($a['at'] ?? 0)) <=> ((int) ($b['at'] ?? 0)));
+                $all = array_slice($all, -300, null, true);
+            }
+            $fresh = $this->load();
+            $fresh['motion_changed'] = $all;
             $this->write($fresh);
         }
 

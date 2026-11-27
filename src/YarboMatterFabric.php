@@ -1950,6 +1950,7 @@ final class YarboMatterFabric
             'open' => $open,
             'has_motion' => $hasMotion,
             'motion' => $motion,
+            // Stamp only while occupied; Home remembers the last rising edge after clear.
             'motion_at' => $motion === true ? time() : 0,
             'status' => $parts !== [] ? implode(' · ', $parts) : '',
             'on' => $on,

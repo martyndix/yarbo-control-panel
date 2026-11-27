@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.117] - 2026-11-27
+
+### Added
+
+- Home motion sensors (UniFi PIR, floodlight motion, Matter occupancy) show small muted **Last motion** text under the name, the same way Doors tile rows show **Last change**. UniFi uses the controller stamp; Matter remembers the last detection after motion clears.
+
 ## [5.0.116] - 2026-11-27
 
 ### Fixed

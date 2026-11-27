@@ -3370,7 +3370,8 @@ html[data-theme="light"] .plan-activity {
     font-size: 0.82rem;
 }
 
-.home-doors-card .home-device-title {
+.home-doors-card .home-device-title,
+.home-device-title {
     display: flex;
     flex-direction: column;
     gap: 0.05rem;
@@ -3378,7 +3379,8 @@ html[data-theme="light"] .plan-activity {
     flex: 1 1 auto;
 }
 
-.home-doors-card .home-device-changed {
+.home-doors-card .home-device-changed,
+.home-device-changed {
     margin: 0;
     font-size: 0.62rem;
     font-weight: 500;

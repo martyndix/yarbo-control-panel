@@ -4308,6 +4308,49 @@ function homeDoorOpenChangedHtml(d) {
     return `<p class="home-device-changed" data-home-open-changed title="${escapeHtml(title)}">${escapeHtml(text)}</p>`;
 }
 
+function homeMotionChangedHtml(d) {
+    const text = String(d?.motion_changed_text || '').trim();
+    if (!text) return '';
+    const at = Number(d?.motion_changed_at || d?.motion_at || 0);
+    const title = at > 0 ? (() => {
+        try { return new Date(at * 1000).toLocaleString(); } catch { return text; }
+    })() : text;
+    return `<p class="home-device-changed" data-home-motion-changed title="${escapeHtml(title)}">${escapeHtml(text)}</p>`;
+}
+
+function patchHomeMotionChanged(card, d) {
+    if (!card) return;
+    let titleWrap = card.querySelector('.home-device-title');
+    const name = card.querySelector('.home-device-name, .home-device-name-input');
+    if (!titleWrap && name?.parentElement) {
+        titleWrap = document.createElement('div');
+        titleWrap.className = 'home-device-title';
+        name.parentElement.insertBefore(titleWrap, name);
+        titleWrap.appendChild(name);
+    }
+    let changed = card.querySelector('[data-home-motion-changed]');
+    const changedText = String(d?.motion_changed_text || '').trim();
+    if (changedText) {
+        if (!changed && titleWrap) {
+            changed = document.createElement('p');
+            changed.className = 'home-device-changed';
+            changed.setAttribute('data-home-motion-changed', '');
+            titleWrap.appendChild(changed);
+        }
+        if (changed) {
+            changed.textContent = changedText;
+            const at = Number(d?.motion_changed_at || d?.motion_at || 0);
+            try {
+                changed.title = at > 0 ? new Date(at * 1000).toLocaleString() : changedText;
+            } catch {
+                changed.title = changedText;
+            }
+        }
+    } else if (changed) {
+        changed.remove();
+    }
+}
+
 function homeDoorsTileCardHtml(d) {
     const sensor = String(d.kind || '') === 'sensor';
     const gate = !sensor && d.gate
@@ -6174,6 +6217,10 @@ function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
             if (typeof extras.motion === 'boolean') device.motion = extras.motion;
             if (typeof extras.has_motion === 'boolean') device.has_motion = extras.has_motion;
             if (extras.motion_at != null && Number(extras.motion_at) > 0) device.motion_at = Number(extras.motion_at);
+            if (extras.motion_changed_text) device.motion_changed_text = extras.motion_changed_text;
+            if (extras.motion_changed_at != null && Number(extras.motion_changed_at) > 0) {
+                device.motion_changed_at = Number(extras.motion_changed_at);
+            }
             if (extras.status) device.status = extras.status;
             if (extras.humidity != null && extras.humidity !== '') device.humidity = extras.humidity;
             if (extras.temperature != null && extras.temperature !== '') device.temperature = extras.temperature;
@@ -6199,6 +6246,23 @@ function patchOneHomeDeviceVisual(card, id, on, extras = {}) {
         }
         patchUnifiDoorLockButton(card, device || extras);
         syncHomeAlertsForDevice(id);
+    }
+    if (extras.motion_changed_text != null
+        || extras.motion_changed_at != null
+        || extras.motion_at != null
+        || typeof extras.has_motion === 'boolean'
+        || typeof extras.motion === 'boolean') {
+        const device = homeDeviceRecord(id);
+        if (device) {
+            if (extras.motion_changed_text) device.motion_changed_text = extras.motion_changed_text;
+            if (extras.motion_changed_at != null && Number(extras.motion_changed_at) > 0) {
+                device.motion_changed_at = Number(extras.motion_changed_at);
+            }
+            if (extras.motion_at != null && Number(extras.motion_at) > 0) device.motion_at = Number(extras.motion_at);
+            if (typeof extras.has_motion === 'boolean') device.has_motion = extras.has_motion;
+            if (typeof extras.motion === 'boolean') device.motion = extras.motion;
+        }
+        patchHomeMotionChanged(card, device || extras);
     }
     if (card.classList.contains('home-device--vacuum')) {
         const device = homeDeviceRecord(id);
@@ -6279,6 +6343,10 @@ function patchHomeDashboard(data) {
             if (d.dps != null) rec.dps = d.dps;
             if (d.open != null) rec.open = d.open;
             if (typeof d.motion === 'boolean') rec.motion = d.motion;
+            if (typeof d.has_motion === 'boolean') rec.has_motion = d.has_motion;
+            if (d.motion_at != null) rec.motion_at = d.motion_at;
+            if (d.motion_changed_text) rec.motion_changed_text = d.motion_changed_text;
+            if (d.motion_changed_at != null) rec.motion_changed_at = d.motion_changed_at;
             if (d.status) rec.status = d.status;
             if (d.vacuum_status) rec.vacuum_status = d.vacuum_status;
             if (d.vacuum_battery != null) rec.vacuum_battery = d.vacuum_battery;
@@ -6869,9 +6937,13 @@ function homeDeviceCardHtml(d, hidden, rooms) {
     const plugExtras = (!hidden && !unifi && String(d.kind || '') === 'plug')
         ? `${homePlugAutoOffHtml(d)}${homePlugMotorModeHtml(d)}`
         : '';
+    const motionChanged = homeMotionChangedHtml(d);
     const label = homeManageOpen
         ? `<input type="text" class="home-device-name-input" data-home-name="${escapeHtml(d.id)}" value="${escapeHtml(d.name)}" placeholder="${escapeHtml(defaultName)}" maxlength="48" aria-label="Device name">`
         : `<p class="home-device-name">${escapeHtml(d.name)}</p>`;
+    const titleBlock = motionChanged
+        ? `<div class="home-device-title">${label}${motionChanged}</div>`
+        : label;
     const isTv = String(d.kind || '') === 'tv';
     const roomSelect = hidden || isTv ? '' : homeRoomSelectHtml(d, rooms || homeDash.rooms || []);
     const groupSelect = hidden || isTv ? '' : homeGroupSelectHtml(d, rooms || homeDash.rooms || []);
@@ -6883,7 +6955,7 @@ function homeDeviceCardHtml(d, hidden, rooms) {
         ${hidden ? '' : homeReorderHandleHtml()}
         <div class="home-device-label">
             <span class="home-device-dot" aria-hidden="true"${dotStyle}></span>
-            ${label}
+            ${titleBlock}
             ${kindChip}
             ${contactSelect}
         </div>
