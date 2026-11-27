@@ -11,9 +11,22 @@ namespace Yarbo;
 final class YarboCameraLive
 {
     private const CELLULAR_MESSAGE = 'Live view stays off while the robot is on 4G. It uses home Wi-Fi or HaLow.';
+    public const CAMERA_PORT_DEFAULT = 8769;
+    /** MQTT 8765, Matter 8766, HomePod 8767, HomePod audio bridge 8768. */
+    public const RESERVED_PORTS = [8765, 8766, 8767, 8768];
 
     public function __construct(private readonly string $projectRoot)
     {
+    }
+
+    public static function cameraPort(): int
+    {
+        $port = (int) (getenv('YARBO_CAMERA_PORT') ?: self::CAMERA_PORT_DEFAULT);
+        if ($port <= 0 || in_array($port, self::RESERVED_PORTS, true)) {
+            return self::CAMERA_PORT_DEFAULT;
+        }
+
+        return $port;
     }
 
     /**
@@ -73,10 +86,7 @@ final class YarboCameraLive
         $setsid = is_executable('/usr/bin/setsid') ? '/usr/bin/setsid ' : '';
         $nohup = is_executable('/usr/bin/nohup') || is_executable('/bin/nohup') ? 'nohup ' : '';
         $mqttPort = (int) (getenv('YARBO_MQTT_AGENT_PORT') ?: 8765);
-        $cameraPort = (int) (getenv('YARBO_CAMERA_PORT') ?: 8767);
-        if ($cameraPort === 8766) {
-            $cameraPort = 8767;
-        }
+        $cameraPort = self::cameraPort();
         $cmd = sprintf(
             'cd %s && YARBO_MQTT_AGENT_PORT=%d YARBO_CAMERA_PORT=%d %s%s%s %s --root %s >> %s 2>&1 < /dev/null & echo $!',
             escapeshellarg($this->projectRoot),
@@ -107,9 +117,9 @@ final class YarboCameraLive
     public function stop(): array
     {
         $snap = $this->readStatusFile();
-        $port = (int) ($snap['port'] ?? (getenv('YARBO_CAMERA_PORT') ?: 8767));
-        if ($port === 8766) {
-            $port = 8767;
+        $port = (int) ($snap['port'] ?? self::cameraPort());
+        if (in_array($port, self::RESERVED_PORTS, true)) {
+            $port = self::cameraPort();
         }
         if ($port > 0) {
             $ctx = stream_context_create(['http' => ['method' => 'POST', 'timeout' => 2, 'ignore_errors' => true]]);

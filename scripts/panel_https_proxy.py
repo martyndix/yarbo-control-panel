@@ -43,16 +43,20 @@ def is_camera_controls(path: str) -> bool:
 
 
 def camera_agent_port() -> int:
-    """Port the camera agent is actually listening on. Never the Matter port."""
-    fallback = int(os.environ.get("YARBO_CAMERA_PORT") or 8767)
-    if fallback == 8766:
-        fallback = 8767
+    """Port the camera agent is actually listening on. Never another agent's port."""
+    reserved = {8765, 8766, 8767, 8768}
+    try:
+        fallback = int(os.environ.get("YARBO_CAMERA_PORT") or 8769)
+    except ValueError:
+        fallback = 8769
+    if fallback <= 0 or fallback in reserved:
+        fallback = 8769
     try:
         data = json.loads((ROOT / "data" / "camera-live-status.json").read_text(encoding="utf-8"))
         port = int(data.get("port") or 0)
     except (OSError, ValueError, TypeError):
         return fallback
-    if port <= 0 or port == 8766:
+    if port <= 0 or port in reserved:
         return fallback
     return port
 

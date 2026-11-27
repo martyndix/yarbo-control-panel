@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.116] - 2026-11-27
+
+### Fixed
+
+- Live view: "could not open its picture port". The camera picture server shared port 8767 with the HomePod agent, which `panel.sh` starts at boot. Live view now uses 8769, never takes the MQTT, Matter, or HomePod ports, and moves to the next free port (8770–8779) if 8769 is busy.
+
 ## [5.0.115] - 2026-11-27
 
 ### Added

@@ -49,8 +49,18 @@ assert_true(!str_contains($slice, 'get_controller'), 'vision does not take the c
 assert_true(!str_contains($slice, 'apply_command_session'), 'vision does not use the control session');
 
 $camera = (string) file_get_contents($root . '/scripts/yarbo_camera_agent.py');
-assert_true(str_contains($camera, 'or 8767'), 'live view does not bind the Matter agent port');
-assert_true(!str_contains($camera, 'or 8766'), 'live view default port is not 8766');
+assert_true(str_contains($camera, 'CAMERA_PORT_DEFAULT = 8769'), 'live view has its own picture port');
+assert_true(str_contains($camera, 'RESERVED_PORTS = frozenset({8765, 8766, 8767, 8768})'), 'live view skips the MQTT, Matter, and HomePod ports');
+assert_true(str_contains($camera, 'httpd = bind_picture_server(Handler)'), 'live view falls back to a free port');
+assert_true(!str_contains($camera, 'or 8766') && !str_contains($camera, 'or 8767'), 'live view default is not another agent port');
+$homepodPort = (string) file_get_contents($root . '/scripts/homepod_agent.py');
+assert_true(str_contains($homepodPort, '"YARBO_HOMEPOD_AGENT_PORT", "8767"'), 'HomePod agent keeps 8767');
+assert_true(\Yarbo\YarboCameraLive::CAMERA_PORT_DEFAULT !== \Yarbo\YarboHomepod::AGENT_PORT_DEFAULT, 'camera and HomePod ports differ');
+putenv('YARBO_CAMERA_PORT=8767');
+assert_true(\Yarbo\YarboCameraLive::cameraPort() === 8769, 'a HomePod port setting is not used for live view');
+putenv('YARBO_CAMERA_PORT');
+$proxy = (string) file_get_contents($root . '/scripts/panel_https_proxy.py');
+assert_true(str_contains($proxy, 'reserved = {8765, 8766, 8767, 8768}'), 'HTTPS proxy never sends pictures to another agent port');
 assert_true(str_contains($camera, 'execute-api.us-east-1.amazonaws.com/prod'), 'camera tokens come from /prod');
 assert_true(!str_contains($camera, 'amazonaws.com/Stage'), 'camera tokens do not use /Stage');
 $sensor = strpos($camera, 'publish_vision("set_manul_camera_check"');

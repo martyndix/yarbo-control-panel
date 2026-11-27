@@ -49,6 +49,38 @@ IDLE_AFTER_VIEWER_S = 180
 IDLE_BEFORE_VIEWER_S = 45
 HEARTBEAT_S = 10
 LINK_CHECK_S = 30
+CAMERA_PORT_DEFAULT = 8769
+# Other panel agents own these: MQTT 8765, Matter 8766, HomePod 8767, and the
+# HomePod audio bridge 8768. Binding one of them raises Errno 98.
+RESERVED_PORTS = frozenset({8765, 8766, 8767, 8768})
+CAMERA_PORT_FALLBACKS = tuple(range(8770, 8780))
+
+
+def camera_port() -> int:
+    try:
+        port = int(os.environ.get("YARBO_CAMERA_PORT") or CAMERA_PORT_DEFAULT)
+    except ValueError:
+        return CAMERA_PORT_DEFAULT
+    if port <= 0 or port in RESERVED_PORTS:
+        return CAMERA_PORT_DEFAULT
+    return port
+
+
+def bind_picture_server(handler: type[BaseHTTPRequestHandler]) -> ThreadingHTTPServer:
+    """Bind the usual port, or the next free one. Readers take the port from the status file."""
+    preferred = camera_port()
+    candidates = [preferred] + [port for port in CAMERA_PORT_FALLBACKS if port != preferred]
+    last_error: OSError | None = None
+    for index, port in enumerate(candidates):
+        # The last live view can take a moment to let go of the usual port.
+        for _ in range(5 if index == 0 else 1):
+            try:
+                return ThreadingHTTPServer(("127.0.0.1", port), handler)
+            except OSError as exc:
+                last_error = exc
+                if index == 0:
+                    time.sleep(0.2)
+    raise last_error or OSError("Live view could not open its picture port")
 
 
 def link_name(raw: dict[str, Any] | None) -> str:
@@ -1208,23 +1240,8 @@ def run(root: Path) -> int:
         prepare_sensors(session)
         session.set_state("starting", "Asking the robot to publish")
         arm(session)
-        # 8766 is the Matter agent. Binding there raises Errno 98 and live view
-        # never starts, even though the robot itself is online.
-        port = int(os.environ.get("YARBO_CAMERA_PORT") or 8767)
-        if port == 8766:
-            port = 8767
-        httpd = None
-        bind_error: Exception | None = None
-        for _ in range(10):
-            try:
-                httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
-                break
-            except OSError as exc:
-                bind_error = exc
-                time.sleep(0.2)
-        if httpd is None:
-            raise bind_error or OSError("Live view could not open its picture port")
-        session.port = port
+        httpd = bind_picture_server(Handler)
+        session.port = int(httpd.server_address[1])
         session.set_state("live", "Live view is on")
         threading.Thread(target=watch_lease, args=(session, time.time()), daemon=True).start()
         httpd.serve_forever(poll_interval=0.5)
@@ -1356,6 +1373,33 @@ def self_test() -> int:
     if hasattr(os, "sched_getscheduler") and hasattr(os, "SCHED_IDLE"):
         policies = {os.sched_getscheduler(int(tid)) for tid in os.listdir("/proc/self/task")}
         assert policies == {os.SCHED_IDLE}, policies
+    saved = os.environ.get("YARBO_CAMERA_PORT")
+    try:
+        os.environ["YARBO_CAMERA_PORT"] = "8767"
+        assert camera_port() == CAMERA_PORT_DEFAULT, camera_port()
+        os.environ.pop("YARBO_CAMERA_PORT", None)
+        assert camera_port() == CAMERA_PORT_DEFAULT
+        holder = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            holder.bind(("127.0.0.1", CAMERA_PORT_DEFAULT))
+            holder.listen(1)
+            held_default = True
+        except OSError:
+            held_default = False
+        server = bind_picture_server(BaseHTTPRequestHandler)
+        try:
+            bound = int(server.server_address[1])
+            assert bound not in RESERVED_PORTS, bound
+            if held_default:
+                assert bound in CAMERA_PORT_FALLBACKS, bound
+        finally:
+            server.server_close()
+            holder.close()
+    finally:
+        if saved is None:
+            os.environ.pop("YARBO_CAMERA_PORT", None)
+        else:
+            os.environ["YARBO_CAMERA_PORT"] = saved
     print("ok")
     return 0
 
