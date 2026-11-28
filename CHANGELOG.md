@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.121] - 2026-11-28
+
+### Changed
+
+- Home **Doors** and **Windows** lists (not Controllable doors) show the assigned **room** name when one is set — the icon already says door vs window, so “Kitchen Window” in Kitchen reads as **Kitchen**.
+
 ## [5.0.120] - 2026-11-28
 
 ### Changed

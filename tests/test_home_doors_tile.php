@@ -244,7 +244,9 @@ foreach ($dash['unifi_doors'] ?? [] as $row) {
     }
 }
 assert_true(is_array($matterDoor), 'Matter contact row is present');
-assert_true(($matterDoor['name'] ?? '') === 'Workshop window', 'doors strip uses the Home name');
+assert_true(($matterDoor['name'] ?? '') === 'Workshop window', 'doors strip keeps the Home name');
+assert_true(($matterDoor['room'] ?? '') === 'Workshop', 'doors strip carries the assigned room');
+assert_true(($matterDoor['room_id'] ?? '') === 'workshop', 'doors strip carries the room id');
 assert_true(($matterDoor['open'] ?? true) === false, 'closed Matter contact stays closed on the strip');
 assert_true(($matterDoor['contact_kind'] ?? '') === 'window', 'window assignment is on the strip');
 assert_true(($matterDoor['kind'] ?? '') === 'sensor', 'Matter contact is a sensor card');
@@ -507,6 +509,8 @@ assert_true(str_contains($html, 'id="settings-unifi-doors-tile"'), 'Settings →
 assert_true(str_contains($html, 'id="settings-unifi-doors-tile-sensors"'), 'Settings → UniFi has the door-sensors tick');
 assert_true(str_contains($js, 'function renderHomeDoorsTile'), 'JS renders the compact doors tile');
 assert_true(str_contains($js, 'function homeDoorsTileCardHtml'), 'JS builds compact Unlock/Lock rows');
+assert_true(str_contains($js, 'function homeDoorOverviewDisplayName'), 'JS prefers room names on Doors/Windows');
+assert_true(str_contains($js, "section === 'doors' || section === 'windows'"), 'room names only on sensor sections');
 assert_true(str_contains($js, 'function pinHomeDoorsAfterVestaboard'), 'JS keeps the tile under Vestaboard after reorder');
 assert_true(str_contains($js, 'unifiDoorLockButtonHtml(d, { home: true })'), 'tile reuses the live Unlock/Lock label');
 assert_true(str_contains($js, "unifiDpsMetaHtml(d, 'data-home-dps')"), 'tile shows live Open/Closed');
@@ -527,6 +531,8 @@ assert_true(str_contains($js, "if (!homeManageOpen) return '';"), 'door reorder 
 assert_true(str_contains($css, '.home-doors-card--manage .home-door-section .home-reorder-controls'), 'door reorder controls show only while Home settings are open');
 assert_true(str_contains($change, '## [5.0.65]'), 'changelog 5.0.65');
 assert_true(str_contains($change, '## [5.0.66]'), 'changelog 5.0.66');
+assert_true(str_contains($change, '## [5.0.121]'), 'changelog 5.0.121');
+assert_true(str_contains($change, 'Doors') && str_contains($change, 'room'), 'changelog room names on Doors/Windows');
 assert_true(str_contains($js, 'data-home-door-section'), 'sections are collapsible blocks');
 assert_true(str_contains($js, "home-room\${anyOpen ? ' is-on' : ''}"), 'an open entry marks its section the same way a room does');
 assert_true(str_contains($css, '.home-door-section'), 'door sections have CSS');
