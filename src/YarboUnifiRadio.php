@@ -167,10 +167,12 @@ final class YarboUnifiRadio
         // HomePod-only radio stays Playing while homepod_targets is set (no local ffmpeg pid).
         $markedPlaying = !empty($state['playing']);
         $trackedGone = $alive === [] && !$homepodAlive && $markedPlaying;
-        // Browser status polls resume when a phone returns to the page. Tracked shell
-        // pids can look dead while nohup ffmpeg is still feeding the speakers — do not
-        // clear Playing or reap those streams, or going back to the tab cuts the music.
-        $liveFfmpeg = $trackedGone && !$timedOut && $stationIdNow !== 'announce'
+        $isAnnounce = $stationIdNow === 'announce';
+        // Safari (and other phones) reload the panel often; that kicks several status()
+        // polls at once. status() must not kill radio — only Stop / Speakers-off /
+        // announce timeout / AirPlay client-gone may. A false-negative pid check plus
+        // an orphan reap was cutting Classic FM when the tab came back.
+        $liveFfmpeg = $trackedGone && !$timedOut && !$isAnnounce
             ? $this->listPanelRadioFfmpegPids()
             : [];
         if ($trackedGone && $liveFfmpeg !== []) {
@@ -190,7 +192,8 @@ final class YarboUnifiRadio
             $state['playing'] = true;
             $this->writeState($state);
             $alive = $adopted;
-        } elseif ($timedOut || $trackedGone) {
+        } elseif ($timedOut || ($trackedGone && $isAnnounce)) {
+            // Announcement ended (or timed out) — stop streams and maybe resume radio.
             if ($timedOut && $alive !== []) {
                 foreach ($alive as $row) {
                     $pid = (int) ($row['pid'] ?? 0);
@@ -203,7 +206,7 @@ final class YarboUnifiRadio
                 YarboHomepod::fromEnv($this->projectRoot)->stop($homepodTargets !== [] ? $homepodTargets : null);
                 $this->stopHomepodBridgeHttp();
             }
-            $wasAnnounce = trim((string) ($state['station_id'] ?? '')) === 'announce';
+            $wasAnnounce = $isAnnounce;
             $resume = is_array($state['resume_after'] ?? null) ? $state['resume_after'] : null;
             $state['playing'] = false;
             $state['streams'] = [];
@@ -232,6 +235,14 @@ final class YarboUnifiRadio
                 }
                 $state = $this->loadState();
             }
+        } elseif ($trackedGone) {
+            // Radio station: tracked pids gone and no live ffmpeg found — mark Idle only.
+            // Do not reap here (see note above). Explicit Stop cleans orphans.
+            $state['playing'] = false;
+            $state['streams'] = [];
+            $state['ends_at'] = null;
+            $this->writeState($state);
+            $alive = [];
         } elseif (count($alive) !== count($state['streams'])) {
             $state['streams'] = $alive;
             $state['playing'] = $alive !== [] || $homepodAlive;
@@ -244,11 +255,8 @@ final class YarboUnifiRadio
         // Re-read after possible writes above.
         $homepodAlive = is_array($state['homepod_targets'] ?? null) && $state['homepod_targets'] !== [];
 
-        // Idle only: reap nohup talkback orphans left when state was cleared/lost.
-        // Skip while starting a new stream (radio lock held) so we do not kill a fresh pid.
-        if ($alive === [] && !$homepodAlive && empty($state['playing'])) {
-            $this->tryKillOrphanRadioFfmpeg([]);
-        }
+        // Do not reap orphans from status(). Page-load polls used to kill live radio
+        // when a tracked pid looked dead. Stop() / Speakers-off / recover_speed reap.
 
         $aliveIds = array_values(array_map(
             static fn (array $r): string => (string) ($r['camera_id'] ?? ''),

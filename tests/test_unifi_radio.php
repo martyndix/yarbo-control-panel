@@ -266,6 +266,8 @@ assert_true(str_contains($js, 'prevModuleId !== \'unifi\''), 'UniFi poll not res
 assert_true(str_contains($js, 'syncRadioPlayerChrome'), 'Radio header chrome sync');
 assert_true(str_contains($js, 'Playback is server-owned'), 'chrome sync must not radio_stop on revisit');
 assert_true(!preg_match('/function syncRadioPlayerChrome[\s\S]*?unifiModuleOn === false[\s\S]*?radio_stop/', $js), 'no auto radio_stop when UniFi chrome hides');
+assert_true(str_contains($js, 'radioIgnoreSpeakerChangesUntil'), 'Safari speaker restore ignored');
+assert_true(str_contains($js, 'closing the modal must never stop'), 'closing modal never radio_stop');
 assert_true(str_contains($js, 'openRadioPlayerModal'), 'Radio Player modal open');
 assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remembered');
 assert_true(str_contains($js, 'fromDom'), 'speaker ticks preserved across Speakers re-render');
@@ -458,7 +460,8 @@ assert_true($talkbacks !== [], 'resume after announce starts talkback');
 $radioSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboUnifiRadio.php');
 assert_true(str_contains($radioSrc, 'killOrphanRadioFfmpeg'), 'reaps orphan talkback ffmpeg');
 assert_true(str_contains($radioSrc, 'listPanelRadioFfmpegPids'), 'status can see live ffmpeg without tracked pids');
-assert_true(str_contains($radioSrc, 'Browser status polls'), 'status keeps Playing when ffmpeg still live');
+assert_true(str_contains($radioSrc, 'status() must not kill radio'), 'status is read-only for live radio');
+assert_true(str_contains($radioSrc, 'Do not reap orphans from status()'), 'status no longer reaps orphans');
 assert_true(str_contains($radioSrc, 'withRadioLock'), 'serializes play/stop under radio lock');
 assert_true(str_contains($radioSrc, '-f adts'), 'matches ADTS talkback argv');
 assert_true(
@@ -470,7 +473,8 @@ assert_true(
     'listPanelRadioFfmpegPids is public for recovery/tests'
 );
 assert_true(str_contains($change, '## [5.0.123]'), 'changelog 5.0.123');
-assert_true(str_contains($change, 'Radio keeps playing'), 'changelog radio persist');
+assert_true(str_contains($change, '## [5.0.124]'), 'changelog 5.0.124');
+assert_true(str_contains($change, 'Safari'), 'changelog Safari reload');
 $matcher = new ReflectionMethod(YarboUnifiRadio::class, 'isPanelRadioFfmpegArgs');
 $matcher->setAccessible(true);
 $classic = '/usr/bin/ffmpeg -nostdin -f adts udp://192.168.1.50:7004';
