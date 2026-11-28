@@ -4351,6 +4351,19 @@ function patchHomeMotionChanged(card, d) {
     }
 }
 
+/** Doors/Windows lists already show type via icon — prefer the assigned room name. */
+function homeDoorOverviewDisplayName(d) {
+    const section = homeDoorSectionOf(d);
+    if (section === 'doors' || section === 'windows') {
+        const room = String(d?.room || '').trim();
+        if (room) return room;
+    }
+    const fallback = String(d?.kind || '') === 'sensor'
+        ? (homeContactRole(d) === 'window' ? 'Window' : 'Door sensor')
+        : 'Door';
+    return String(d?.name || '').trim() || fallback;
+}
+
 function homeDoorsTileCardHtml(d) {
     const sensor = String(d.kind || '') === 'sensor';
     const gate = !sensor && d.gate
@@ -4360,7 +4373,7 @@ function homeDoorsTileCardHtml(d) {
         : '';
     const unlock = sensor ? '' : unifiDoorLockButtonHtml(d, { home: true });
     const emoji = homeContactEmoji(d) || (sensor && homeContactRole(d) === 'window' ? '🪟' : '🚪');
-    const label = `${emoji} ${d.name || (sensor ? (homeContactRole(d) === 'window' ? 'Window' : 'Door sensor') : 'Door')}`;
+    const label = `${emoji} ${homeDoorOverviewDisplayName(d)}`;
     const changed = homeDoorOpenChangedHtml(d);
     return `<article class="home-device home-device--door home-device--unifi${sensor ? ' home-device--sensor' : ''}" data-home-id="${escapeHtml(d.id)}">
         <div class="home-device-label">
@@ -4488,7 +4501,7 @@ function renderHomeDoorOverviewPicks(data, doors) {
             if (!id) return;
             parts.push(`<label class="settings-field settings-checkbox home-doors-pick">
                 <input type="checkbox" data-door-overview="${escapeHtml(id)}"${d.overview !== false ? ' checked' : ''}>
-                <span>${escapeHtml(d.name || id)}</span>
+                <span>${escapeHtml(homeDoorOverviewDisplayName(d) || id)}</span>
             </label>`);
         });
     });
@@ -4585,9 +4598,9 @@ function renderHomeDoorsTile(data) {
         const el = grid.querySelector(`[data-home-id="${CSS.escape(id)}"]`);
         if (!el) return;
         const name = el.querySelector('.home-device-name');
-        if (name && d.name) {
+        if (name) {
             const emoji = homeContactEmoji(d) || (String(d.kind || '') === 'sensor' && homeContactRole(d) === 'window' ? '🪟' : '🚪');
-            name.textContent = `${emoji} ${d.name}`;
+            name.textContent = `${emoji} ${homeDoorOverviewDisplayName(d)}`;
         }
         let titleWrap = el.querySelector('.home-device-title');
         if (!titleWrap && name?.parentElement) {
@@ -4643,7 +4656,7 @@ function renderHomeDoorsTile(data) {
                 status.classList.toggle('is-open', d.open === true || d.dps === 'open' || d.dps === 'opened' || /^Open\b/i.test(String(label || '')));
                 if (wantHistory) {
                     status.setAttribute('data-sensor-history', String(d.id || ''));
-                    status.setAttribute('data-sensor-history-name', String(d.name || ''));
+                    status.setAttribute('data-sensor-history-name', homeDoorOverviewDisplayName(d));
                     status.setAttribute('title', 'Climate history');
                     status.classList.add('home-device-meta--history');
                 }

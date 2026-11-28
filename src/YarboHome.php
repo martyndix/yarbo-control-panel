@@ -4308,6 +4308,18 @@ final class YarboHome
             $this->normalizeIdList(is_array($store['doors_overview_off'] ?? null) ? $store['doors_overview_off'] : []),
             true
         );
+        $roomNames = [];
+        foreach (is_array($store['room_defs'] ?? null) ? $store['room_defs'] : [] as $def) {
+            if (!is_array($def)) {
+                continue;
+            }
+            $rid = trim((string) ($def['id'] ?? ''));
+            if ($rid === '') {
+                continue;
+            }
+            $roomNames[$rid] = trim((string) ($def['name'] ?? ''));
+        }
+        $rooms = is_array($store['rooms'] ?? null) ? $store['rooms'] : [];
         foreach ($rows as $index => $row) {
             if (!is_array($row)) {
                 continue;
@@ -4315,6 +4327,10 @@ final class YarboHome
             $id = (string) ($row['id'] ?? '');
             $row['overview'] = $id === '' || !isset($off[$id]);
             $row['section'] = self::doorSectionFor($row);
+            $roomId = trim((string) ($rooms[$id] ?? ''));
+            $roomName = $roomId !== '' ? (string) ($roomNames[$roomId] ?? '') : '';
+            $row['room_id'] = $roomName !== '' ? $roomId : '';
+            $row['room'] = $roomName;
             $rows[$index] = $row;
         }
 
