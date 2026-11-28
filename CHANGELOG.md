@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.120] - 2026-11-28
+
+### Changed
+
+- Vestaboard Night hours open alerts say **WINDOW OPEN** / **DOOR OPEN** on the top line. When the contact is named only “Window” or “Door”, the next line is the Home **room** (Master Bedroom → **MASTER BEDROOM**), not the redundant device name. Specific names stay as they are.
+
 ## [5.0.119] - 2026-11-28
 
 ### Fixed

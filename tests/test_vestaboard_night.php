@@ -112,7 +112,7 @@ assert_true(str_contains((string) ($doorOpen['lines'][1] ?? ''), 'GARAGE'), 'doo
 assert_true(in_array(YarboVestaboard::COLOR_RED, $doorOpen['codes'][0], true), 'door open header has red pads');
 assert_true(in_array(YarboVestaboard::COLOR_RED, $doorOpen['codes'][2], true), 'door open filler row is red');
 $winOpen = $vb->nightLayout(true, 'window');
-assert_true(str_contains((string) ($winOpen['lines'][0] ?? ''), 'WIN OPEN'), 'window open header');
+assert_true(str_contains((string) ($winOpen['lines'][0] ?? ''), 'WINDOW OPEN'), 'window open header');
 assert_true(str_contains((string) ($winOpen['lines'][1] ?? ''), 'KITCHEN'), 'window open names the contact');
 assert_true(in_array(YarboVestaboard::COLOR_RED, $winOpen['codes'][0], true), 'window open has red pads');
 $bothOpen = $vb->nightLayout(true, 'both');
@@ -121,7 +121,55 @@ assert_true(count($bothOpen['open_names'] ?? []) >= 2, 'both open lists two name
 assert_true(in_array(YarboVestaboard::COLOR_RED, $bothOpen['codes'][0], true), 'both open has red pads');
 assert_true($vb->fitNightName('Garage Side Entrance Door', 15) === 'GARAGE SIDE', 'fitNightName keeps whole words');
 assert_true(strlen($vb->fitNightName('SUPERCALIFRAGILISTICEXPIALIDOCIOUS', 15)) === 15, 'fitNightName hard-truncates long tokens');
-foreach (['DOOR OPEN', 'WIN OPEN', 'DOORS OPEN', 'HOUSE SECURE', '3 OPEN', '+2 MORE'] as $phrase) {
+assert_true($vb->fitNightRoomType('Study', 'PATIO', 15) === 'STUDY PATIO', 'room + specific name fits');
+assert_true($vb->fitNightRoomType('Master Bedroom', 'PATIO', 15) === 'MASTER PATIO', 'long room keeps trailing word');
+assert_true(
+    $vb->nightContactLabel(
+        ['id' => '79:1', 'name' => 'Window'],
+        Yarbo\YarboHome::CONTACT_WINDOW,
+        [
+            'names' => ['79:1' => 'Window'],
+            'rooms' => ['79:1' => 'master'],
+            'room_defs' => [['id' => 'master', 'name' => 'Master Bedroom']],
+        ]
+    ) === 'MASTER BEDROOM',
+    'generic Window in Master Bedroom → MASTER BEDROOM (type is on the header)'
+);
+$masterAlert = $vb->nightOpenAlertLayout([[
+    'id' => '79:1',
+    'label' => 'MASTER BEDROOM',
+    'role' => Yarbo\YarboHome::CONTACT_WINDOW,
+]]);
+assert_true(
+    str_contains((string) ($masterAlert['lines'][0] ?? ''), 'WINDOW OPEN')
+    && str_contains((string) ($masterAlert['lines'][1] ?? ''), 'MASTER BEDROOM'),
+    'WINDOW OPEN + MASTER BEDROOM layout'
+);
+assert_true(
+    $vb->nightContactLabel(
+        ['id' => 'unifi:door:garage', 'name' => 'Garage'],
+        Yarbo\YarboHome::CONTACT_DOOR,
+        [
+            'names' => [],
+            'rooms' => [],
+            'room_defs' => [],
+        ]
+    ) === 'GARAGE',
+    'specific door name without room stays GARAGE'
+);
+assert_true(
+    $vb->nightContactLabel(
+        ['id' => '80:1', 'name' => 'Patio'],
+        Yarbo\YarboHome::CONTACT_DOOR,
+        [
+            'names' => ['80:1' => 'Patio'],
+            'rooms' => ['80:1' => 'living'],
+            'room_defs' => [['id' => 'living', 'name' => 'Living']],
+        ]
+    ) === 'LIVING PATIO',
+    'specific name without room gets room prefix'
+);
+foreach (['DOOR OPEN', 'WINDOW OPEN', 'WINDOWS OPEN', 'DOORS OPEN', 'HOUSE SECURE', '3 OPEN', '+2 MORE'] as $phrase) {
     assert_true(strlen($phrase) <= 13, 'status phrase leaves room for colour pads: ' . $phrase);
 }
 
@@ -130,7 +178,7 @@ $inv['sensors'][0]['open'] = true;
 file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
 $live = $vb->nightLayout();
 assert_true(!empty($live['open']), 'live layout sees open window');
-assert_true(str_contains((string) ($live['lines'][0] ?? ''), 'WIN OPEN'), 'live window open header: ' . ($live['lines'][0] ?? ''));
+assert_true(str_contains((string) ($live['lines'][0] ?? ''), 'WINDOW OPEN'), 'live window open header: ' . ($live['lines'][0] ?? ''));
 assert_true(str_contains((string) ($live['lines'][1] ?? ''), 'KITCHEN'), 'live window open name: ' . ($live['lines'][1] ?? ''));
 
 $view = $vb->publicView();
@@ -257,7 +305,7 @@ $inv['doors'][0]['dps_label'] = 'Closed';
 file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
 $afterClose = $vb->nightLayout();
 assert_true(($afterClose['open'] ?? false) === true, 'still open after first closes');
-assert_true(str_contains((string) ($afterClose['lines'][0] ?? ''), 'WINS OPEN')
+assert_true(str_contains((string) ($afterClose['lines'][0] ?? ''), 'WINDOWS OPEN')
     || str_contains((string) ($afterClose['lines'][0] ?? ''), '2 OPEN')
     || str_contains((string) ($afterClose['lines'][0] ?? ''), 'OPEN'),
     'two windows header: ' . ($afterClose['lines'][0] ?? ''));
@@ -338,9 +386,15 @@ $html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($change, '## [4.0.236]'), 'changelog 4.0.236');
 assert_true(str_contains($change, '## [5.0.119]'), 'changelog 5.0.119');
+assert_true(str_contains($change, '## [5.0.120]'), 'changelog 5.0.120');
+assert_true(str_contains($change, 'MASTER BEDROOM'), 'changelog room-name example');
+assert_true(str_contains($change, 'WINDOW OPEN'), 'changelog WINDOW OPEN header');
 assert_true(str_contains($docs, 'Simulate open'), 'docs Simulate open');
 assert_true(str_contains($docs, 'first two names'), 'docs two names');
 assert_true(str_contains($docs, 'MYGGBETT'), 'docs Matter contacts');
+assert_true(str_contains($docs, 'MASTER BEDROOM'), 'docs room on name line');
+assert_true(str_contains($phpSrc, 'WINDOW OPEN'), 'header uses WINDOW OPEN');
+assert_true(str_contains($phpSrc, 'fitNightRoomType'), 'room+name flitter');
 assert_true(str_contains($html, 'settings-vestaboard-night'), 'settings night checkbox');
 assert_true(str_contains($html, 'settings-vestaboard-night-simulate'), 'settings simulate button');
 assert_true(str_contains($html, 'HOUSE SECURE'), 'settings HOUSE SECURE');
