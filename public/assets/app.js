@@ -16002,13 +16002,13 @@ function applyVestaboardNightHours(board) {
                 : [];
             if (open > 0 && names.length) {
                 els.settingsVestaboardNightWatchCount.textContent =
-                    `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — open now: ${names.join(', ')}.`;
+                    `Watching ${n} door/window contact${n === 1 ? '' : 's'} — open now: ${names.join(', ')}.`;
             } else if (open > 0) {
                 els.settingsVestaboardNightWatchCount.textContent =
-                    `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — ${open} open now.`;
+                    `Watching ${n} door/window contact${n === 1 ? '' : 's'} — ${open} open now.`;
             } else {
                 els.settingsVestaboardNightWatchCount.textContent =
-                    `Watching ${n} UniFi door/window contact${n === 1 ? '' : 's'} — all closed.`;
+                    `Watching ${n} door/window contact${n === 1 ? '' : 's'} — all closed.`;
             }
         }
     }

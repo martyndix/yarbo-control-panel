@@ -98,14 +98,14 @@ This is separate from Quiet Hours in the Vestaboard **app**. The app setting can
 
 ## Night hours
 
-In **Settings → Vestaboard Note**, enable **Night hours** when the UniFi module is on and at least one Access door controller or door/window contact is present. Edit the **top two rows** of a custom message for the secure state:
+In **Settings → Vestaboard Note**, enable **Night hours** when at least one UniFi Access door/window contact or a Matter door/window contact on Home (IKEA MYGGBETT, PARASOLL, and the same) is present. Edit the **top two rows** of a custom message for the secure state:
 
 - **Closed:** your custom top two rows + **HOUSE SECURE** on the bottom row (green colour flaps)
 - **Open:** the Note uses **all three rows** with red colour flaps — a short header (**DOOR OPEN**, **WIN OPEN**, **DOORS OPEN**, **OPEN**, or **N OPEN**) plus truncated UniFi contact name(s). When two or more are open, rows 2 and 3 show the first two names; as contacts close, the next open name slides onto the board so two stay visible until only one remains. The watcher polls about every **1 second** overnight (and reuses a fresh UniFi inventory from the automations runner) so open/close updates reach the Note quickly without hammering the console
 
 Names are uppercased to Vestaboard characters and shortened to 15 flaps, preferring whole words (for example `Garage Side Entrance Door` → `GARAGE SIDE`). Use **Simulate open** under the night editor (or the Preview dropdown **Night hours: something open**) to see the alert with your watched contacts without writing the Note.
 
-Night hours only uses UniFi Access doors and door/window sensors known to this panel. It cannot see any other sensors and **cannot guarantee the security of the building**. If UniFi is off or no contacts exist, Night hours is hidden and cannot be newly enabled — but an already-on preference is kept across short UniFi gaps (for example right after a panel Update). Once enabled, the overnight clock runs in `vestaboard_watch` **without needing the website open**; a brief UniFi inventory gap no longer drops the Note back to the daytime Yarbo page.
+Night hours uses UniFi Access doors/windows and Matter contacts on Home that this panel already knows. It cannot see any other sensors and **cannot guarantee the security of the building**. If no contacts exist, Night hours is hidden and cannot be newly enabled — but an already-on preference is kept across short UniFi gaps (for example right after a panel Update). Once enabled, the overnight clock runs in `vestaboard_watch` **without needing the website open**; a brief UniFi inventory gap no longer drops the Note back to the daytime Yarbo page.
 
 While the window is active the watcher re-reads those contacts every tick (~8s) and rewrites the Note as soon as something opens, closes, or another contact joins the open set.
 

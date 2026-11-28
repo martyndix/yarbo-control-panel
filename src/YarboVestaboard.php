@@ -3420,52 +3420,54 @@ final class YarboVestaboard
     }
 
     /**
-     * Cheap count of UniFi doors/sensors night hours can watch (cached inventory JSON).
+     * Cheap count of UniFi + Matter doors/sensors night hours can watch (cached JSON only).
      */
     private function nightWatchInventoryCount(): int
     {
+        $count = 0;
         try {
             $hub = new YarboHub($this->projectRoot);
-            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
-                return 0;
+            if ($hub->enabled(YarboHub::MODULE_UNIFI)) {
+                $path = $this->projectRoot . '/data/unifi-inventory.json';
+                $raw = @file_get_contents($path);
+                if ($raw !== false && $raw !== '') {
+                    $decoded = json_decode($raw, true);
+                    if (is_array($decoded)) {
+                        foreach (['doors', 'hubs', 'sensors'] as $key) {
+                            $rows = $decoded[$key] ?? null;
+                            if (!is_array($rows)) {
+                                continue;
+                            }
+                            foreach ($rows as $row) {
+                                if (!is_array($row)) {
+                                    continue;
+                                }
+                                if ($key === 'sensors' && !YarboUnifi::isDoorSensor($row)) {
+                                    continue;
+                                }
+                                if ($key === 'hubs' && trim((string) ($row['door_id'] ?? '')) === '') {
+                                    continue;
+                                }
+                                $count++;
+                            }
+                        }
+                    }
+                }
             }
         } catch (\Throwable) {
-            return 0;
+            // UniFi optional.
         }
-        $path = $this->projectRoot . '/data/unifi-inventory.json';
-        $raw = @file_get_contents($path);
-        if ($raw === false || $raw === '') {
-            return 0;
-        }
-        $decoded = json_decode($raw, true);
-        if (!is_array($decoded)) {
-            return 0;
-        }
-        $count = 0;
-        foreach (['doors', 'hubs', 'sensors'] as $key) {
-            $rows = $decoded[$key] ?? null;
-            if (!is_array($rows)) {
-                continue;
-            }
-            foreach ($rows as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-                if ($key === 'sensors' && !YarboUnifi::isDoorSensor($row)) {
-                    continue;
-                }
-                if ($key === 'hubs' && trim((string) ($row['door_id'] ?? '')) === '') {
-                    continue;
-                }
-                $count++;
-            }
+        try {
+            $count += (new YarboHome($this->projectRoot))->nightWatchMatterInventoryCount();
+        } catch (\Throwable) {
+            // Home / Matter optional.
         }
 
         return $count;
     }
 
     /**
-     * UniFi door/window contacts night hours can watch.
+     * UniFi + Matter door/window contacts night hours can watch.
      *
      * @return array{
      *   available: bool,
@@ -3490,17 +3492,15 @@ final class YarboVestaboard
             'open_kind' => '',
             'open_names' => [],
         ];
+        $unifiOn = false;
         try {
-            $hub = new YarboHub($this->projectRoot);
-            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
-                return $empty;
-            }
+            $unifiOn = (new YarboHub($this->projectRoot))->enabled(YarboHub::MODULE_UNIFI);
         } catch (\Throwable) {
-            return $empty;
+            $unifiOn = false;
         }
         $rows = $this->nightWatchRows($kickRefresh);
         if ($rows === []) {
-            return $empty + ['unifi' => true];
+            return $empty + ['unifi' => $unifiOn];
         }
         $opens = $this->nightOpenContacts($kickRefresh);
         $doorsOpen = 0;
@@ -3525,7 +3525,7 @@ final class YarboVestaboard
 
         return [
             'available' => true,
-            'unifi' => true,
+            'unifi' => $unifiOn,
             'count' => count($rows),
             'open' => $doorsOpen + $windowsOpen,
             'doors_open' => $doorsOpen,
@@ -3575,58 +3575,75 @@ final class YarboVestaboard
      */
     public function nightWatchRows(bool $kickRefresh = true): array
     {
-        try {
-            $hub = new YarboHub($this->projectRoot);
-            if (!$hub->enabled(YarboHub::MODULE_UNIFI)) {
-                return [];
-            }
-            $unifi = new YarboUnifi($this->projectRoot);
-        } catch (\Throwable) {
-            return [];
-        }
         $out = [];
         $covered = [];
-        foreach ($unifi->lockableDoors($kickRefresh) as $row) {
-            if (!is_array($row)) {
-                continue;
+        $seen = [];
+        try {
+            $hub = new YarboHub($this->projectRoot);
+            if ($hub->enabled(YarboHub::MODULE_UNIFI)) {
+                $unifi = new YarboUnifi($this->projectRoot);
+                foreach ($unifi->lockableDoors($kickRefresh) as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $id = trim((string) ($row['id'] ?? ''));
+                    if ($id === '') {
+                        continue;
+                    }
+                    // Only contacts with a known open/closed reading.
+                    if (($row['open'] ?? null) !== true && ($row['open'] ?? null) !== false
+                        && trim((string) ($row['dps'] ?? '')) === ''
+                        && trim((string) ($row['dps_label'] ?? '')) === '') {
+                        continue;
+                    }
+                    $out[] = $row;
+                    $seen[$id] = true;
+                    $native = trim((string) ($row['native_id'] ?? ''));
+                    if ($native !== '') {
+                        $covered[$native] = true;
+                    }
+                    $doorId = trim((string) ($row['door_id'] ?? ''));
+                    if ($doorId !== '') {
+                        $covered[$doorId] = true;
+                    }
+                }
+                foreach ($unifi->doorSensorRows($kickRefresh) as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $id = trim((string) ($row['id'] ?? ''));
+                    if ($id === '' || isset($seen[$id])) {
+                        continue;
+                    }
+                    $doorId = trim((string) ($row['door_id'] ?? ''));
+                    $native = (string) ($row['native_id'] ?? '');
+                    if ($doorId !== '' && isset($covered[$doorId])) {
+                        continue;
+                    }
+                    if (str_starts_with($native, 'dps-') && isset($covered[substr($native, 4)])) {
+                        continue;
+                    }
+                    $out[] = $row;
+                    $seen[$id] = true;
+                }
             }
-            $id = trim((string) ($row['id'] ?? ''));
-            if ($id === '') {
-                continue;
-            }
-            // Only contacts with a known open/closed reading.
-            if (($row['open'] ?? null) !== true && ($row['open'] ?? null) !== false
-                && trim((string) ($row['dps'] ?? '')) === ''
-                && trim((string) ($row['dps_label'] ?? '')) === '') {
-                continue;
-            }
-            $out[] = $row;
-            $native = trim((string) ($row['native_id'] ?? ''));
-            if ($native !== '') {
-                $covered[$native] = true;
-            }
-            $doorId = trim((string) ($row['door_id'] ?? ''));
-            if ($doorId !== '') {
-                $covered[$doorId] = true;
-            }
+        } catch (\Throwable) {
+            // UniFi optional — Matter contacts below still apply.
         }
-        foreach ($unifi->doorSensorRows($kickRefresh) as $row) {
-            if (!is_array($row)) {
-                continue;
+        try {
+            foreach ((new YarboHome($this->projectRoot))->nightWatchMatterRows() as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $id = trim((string) ($row['id'] ?? ''));
+                if ($id === '' || isset($seen[$id])) {
+                    continue;
+                }
+                $out[] = $row;
+                $seen[$id] = true;
             }
-            $id = trim((string) ($row['id'] ?? ''));
-            if ($id === '') {
-                continue;
-            }
-            $doorId = trim((string) ($row['door_id'] ?? ''));
-            $native = (string) ($row['native_id'] ?? '');
-            if ($doorId !== '' && isset($covered[$doorId])) {
-                continue;
-            }
-            if (str_starts_with($native, 'dps-') && isset($covered[substr($native, 4)])) {
-                continue;
-            }
-            $out[] = $row;
+        } catch (\Throwable) {
+            // Home / Matter optional.
         }
 
         return $out;

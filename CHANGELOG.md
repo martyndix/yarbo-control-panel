@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.119] - 2026-11-28
+
+### Fixed
+
+- Vestaboard **Night hours** now watches Matter door/window contacts on Home (IKEA MYGGBETT, PARASOLL, and the same), not only UniFi Access. Opening that window overnight shows the red open alert the same way UniFi doors already did.
+
 ## [5.0.118] - 2026-11-28
 
 ### Fixed

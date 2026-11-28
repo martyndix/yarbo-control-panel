@@ -264,11 +264,70 @@ assert_true(str_contains((string) ($afterClose['lines'][0] ?? ''), 'WINS OPEN')
 assert_true(str_contains((string) ($afterClose['lines'][1] ?? ''), 'KITCHEN'), 'kitchen on row 2: ' . ($afterClose['lines'][1] ?? ''));
 assert_true(str_contains((string) ($afterClose['lines'][2] ?? ''), 'OFFICE'), 'office on row 3: ' . ($afterClose['lines'][2] ?? ''));
 
+// Matter MYGGBETT on Home is watched (same as UniFi doors/windows).
+file_put_contents($root . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => true],
+    'vestaboard_live' => 'yarbo',
+], JSON_UNESCAPED_SLASHES));
+foreach ($inv['sensors'] as &$sensorRow) {
+    $sensorRow['open'] = false;
+}
+unset($sensorRow);
+file_put_contents($root . '/data/unifi-inventory.json', json_encode($inv, JSON_UNESCAPED_SLASHES));
+file_put_contents($root . '/data/home.json', json_encode([
+    'names' => ['79:1' => 'Study window'],
+    'contact_kind' => [
+        'unifi:sensor:kitchen-window' => 'window',
+        'unifi:sensor:office-window' => 'window',
+        '79:1' => 'window',
+    ],
+    'hidden' => [],
+    'last_devices' => [[
+        'id' => '79:1',
+        'node_id' => 79,
+        'name' => 'Study window',
+        'kind' => 'sensor',
+        'source' => 'matter',
+        'product' => 'MYGGBETT',
+        'has_open' => true,
+        'open' => true,
+        'status' => 'Open',
+    ]],
+], JSON_UNESCAPED_SLASHES));
+$matterVb = new YarboVestaboard($root);
+$matterOpen = $matterVb->nightOpenContacts(false);
+$matterIds = array_map(static fn(array $row): string => (string) ($row['id'] ?? ''), $matterOpen);
+assert_true(in_array('79:1', $matterIds, true), 'Matter MYGGBETT is in night open contacts: ' . json_encode($matterOpen));
+$matterLayout = $matterVb->nightLayout(null, null, false);
+assert_true(!empty($matterLayout['open']), 'night layout sees open Matter window');
+assert_true(
+    str_contains((string) ($matterLayout['lines'][0] ?? ''), 'WIN')
+        || str_contains((string) ($matterLayout['lines'][0] ?? ''), 'OPEN'),
+    'Matter open header: ' . ($matterLayout['lines'][0] ?? '')
+);
+assert_true(
+    str_contains((string) ($matterLayout['lines'][1] ?? ''), 'STUDY'),
+    'Matter open names the window: ' . ($matterLayout['lines'][1] ?? '')
+);
+$watchBefore = $matterVb->nightWatchSummary(false);
+assert_true(($watchBefore['count'] ?? 0) >= 3, 'UniFi + Matter contacts watched: ' . json_encode($watchBefore));
+
+// Matter alone is enough for Night hours availability when UniFi is off.
+file_put_contents($root . '/data/hub-config.json', json_encode([
+    'modules' => ['yarbo' => true, 'home' => true, 'unifi' => false],
+    'vestaboard_live' => 'yarbo',
+], JSON_UNESCAPED_SLASHES));
+$matterOnly = new YarboVestaboard($root);
+assert_true($matterOnly->nightHoursAvailable() === true, 'night available from Matter contacts alone');
+
 $phpSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboVestaboard.php');
+$homeSrc = (string) file_get_contents(dirname(__DIR__) . '/src/YarboHome.php');
 assert_true(str_contains($phpSrc, 'refreshNightContacts'), 'tick refreshes UniFi during night hours');
 assert_true(str_contains($phpSrc, 'openChanged'), 'tick forces write when open state changes');
 assert_true(str_contains($phpSrc, 'night_last_open_key'), 'tick tracks which contacts are open');
 assert_true(str_contains($phpSrc, 'nightOpenAlertLayout'), 'open alert uses full board');
+assert_true(str_contains($phpSrc, 'nightWatchMatterRows'), 'night watch includes Matter rows');
+assert_true(str_contains($homeSrc, 'function nightWatchMatterRows'), 'Home exposes Matter night rows');
 
 $watchSrc = (string) file_get_contents(dirname(__DIR__) . '/scripts/vestaboard_watch.php');
 assert_true(str_contains($watchSrc, 'isNightHours() ? 1 : 8'), 'night watcher idle is 1s');
@@ -278,14 +337,18 @@ $docs = (string) file_get_contents(dirname(__DIR__) . '/docs/vestaboard.md');
 $html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($change, '## [4.0.236]'), 'changelog 4.0.236');
+assert_true(str_contains($change, '## [5.0.119]'), 'changelog 5.0.119');
 assert_true(str_contains($docs, 'Simulate open'), 'docs Simulate open');
 assert_true(str_contains($docs, 'first two names'), 'docs two names');
+assert_true(str_contains($docs, 'MYGGBETT'), 'docs Matter contacts');
 assert_true(str_contains($html, 'settings-vestaboard-night'), 'settings night checkbox');
 assert_true(str_contains($html, 'settings-vestaboard-night-simulate'), 'settings simulate button');
 assert_true(str_contains($html, 'HOUSE SECURE'), 'settings HOUSE SECURE');
 assert_true(str_contains($html, 'cannot guarantee the security'), 'disclaimer in settings');
+assert_true(str_contains($html, 'MYGGBETT'), 'settings mention Matter contacts');
 assert_true(str_contains($js, 'vestaboard_night_hours'), 'JS saves night hours');
 assert_true(str_contains($js, 'Do not uncheck Night hours'), 'JS keeps night checkbox across UniFi blips');
+assert_true(str_contains($js, 'Watching ${n} door/window contact'), 'JS watch count is not UniFi-only');
 assert_true(str_contains($phpSrc, 'already-enabled Night hours preference'), 'PHP keeps night preference across UniFi blips');
 assert_true(str_contains($js, 'function applyVestaboardNightHours'), 'JS night hours UI');
 assert_true(str_contains($js, 'function toggleNightOpenSimulate'), 'JS simulate open');

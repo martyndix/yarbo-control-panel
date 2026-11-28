@@ -6187,6 +6187,88 @@ final class YarboHome
     }
 
     /**
+     * Matter (and other non-UniFi) open/close contacts for Vestaboard Night hours.
+     * Same sensors as the Home DOORS / WINDOWS tile and PaperMono Access page.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function nightWatchMatterRows(): array
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys(
+            $this->normalizeIdList(is_array($store['hidden'] ?? null) ? $store['hidden'] : []),
+            true
+        );
+        $names = is_array($store['names'] ?? null) ? $store['names'] : [];
+        try {
+            $live = $this->devicesWithLiveState();
+            $devices = is_array($live['devices'] ?? null) ? $live['devices'] : [];
+        } catch (\Throwable) {
+            $devices = is_array($store['last_devices'] ?? null) ? $store['last_devices'] : [];
+        }
+        $out = [];
+        foreach ($devices as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($hidden[$id]) || YarboUnifi::isHomeId($id)) {
+                continue;
+            }
+            if (!self::isOpenCloseSensor($device) || self::isLockableDoor($device)) {
+                continue;
+            }
+            $defaultName = (string) ($device['name'] ?? $id);
+            $out[] = [
+                'id' => $id,
+                'name' => is_string($names[$id] ?? null) && $names[$id] !== '' ? $names[$id] : $defaultName,
+                'kind' => 'sensor',
+                'source' => (string) ($device['source'] ?? 'matter'),
+                'has_open' => true,
+                'open' => self::paperContactOpen($device),
+                'product' => (string) ($device['product'] ?? ''),
+                'contact_kind' => $this->contactRoleFor($device, $store),
+                'status' => self::paperContactOpen($device) ? 'Open' : 'Closed',
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Cheap count of Matter open/close contacts (no agent call) for Night hours availability.
+     */
+    public function nightWatchMatterInventoryCount(): int
+    {
+        $store = $this->load();
+        $hidden = array_fill_keys(
+            $this->normalizeIdList(is_array($store['hidden'] ?? null) ? $store['hidden'] : []),
+            true
+        );
+        $devices = is_array($store['last_devices'] ?? null) ? $store['last_devices'] : [];
+        if ($devices === []) {
+            $cached = $this->readDeviceCache($this->projectRoot . '/data/home-nodes-cache.json');
+            $devices = is_array($cached) ? $cached : [];
+        }
+        $count = 0;
+        foreach ($devices as $device) {
+            if (!is_array($device)) {
+                continue;
+            }
+            $id = trim((string) ($device['id'] ?? ''));
+            if ($id === '' || isset($hidden[$id]) || YarboUnifi::isHomeId($id)) {
+                continue;
+            }
+            if (!self::isOpenCloseSensor($device) || self::isLockableDoor($device)) {
+                continue;
+            }
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
      * Lockable Access doors plus open/close sensors for the PaperMono ACCESS page.
      *
      * @return list<array{id: string, name: string, kind: string, role: string, on: bool, unlock: bool}>
