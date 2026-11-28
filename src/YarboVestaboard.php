@@ -3783,7 +3783,7 @@ final class YarboVestaboard
         } elseif ($kind === 'both') {
             $header = 'OPEN';
         } elseif ($kind === 'window') {
-            $header = $n === 1 ? 'WIN OPEN' : 'WINS OPEN';
+            $header = $n === 1 ? 'WINDOW OPEN' : 'WINDOWS OPEN';
         } else {
             $header = $n === 1 ? 'DOOR OPEN' : 'DOORS OPEN';
         }
@@ -3861,7 +3861,7 @@ final class YarboVestaboard
             if ($kind === 'window') {
                 return [[
                     'id' => 'sample:window',
-                    'label' => 'KITCHEN WINDOW',
+                    'label' => 'KITCHEN',
                     'role' => YarboHome::CONTACT_WINDOW,
                 ]];
             }
@@ -3869,12 +3869,12 @@ final class YarboVestaboard
                 return [
                     [
                         'id' => 'sample:door',
-                        'label' => 'HALL DOOR',
+                        'label' => 'HALL',
                         'role' => YarboHome::CONTACT_DOOR,
                     ],
                     [
                         'id' => 'sample:window',
-                        'label' => 'KITCHEN WINDOW',
+                        'label' => 'KITCHEN',
                         'role' => YarboHome::CONTACT_WINDOW,
                     ],
                 ];
@@ -3882,7 +3882,7 @@ final class YarboVestaboard
 
             return [[
                 'id' => 'sample:door',
-                'label' => 'HALL DOOR',
+                'label' => 'HALL',
                 'role' => YarboHome::CONTACT_DOOR,
             ]];
         }
@@ -3891,12 +3891,12 @@ final class YarboVestaboard
             $picked[] = $haveWindow
                 ? [
                     'id' => 'sample:door',
-                    'label' => 'HALL DOOR',
+                    'label' => 'HALL',
                     'role' => YarboHome::CONTACT_DOOR,
                 ]
                 : [
                     'id' => 'sample:window',
-                    'label' => 'KITCHEN WINDOW',
+                    'label' => 'KITCHEN',
                     'role' => YarboHome::CONTACT_WINDOW,
                 ];
         }
@@ -3905,10 +3905,10 @@ final class YarboVestaboard
     }
 
     /**
-     * Night alert label: room + door/window when the contact is named generically.
-     *
-     * "Window" in Study → STUDY WINDOW. A specific name that already includes the
-     * room stays as-is. A specific name without the room gets the room in front.
+     * Night alert name line. The header already says WINDOW OPEN / DOOR OPEN, so a
+     * contact named only "Window" or "Door" shows the Home room instead
+     * (Master Bedroom → MASTER BEDROOM). Specific names stay as they are; if they
+     * omit the room and one is assigned, the room is put in front.
      *
      * @param array<string, mixed> $row
      * @param array<string, mixed>|null $store
@@ -3939,13 +3939,18 @@ final class YarboVestaboard
         }
         $room = $this->nightSanitizeLabel($this->nightContactRoomName($id, $store));
         if ($this->nightNameLooksGeneric($name, $type)) {
+            // Type is already on the header; prefer the room name alone.
             if ($room !== '') {
-                return $this->fitNightRoomType($room, $type, self::COLS);
+                return $this->fitNightName($room, self::COLS);
             }
 
             return $this->fitNightName($type, self::COLS);
         }
         if ($name === '') {
+            if ($room !== '') {
+                return $this->fitNightName($room, self::COLS);
+            }
+
             return $this->fitNightName($type, self::COLS);
         }
         if ($room !== '' && !$this->nightLabelHasRoom($name, $room)) {
