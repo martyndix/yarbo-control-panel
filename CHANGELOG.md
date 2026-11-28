@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.122] - 2026-11-28
+
+### Changed
+
+- PaperMono **ACCESS** open/close sensors use the assigned Home **room** name when one is set (same as the Home Doors/Windows lists). Lockable doors keep their own names.
+
 ## [5.0.121] - 2026-11-28
 
 ### Changed

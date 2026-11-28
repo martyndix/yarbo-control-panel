@@ -158,6 +158,15 @@ file_put_contents($root . '/data/home.json', json_encode([
         'unifi:door:garage' => 'Garage',
         'unifi:sensor:kitchen-window' => 'Kitchen window',
         'unifi:sensor:side-door' => 'Side door',
+        'unifi:sensor:utility-window' => 'Window',
+    ],
+    'rooms' => [
+        'unifi:sensor:kitchen-window' => 'kitchen',
+        'unifi:sensor:utility-window' => 'utility',
+    ],
+    'room_defs' => [
+        ['id' => 'kitchen', 'name' => 'Kitchen'],
+        ['id' => 'utility', 'name' => 'Utility'],
     ],
     'hidden' => ['unifi:sensor:spare-window'],
     'scenes' => [],
@@ -192,6 +201,10 @@ assert_true(($byId['unifi:door:front']['unlock'] ?? false) === true, 'front stay
 assert_true(($byId['unifi:door:garage']['role'] ?? '') === 'door', 'lockable stays door');
 assert_true(($byId['unifi:sensor:kitchen-window']['unlock'] ?? true) === false, 'window sensor is not tappable');
 assert_true(($byId['unifi:sensor:kitchen-window']['role'] ?? '') === 'window', 'window name infers window: ' . json_encode($byId['unifi:sensor:kitchen-window'] ?? null));
+assert_true(($byId['unifi:sensor:kitchen-window']['name'] ?? '') === 'Kitchen', 'ACCESS uses room name for kitchen window');
+assert_true(($byId['unifi:sensor:utility-window']['name'] ?? '') === 'Utility', 'ACCESS uses room name for utility window');
+assert_true(($byId['unifi:door:garage']['name'] ?? '') === 'Garage', 'lockable door keeps its own name');
+assert_true(($byId['unifi:sensor:side-door']['name'] ?? '') === 'Side door', 'sensor without a room keeps its name');
 assert_true(($byId['unifi:sensor:side-door']['role'] ?? '') === 'door', 'side door infers door');
 assert_true(($byId['unifi:sensor:kitchen-window']['on'] ?? false) === true, 'open window inverts');
 assert_true(($byId['unifi:sensor:side-door']['on'] ?? true) === false, 'closed side door sensor stays empty');
@@ -363,6 +376,7 @@ assert_true(str_contains($ver, '#define PAPERMONO_PAGE_COUNT 14'), 'page count i
 assert_true(str_contains($ver, '#define PAPERMONO_FW_VERSION "0.1.98"'), 'firmware 0.1.98');
 assert_true(str_contains($php, "public const FIRMWARE_VERSION = '0.1.98';"), 'panel pin 0.1.98');
 assert_true(str_contains($homePhp, 'function paperAccessItems'), 'paper ACCESS helper');
+assert_true(str_contains($homePhp, 'function paperAccessLabel'), 'ACCESS prefers room names for sensors');
 assert_true(str_contains($homePhp, 'paperContactOpen'), 'ACCESS fill uses paperContactOpen / DPS');
 assert_true(str_contains($homePhp, 'function assignContactKind'), 'contact_kind save');
 assert_true(str_contains($homePhp, 'function openChangedShort'), 'compact ACCESS time helper');
@@ -391,6 +405,8 @@ assert_true(str_contains($js, 'data-home-contact-assign'), 'Home ⚙️ Door/Win
 assert_true(str_contains($js, '🪟'), 'Home uses a window emoji');
 assert_true(str_contains($change, '## [4.0.153]'), 'changelog 4.0.153');
 assert_true(str_contains($change, '## [4.0.245]'), 'changelog 4.0.245');
+assert_true(str_contains($change, '## [5.0.122]'), 'changelog 5.0.122');
+assert_true(str_contains($change, 'ACCESS') && str_contains($change, 'room'), 'changelog ACCESS room names');
 assert_true(str_contains($html, 'thick lockable-door borders'), 'settings preview uses a thick door border');
 assert_true(str_contains($homePhp, 'Home rows only: UniFi Hide unticks Show on Home'), 'ACCESS uses Home rows, not all UniFi devices');
 
