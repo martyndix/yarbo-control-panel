@@ -86,6 +86,18 @@ if (!is_array($input)) {
 }
 $action = (string) ($input['action'] ?? $action);
 
+if (str_starts_with($action, 'radio_') || $action === 'speakers_enabled' || str_starts_with($action, 'airplay_')) {
+    $logDir = $projectRoot . '/data';
+    if (!is_dir($logDir)) {
+        @mkdir($logDir, 0755, true);
+    }
+    @file_put_contents(
+        $logDir . '/unifi-radio-api.log',
+        gmdate('c') . ' ' . $method . ' ' . $action . "\n",
+        FILE_APPEND | LOCK_EX
+    );
+}
+
 if ($action === 'save') {
     if (!$unifi->save($input)) {
         json_response(['ok' => false, 'error' => 'Could not write UniFi settings.'], 500);

@@ -4081,7 +4081,26 @@ async function saveUnifiShowOnHome(id, show) {
     }
 }
 
+/** Set only from Play / Stop / volume / speaker / Speakers-enabled user handlers. */
+let radioUserGesture = false;
+const RADIO_MUTATION_ACTIONS = new Set([
+    'radio_stop',
+    'radio_volume',
+    'radio_targets',
+    'radio_play',
+    'radio_announce',
+    'speakers_enabled',
+    'airplay_stop',
+    'airplay_start',
+]);
+
 async function unifiApi(body, timeoutMs = 20000) {
+    const action = body && typeof body === 'object' ? String(body.action || '') : '';
+    // Safari reload / form restore must not mutate radio. Only handlers that set
+    // radioUserGesture (real taps) may Play/Stop/volume/speakers.
+    if (action && RADIO_MUTATION_ACTIONS.has(action) && !radioUserGesture) {
+        return { ok: false, error: 'radio mutation blocked without user gesture', blocked: true };
+    }
     const isCommand = Boolean(body && (body.action === 'command' || body.action === 'unlock' || body.action === 'light'));
     if (isCommand) beginHomeControl();
     try {
@@ -4094,6 +4113,17 @@ async function unifiApi(body, timeoutMs = 20000) {
     } finally {
         if (isCommand) endHomeControl();
     }
+}
+
+function withRadioUserGesture(fn) {
+    return async (...args) => {
+        radioUserGesture = true;
+        try {
+            return await fn(...args);
+        } finally {
+            radioUserGesture = false;
+        }
+    };
 }
 
 function unifiExistingThumbSrc(d) {
@@ -19330,6 +19360,7 @@ els.settingsUnifiSpeakersEnabled?.addEventListener('change', async (event) => {
     if (Date.now() < radioIgnoreSpeakersEnabledUntil) return;
     if (!settingsModalOpen) return;
     const show = Boolean(els.settingsUnifiSpeakersEnabled.checked);
+    radioUserGesture = true;
     try {
         const data = await unifiApi({ action: 'speakers_enabled', show }, 8000);
         if (!data?.ok) throw new Error(data?.error || 'Could not update Radio Player');
@@ -19351,6 +19382,8 @@ els.settingsUnifiSpeakersEnabled?.addEventListener('change', async (event) => {
     } catch (err) {
         els.settingsUnifiSpeakersEnabled.checked = !show;
         showToast(err.message || 'Could not update Radio Player', 'error');
+    } finally {
+        radioUserGesture = false;
     }
 });
 els.settingsUnifiStationAdd?.addEventListener('click', () => {
@@ -19422,15 +19455,17 @@ els.unifiRadioVolume?.addEventListener('change', async (event) => {
     const current = Number(unifiDash?.radio?.volume);
     if (Number.isFinite(current) && current === volume) return;
     const targets = unifiSelectedSpeakerIds();
+    radioUserGesture = true;
     try {
-        // May restart an active talkback stream so the new gain applies.
-        const data = await unifiApi({ action: 'radio_volume', volume, targets, apply_stream_gain: true }, 45000);
+        const data = await unifiApi({ action: 'radio_volume', volume, targets }, 45000);
         if (!data?.ok && data?.error) throw new Error(data.error);
         if (data.radio) applyRadioCommandResult(data.radio);
         if (unifiDash && data.radio) unifiDash.radio = data.radio;
         renderUnifiSpeakers(unifiDash || data, { replace: false });
     } catch (err) {
         showToast(err.message || 'Could not set volume', 'error');
+    } finally {
+        radioUserGesture = false;
     }
 });
 els.unifiRadioPlay?.addEventListener('click', async () => {
@@ -19447,6 +19482,7 @@ els.unifiRadioPlay?.addEventListener('click', async () => {
     }
     els.unifiRadioPlay.disabled = true;
     if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = 'Starting…';
+    radioUserGesture = true;
     try {
         const data = await unifiApi({ action: 'radio_play', station_id, targets, volume }, 45000);
         if (!data?.ok) throw new Error(data?.error || 'Play failed');
@@ -19468,11 +19504,13 @@ els.unifiRadioPlay?.addEventListener('click', async () => {
         if (els.unifiRadioStatus) els.unifiRadioStatus.textContent = err.message || 'Play failed';
         showToast(err.message || 'Play failed', 'error');
     } finally {
+        radioUserGesture = false;
         els.unifiRadioPlay.disabled = false;
     }
 });
 els.unifiRadioStop?.addEventListener('click', async () => {
     els.unifiRadioStop.disabled = true;
+    radioUserGesture = true;
     try {
         const data = await unifiApi({ action: 'radio_stop' }, 10000);
         if (!data?.ok) throw new Error(data?.error || 'Stop failed');
@@ -19488,6 +19526,7 @@ els.unifiRadioStop?.addEventListener('click', async () => {
     } catch (err) {
         showToast(err.message || 'Stop failed', 'error');
     } finally {
+        radioUserGesture = false;
         els.unifiRadioStop.disabled = false;
     }
 });
@@ -19775,6 +19814,7 @@ els.unifiAirplayStart?.addEventListener('click', async () => {
             ? 'Installing shairport-sync…'
             : 'Starting AirPlay…';
     }
+    radioUserGesture = true;
     try {
         // Longer timeout: first tap may apt-get install packages on the Pi.
         const data = await unifiApi({ action: 'airplay_start', targets, volume }, 180000);
@@ -19809,11 +19849,13 @@ els.unifiAirplayStart?.addEventListener('click', async () => {
             }
         } catch { /* ignore */ }
     } finally {
+        radioUserGesture = false;
         els.unifiAirplayStart.disabled = false;
     }
 });
 els.unifiAirplayStop?.addEventListener('click', async () => {
     els.unifiAirplayStop.disabled = true;
+    radioUserGesture = true;
     try {
         const data = await unifiApi({ action: 'airplay_stop', stop_receiver: true }, 15000);
         if (!data?.ok) throw new Error(data?.error || 'AirPlay stop failed');
@@ -19832,6 +19874,7 @@ els.unifiAirplayStop?.addEventListener('click', async () => {
     } catch (err) {
         showToast(err.message || 'AirPlay stop failed', 'error');
     } finally {
+        radioUserGesture = false;
         els.unifiAirplayStop.disabled = false;
     }
 });
@@ -20302,6 +20345,7 @@ els.radioPlayerModal?.addEventListener('change', async (event) => {
     writeUnifiSpeakerPick(targets);
     // Apply live while Playing / AirPlay, and always persist so other browsers sync.
     radioLocalCommandUntil = Date.now() + 2500;
+    radioUserGesture = true;
     try {
         const data = await unifiApi({ action: 'radio_targets', targets }, 45000);
         if (!data?.ok) throw new Error(data?.error || 'Could not update speakers');
@@ -20319,6 +20363,8 @@ els.radioPlayerModal?.addEventListener('change', async (event) => {
         if (data.warning) showToast(data.warning, 'error');
     } catch (err) {
         showToast(err.message || 'Could not update speakers', 'error');
+    } finally {
+        radioUserGesture = false;
     }
 });
 function handleUnifiPickerChange(event) {
