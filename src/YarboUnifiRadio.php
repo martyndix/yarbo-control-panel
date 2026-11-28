@@ -154,25 +154,33 @@ final class YarboUnifiRadio
 
         $endsAt = isset($state['ends_at']) ? (int) $state['ends_at'] : 0;
         $stationIdNow = trim((string) ($state['station_id'] ?? ''));
+        $isAnnounce = $stationIdNow === 'announce';
+        // ends_at is only for Announcement clips. A leftover ends_at on a normal station
+        // (after announce / setTargets / volume) made every status poll "time out" and
+        // call Homepod stop_all — that cut radio when Safari reloaded the panel.
+        if (!$isAnnounce && $endsAt > 0) {
+            $state['ends_at'] = null;
+            $endsAt = 0;
+            $this->writeState($state);
+        }
         // HomePod-only announcements with a missing ends_at used to stay Playing forever
         // (no local ffmpeg pid to reap). Bound them from started_at.
-        if ($stationIdNow === 'announce' && $homepodAlive && $endsAt <= 0) {
+        if ($isAnnounce && $homepodAlive && $endsAt <= 0) {
             $startedAt = (int) ($state['started_at'] ?? 0);
             $endsAt = $startedAt > 0 ? $startedAt + 45 : time();
             $state['ends_at'] = $endsAt;
             $this->writeState($state);
         }
-        $timedOut = $endsAt > 0 && time() >= $endsAt;
+        $announceTimedOut = $isAnnounce && $endsAt > 0 && time() >= $endsAt;
         // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
         // HomePod-only radio stays Playing while homepod_targets is set (no local ffmpeg pid).
         $markedPlaying = !empty($state['playing']);
         $trackedGone = $alive === [] && !$homepodAlive && $markedPlaying;
-        $isAnnounce = $stationIdNow === 'announce';
         // Safari (and other phones) reload the panel often; that kicks several status()
         // polls at once. status() must not kill radio — only Stop / Speakers-off /
         // announce timeout / AirPlay client-gone may. A false-negative pid check plus
         // an orphan reap was cutting Classic FM when the tab came back.
-        $liveFfmpeg = $trackedGone && !$timedOut && !$isAnnounce
+        $liveFfmpeg = $trackedGone && !$announceTimedOut && !$isAnnounce
             ? $this->listPanelRadioFfmpegPids()
             : [];
         if ($trackedGone && $liveFfmpeg !== []) {
@@ -192,9 +200,10 @@ final class YarboUnifiRadio
             $state['playing'] = true;
             $this->writeState($state);
             $alive = $adopted;
-        } elseif ($timedOut || ($trackedGone && $isAnnounce)) {
+        } elseif ($announceTimedOut || ($trackedGone && $isAnnounce)) {
             // Announcement ended (or timed out) — stop streams and maybe resume radio.
-            if ($timedOut && $alive !== []) {
+            // Never pass null to Homepod::stop from here (that is stop_all).
+            if ($announceTimedOut && $alive !== []) {
                 foreach ($alive as $row) {
                     $pid = (int) ($row['pid'] ?? 0);
                     if ($pid > 1) {
@@ -202,8 +211,8 @@ final class YarboUnifiRadio
                     }
                 }
             }
-            if ($homepodAlive || $timedOut) {
-                YarboHomepod::fromEnv($this->projectRoot)->stop($homepodTargets !== [] ? $homepodTargets : null);
+            if ($homepodTargets !== []) {
+                YarboHomepod::fromEnv($this->projectRoot)->stop($homepodTargets);
                 $this->stopHomepodBridgeHttp();
             }
             $wasAnnounce = $isAnnounce;
@@ -1360,6 +1369,7 @@ final class YarboUnifiRadio
      */
     private function stopLocked(bool $clearError = true): array
     {
+        $this->logRadioStop('stopLocked clearError=' . ($clearError ? '1' : '0'));
         $state = $this->loadState();
         $tracked = [];
         foreach ($state['streams'] as $row) {
@@ -1484,31 +1494,57 @@ final class YarboUnifiRadio
             YarboHomepod::fromEnv($this->projectRoot)->setVolume($homepodIds, $volume);
         }
 
-        if ($applyStreamGain && $wasPlaying && $stationId !== '' && $targets !== []) {
-            // Protect / AirPlay bridge loudness is baked into ffmpeg — restart to apply.
-            // HomePod-only radio can keep the RAOP session and only change volume above.
-            $protectIds = YarboHomepod::filterProtectIds($targets);
-            if ($stationId === 'airplay' || $protectIds !== []) {
-                $replay = $stationId === 'airplay'
-                    ? $this->playAirplay([
-                        'targets' => $targets,
-                        'volume' => $volume,
-                        'ensure_receiver' => false,
-                    ])
-                    : $this->play([
-                        'station_id' => $stationId,
-                        'targets' => $targets,
-                        'volume' => $volume,
-                    ]);
-
-                return [
-                    'ok' => (bool) ($replay['ok'] ?? false),
-                    'error' => $replay['error'] ?? null,
-                    'warning' => $replay['warning'] ?? null,
-                    'volume' => $volume,
-                    'radio' => $replay['radio'] ?? $this->status(),
-                    'airplay' => $replay['airplay'] ?? null,
-                ];
+        // Never call play()/stopLocked from volume — that is what Safari form restores
+        // used to trigger, cutting music on page reload. Soft-respawn Protect ffmpeg to
+        // the existing talkback URL (no new talkback session) when gain must change.
+        if ($applyStreamGain && $wasPlaying && $stationId !== '' && $stationId !== 'announce') {
+            $contentUrl = trim((string) ($state['station_url'] ?? ''));
+            $ffmpeg = $this->unifi->ffmpegPath();
+            if ($stationId === 'airplay') {
+                // AirPlay bridge gain needs a controlled rebuild; leave playing alone here.
+            } elseif ($contentUrl !== '' && $ffmpeg !== '') {
+                $newStreams = [];
+                foreach (is_array($state['streams'] ?? null) ? $state['streams'] : [] as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $cam = trim((string) ($row['camera_id'] ?? ''));
+                    $talkback = trim((string) ($row['talkback_url'] ?? ''));
+                    $oldPid = (int) ($row['pid'] ?? 0);
+                    if ($cam === '' || $talkback === '') {
+                        if ($cam !== '') {
+                            $newStreams[] = $row;
+                        }
+                        continue;
+                    }
+                    $newPid = $this->spawnFfmpeg(
+                        $ffmpeg,
+                        $contentUrl,
+                        $talkback,
+                        (string) ($row['codec'] ?? 'aac'),
+                        22050,
+                        $cam,
+                        $volume,
+                        false,
+                    );
+                    if ($newPid > 1) {
+                        if ($oldPid > 1 && $oldPid !== $newPid) {
+                            $this->killPidTree($oldPid);
+                        }
+                        $row['pid'] = $newPid;
+                        $newStreams[] = $row;
+                    } else {
+                        $newStreams[] = $row;
+                    }
+                }
+                $state = $this->loadState();
+                $state['volume'] = $volume;
+                $state['ends_at'] = null;
+                if ($newStreams !== []) {
+                    $state['streams'] = $newStreams;
+                    $state['playing'] = true;
+                }
+                $this->writeState($state);
             }
         }
 
@@ -1793,6 +1829,7 @@ final class YarboUnifiRadio
             $state['streams'] = $streams;
             $state['homepod_targets'] = $startedHp;
             $state['playing'] = $streams !== [] || $startedHp !== [];
+            $state['ends_at'] = null;
             $state['error'] = $errors !== [] ? implode('; ', $errors) : null;
             $this->writeState($state);
 
@@ -1809,7 +1846,7 @@ final class YarboUnifiRadio
             ];
         }
 
-        // Announce (or missing URL) — restart so sessions match the new ticks.
+        // Announce — restart so sessions match the new ticks.
         if ($stationId === 'announce') {
             $clip = trim((string) ($state['clip_path'] ?? $state['station_url'] ?? ''));
             if ($clip !== '' && is_file($clip)) {
@@ -1818,6 +1855,23 @@ final class YarboUnifiRadio
                     'volume' => $volume,
                 ], 'Announcement');
             }
+        }
+
+        // Already Playing a normal station: never fall through to play() (stop+restart).
+        // Persist the ticks only — a Safari reload must not rebuild talkback.
+        if ($playing && $stationId !== '' && $stationId !== 'announce') {
+            $state = $this->loadState();
+            $state['targets'] = $targets;
+            $state['volume'] = $volume;
+            $state['ends_at'] = null;
+            $this->writeState($state);
+
+            return [
+                'ok' => true,
+                'error' => null,
+                'radio' => $this->status(),
+                'airplay' => $airplay->status(),
+            ];
         }
 
         return $this->play([
@@ -2284,6 +2338,16 @@ final class YarboUnifiRadio
         if ($json !== false) {
             file_put_contents($this->statePath(), $json . "\n", LOCK_EX);
         }
+    }
+
+    private function logRadioStop(string $reason): void
+    {
+        $dir = $this->projectRoot . '/data';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        $line = gmdate('c') . ' ' . $reason . "\n";
+        @file_put_contents($dir . '/unifi-radio-stop.log', $line, FILE_APPEND | LOCK_EX);
     }
 
     /**

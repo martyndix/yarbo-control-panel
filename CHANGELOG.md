@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.126] - 2026-11-28
+
+### Fixed
+
+- Radio no longer stops when the panel page is reloaded. A leftover Announcement `ends_at` on a normal station made every status poll time out and call HomePod **stop_all** (and kill talkback). Timeout handling is announce-only, volume no longer does a full stop+play, and speaker-tick updates while Playing never fall through to a rebuild.
+
 ## [5.0.125] - 2026-11-28
 
 ### Fixed
