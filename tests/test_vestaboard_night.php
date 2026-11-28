@@ -121,6 +121,44 @@ assert_true(count($bothOpen['open_names'] ?? []) >= 2, 'both open lists two name
 assert_true(in_array(YarboVestaboard::COLOR_RED, $bothOpen['codes'][0], true), 'both open has red pads');
 assert_true($vb->fitNightName('Garage Side Entrance Door', 15) === 'GARAGE SIDE', 'fitNightName keeps whole words');
 assert_true(strlen($vb->fitNightName('SUPERCALIFRAGILISTICEXPIALIDOCIOUS', 15)) === 15, 'fitNightName hard-truncates long tokens');
+assert_true($vb->fitNightRoomType('Study', 'WINDOW', 15) === 'STUDY WINDOW', 'room + type fits');
+assert_true($vb->fitNightRoomType('Master Bedroom', 'WINDOW', 15) === 'MASTER WINDOW', 'long room keeps WINDOW');
+assert_true(
+    $vb->nightContactLabel(
+        ['id' => '79:1', 'name' => 'Window'],
+        Yarbo\YarboHome::CONTACT_WINDOW,
+        [
+            'names' => ['79:1' => 'Window'],
+            'rooms' => ['79:1' => 'study'],
+            'room_defs' => [['id' => 'study', 'name' => 'Study']],
+        ]
+    ) === 'STUDY WINDOW',
+    'generic Window in Study → STUDY WINDOW'
+);
+assert_true(
+    $vb->nightContactLabel(
+        ['id' => 'unifi:door:garage', 'name' => 'Garage'],
+        Yarbo\YarboHome::CONTACT_DOOR,
+        [
+            'names' => [],
+            'rooms' => [],
+            'room_defs' => [],
+        ]
+    ) === 'GARAGE',
+    'specific door name without room stays GARAGE'
+);
+assert_true(
+    $vb->nightContactLabel(
+        ['id' => '80:1', 'name' => 'Patio'],
+        Yarbo\YarboHome::CONTACT_DOOR,
+        [
+            'names' => ['80:1' => 'Patio'],
+            'rooms' => ['80:1' => 'living'],
+            'room_defs' => [['id' => 'living', 'name' => 'Living']],
+        ]
+    ) === 'LIVING PATIO',
+    'specific name without room gets room prefix'
+);
 foreach (['DOOR OPEN', 'WIN OPEN', 'DOORS OPEN', 'HOUSE SECURE', '3 OPEN', '+2 MORE'] as $phrase) {
     assert_true(strlen($phrase) <= 13, 'status phrase leaves room for colour pads: ' . $phrase);
 }
@@ -338,9 +376,12 @@ $html = (string) file_get_contents(dirname(__DIR__) . '/public/index.php');
 $js = (string) file_get_contents(dirname(__DIR__) . '/public/assets/app.js');
 assert_true(str_contains($change, '## [4.0.236]'), 'changelog 4.0.236');
 assert_true(str_contains($change, '## [5.0.119]'), 'changelog 5.0.119');
+assert_true(str_contains($change, '## [5.0.120]'), 'changelog 5.0.120');
+assert_true(str_contains($change, 'STUDY WINDOW'), 'changelog room+type example');
 assert_true(str_contains($docs, 'Simulate open'), 'docs Simulate open');
 assert_true(str_contains($docs, 'first two names'), 'docs two names');
 assert_true(str_contains($docs, 'MYGGBETT'), 'docs Matter contacts');
+assert_true(str_contains($phpSrc, 'fitNightRoomType'), 'room+type flitter');
 assert_true(str_contains($html, 'settings-vestaboard-night'), 'settings night checkbox');
 assert_true(str_contains($html, 'settings-vestaboard-night-simulate'), 'settings simulate button');
 assert_true(str_contains($html, 'HOUSE SECURE'), 'settings HOUSE SECURE');

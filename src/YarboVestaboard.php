@@ -3560,7 +3560,7 @@ final class YarboVestaboard
             $role = $home->contactRoleFor($row, $store);
             $out[] = [
                 'id' => $id,
-                'label' => $this->nightContactLabel($row, $role),
+                'label' => $this->nightContactLabel($row, $role, $store),
                 'role' => $role === YarboHome::CONTACT_WINDOW
                     ? YarboHome::CONTACT_WINDOW
                     : YarboHome::CONTACT_DOOR,
@@ -3847,7 +3847,7 @@ final class YarboVestaboard
             }
             $picked[] = [
                 'id' => $id,
-                'label' => $this->nightContactLabel($row, $role),
+                'label' => $this->nightContactLabel($row, $role, $store),
                 'role' => $isWindow ? YarboHome::CONTACT_WINDOW : YarboHome::CONTACT_DOOR,
             ];
             if ($kind !== 'both' && count($picked) >= 1) {
@@ -3861,7 +3861,7 @@ final class YarboVestaboard
             if ($kind === 'window') {
                 return [[
                     'id' => 'sample:window',
-                    'label' => 'KITCHEN WIN',
+                    'label' => 'KITCHEN WINDOW',
                     'role' => YarboHome::CONTACT_WINDOW,
                 ]];
             }
@@ -3869,12 +3869,12 @@ final class YarboVestaboard
                 return [
                     [
                         'id' => 'sample:door',
-                        'label' => 'FRONT DOOR',
+                        'label' => 'HALL DOOR',
                         'role' => YarboHome::CONTACT_DOOR,
                     ],
                     [
                         'id' => 'sample:window',
-                        'label' => 'KITCHEN WIN',
+                        'label' => 'KITCHEN WINDOW',
                         'role' => YarboHome::CONTACT_WINDOW,
                     ],
                 ];
@@ -3882,7 +3882,7 @@ final class YarboVestaboard
 
             return [[
                 'id' => 'sample:door',
-                'label' => 'FRONT DOOR',
+                'label' => 'HALL DOOR',
                 'role' => YarboHome::CONTACT_DOOR,
             ]];
         }
@@ -3891,12 +3891,12 @@ final class YarboVestaboard
             $picked[] = $haveWindow
                 ? [
                     'id' => 'sample:door',
-                    'label' => 'FRONT DOOR',
+                    'label' => 'HALL DOOR',
                     'role' => YarboHome::CONTACT_DOOR,
                 ]
                 : [
                     'id' => 'sample:window',
-                    'label' => 'KITCHEN WIN',
+                    'label' => 'KITCHEN WINDOW',
                     'role' => YarboHome::CONTACT_WINDOW,
                 ];
         }
@@ -3905,14 +3905,29 @@ final class YarboVestaboard
     }
 
     /**
+     * Night alert label: room + door/window when the contact is named generically.
+     *
+     * "Window" in Study → STUDY WINDOW. A specific name that already includes the
+     * room stays as-is. A specific name without the room gets the room in front.
+     *
      * @param array<string, mixed> $row
+     * @param array<string, mixed>|null $store
      */
-    private function nightContactLabel(array $row, string $role): string
+    public function nightContactLabel(array $row, string $role, ?array $store = null): string
     {
-        $name = strtoupper(trim((string) ($row['name'] ?? '')));
-        $name = preg_replace('/[^A-Z0-9 !@#$()\-+;:\'"%,.\/?]/', '', $name) ?? '';
-        $name = preg_replace('/\s+/', ' ', $name) ?? '';
-        $name = trim($name);
+        $type = $role === YarboHome::CONTACT_WINDOW ? 'WINDOW' : 'DOOR';
+        $id = trim((string) ($row['id'] ?? ''));
+        $raw = '';
+        if ($store !== null && $id !== '') {
+            $named = $store['names'][$id] ?? null;
+            if (is_string($named) && trim($named) !== '') {
+                $raw = $named;
+            }
+        }
+        if ($raw === '') {
+            $raw = (string) ($row['name'] ?? '');
+        }
+        $name = $this->nightSanitizeLabel($raw);
         $name = preg_replace(
             '/\s+(SENSOR|CONTACT|POSITION|DPS|DOOR POSITION|USP)$/',
             '',
@@ -3922,11 +3937,124 @@ final class YarboVestaboard
         if (str_starts_with($name, 'THE ')) {
             $name = trim(substr($name, 4));
         }
+        $room = $this->nightSanitizeLabel($this->nightContactRoomName($id, $store));
+        if ($this->nightNameLooksGeneric($name, $type)) {
+            if ($room !== '') {
+                return $this->fitNightRoomType($room, $type, self::COLS);
+            }
+
+            return $this->fitNightName($type, self::COLS);
+        }
         if ($name === '') {
-            $name = $role === YarboHome::CONTACT_WINDOW ? 'WINDOW' : 'DOOR';
+            return $this->fitNightName($type, self::COLS);
+        }
+        if ($room !== '' && !$this->nightLabelHasRoom($name, $room)) {
+            return $this->fitNightRoomType($room, $name, self::COLS);
         }
 
         return $this->fitNightName($name, self::COLS);
+    }
+
+    /**
+     * @param array<string, mixed>|null $store
+     */
+    private function nightContactRoomName(string $deviceId, ?array $store): string
+    {
+        if ($deviceId === '' || $store === null) {
+            return '';
+        }
+        $roomId = trim((string) ($store['rooms'][$deviceId] ?? ''));
+        if ($roomId === '') {
+            return '';
+        }
+        foreach (is_array($store['room_defs'] ?? null) ? $store['room_defs'] : [] as $def) {
+            if (!is_array($def)) {
+                continue;
+            }
+            if ((string) ($def['id'] ?? '') === $roomId) {
+                return trim((string) ($def['name'] ?? ''));
+            }
+        }
+
+        return '';
+    }
+
+    private function nightSanitizeLabel(string $raw): string
+    {
+        $name = strtoupper(trim($raw));
+        $name = preg_replace('/[^A-Z0-9 !@#$()\-+;:\'"%,.\/?]/', '', $name) ?? '';
+        $name = preg_replace('/\s+/', ' ', $name) ?? '';
+
+        return trim($name);
+    }
+
+    private function nightNameLooksGeneric(string $name, string $type): bool
+    {
+        if ($name === '') {
+            return true;
+        }
+        $compact = preg_replace('/\s+/', ' ', $name) ?? $name;
+        $generics = [
+            $type,
+            'WIN',
+            'WINDOW',
+            'WINDOWS',
+            'DOOR',
+            'DOORS',
+            'CONTACT',
+            'SENSOR',
+            'OPEN CLOSE',
+            'DOOR WINDOW',
+            'WINDOW DOOR',
+        ];
+        if (in_array($compact, $generics, true)) {
+            return true;
+        }
+
+        return (bool) preg_match(
+            '/^(DOOR|WINDOW|WIN|CONTACT|SENSOR)(\s+(SENSOR|CONTACT))?$/',
+            $compact
+        );
+    }
+
+    private function nightLabelHasRoom(string $label, string $room): bool
+    {
+        if ($label === '' || $room === '') {
+            return false;
+        }
+        $hay = ' ' . preg_replace('/\s+/', ' ', $label) . ' ';
+        $needle = ' ' . preg_replace('/\s+/', ' ', $room) . ' ';
+
+        return str_contains($hay, $needle);
+    }
+
+    /**
+     * Keep the trailing type/name word; fit the room into the remaining flaps.
+     */
+    public function fitNightRoomType(string $room, string $type, int $max = self::COLS): string
+    {
+        $room = $this->nightSanitizeLabel($room);
+        $type = $this->nightSanitizeLabel($type);
+        if ($type === '') {
+            return $this->fitNightName($room, $max);
+        }
+        if ($room === '') {
+            return $this->fitNightName($type, $max);
+        }
+        $full = $room . ' ' . $type;
+        if (strlen($full) <= $max) {
+            return $full;
+        }
+        $budget = $max - 1 - strlen($type);
+        if ($budget < 1) {
+            return $this->fitNightName($type, $max);
+        }
+        $roomFit = $this->fitNightName($room, $budget);
+        if ($roomFit === '') {
+            return $this->fitNightName($type, $max);
+        }
+
+        return $roomFit . ' ' . $type;
     }
 
     /**

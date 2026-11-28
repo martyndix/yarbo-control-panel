@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.120] - 2026-11-28
+
+### Changed
+
+- Vestaboard Night hours open alerts use the **room** the contact is assigned to plus **door/window** when the sensor is named generically (for example a contact named “Window” in Study shows **STUDY WINDOW**). Specific names that already include the room stay as they are.
+
 ## [5.0.119] - 2026-11-28
 
 ### Fixed
