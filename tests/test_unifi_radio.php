@@ -267,6 +267,9 @@ assert_true(str_contains($js, 'syncRadioPlayerChrome'), 'Radio header chrome syn
 assert_true(str_contains($js, 'Playback is server-owned'), 'chrome sync must not radio_stop on revisit');
 assert_true(!preg_match('/function syncRadioPlayerChrome[\s\S]*?unifiModuleOn === false[\s\S]*?radio_stop/', $js), 'no auto radio_stop when UniFi chrome hides');
 assert_true(str_contains($js, 'radioIgnoreSpeakerChangesUntil'), 'Safari speaker restore ignored');
+assert_true(str_contains($js, 'armRadioFormIgnore'), 'Safari pageshow arms form ignore');
+assert_true(str_contains($js, 'radioIgnoreVolumeChangesUntil'), 'Safari volume restore ignored');
+assert_true(str_contains($js, 'apply_stream_gain'), 'volume restart only when user moves slider');
 assert_true(str_contains($js, 'closing the modal must never stop'), 'closing modal never radio_stop');
 assert_true(str_contains($js, 'openRadioPlayerModal'), 'Radio Player modal open');
 assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remembered');
@@ -474,7 +477,10 @@ assert_true(
 );
 assert_true(str_contains($change, '## [5.0.123]'), 'changelog 5.0.123');
 assert_true(str_contains($change, '## [5.0.124]'), 'changelog 5.0.124');
-assert_true(str_contains($change, 'Safari'), 'changelog Safari reload');
+assert_true(str_contains($change, '## [5.0.125]'), 'changelog 5.0.125');
+assert_true(str_contains($change, 'minimised'), 'changelog Safari minimise');
+assert_true(str_contains($radioSrc, 'apply_stream_gain'), 'setVolume requires apply_stream_gain to restart');
+assert_true(str_contains($radioSrc, 'Same ticks as last time'), 'setTargets no-op for identical speakers');
 $matcher = new ReflectionMethod(YarboUnifiRadio::class, 'isPanelRadioFfmpegArgs');
 $matcher->setAccessible(true);
 $classic = '/usr/bin/ffmpeg -nostdin -f adts udp://192.168.1.50:7004';

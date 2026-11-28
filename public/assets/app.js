@@ -1145,9 +1145,11 @@ function initAppearance() {
 
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible') {
+            armRadioFormIgnore(5000);
             refreshUpdateBadge();
         }
     });
+    window.addEventListener('pageshow', () => armRadioFormIgnore(5000));
 }
 
 function zoneStyle(feature) {
@@ -4943,8 +4945,18 @@ let radioStatusPollTimer = 0;
 let radioStatusPollGen = 0;
 /** Ignore remote Idle/Playing for a moment after this tab's own Play/Stop/Announcement. */
 let radioLocalCommandUntil = 0;
-/** Ignore speaker checkbox change while the list is being rebuilt (Safari restore). */
+/** Ignore speaker/volume/settings restores (Safari iPhone page restore fires change). */
 let radioIgnoreSpeakerChangesUntil = 0;
+let radioIgnoreVolumeChangesUntil = 0;
+let radioIgnoreSpeakersEnabledUntil = 0;
+
+function armRadioFormIgnore(ms = 5000) {
+    const until = Date.now() + Math.max(0, ms);
+    radioIgnoreSpeakerChangesUntil = until;
+    radioIgnoreVolumeChangesUntil = until;
+    radioIgnoreSpeakersEnabledUntil = until;
+}
+armRadioFormIgnore(5000);
 
 function radioIsAnnouncement(radio = {}) {
     const id = String(radio?.station_id || '');
@@ -5165,7 +5177,7 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
             const selected = selectedIds === null ? null : new Set(selectedIds);
             // Safari iPhone can fire change on restored checkboxes after a reload;
             // ignore those so we do not radio_targets (rebuild/stop) while Playing.
-            radioIgnoreSpeakerChangesUntil = Date.now() + 2500;
+            armRadioFormIgnore(5000);
             list.innerHTML = speakers.map((s) => {
                 const id = s.native_id || String(s.id || '').replace(/^unifi:camera:/, '');
                 const checked = selected === null ? true : selected.has(id);
@@ -5176,7 +5188,7 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
         }
     } else if (list && acceptRemote && fromRadio.length) {
         // Keep open tabs in sync without rebuilding the whole list.
-        radioIgnoreSpeakerChangesUntil = Date.now() + 2500;
+        armRadioFormIgnore(2500);
         syncSpeakerChecksFromIds(fromRadio);
     }
 
@@ -19312,7 +19324,11 @@ els.settingsUnifiTest?.addEventListener('click', async (e) => {
         button.disabled = false;
     }
 });
-els.settingsUnifiSpeakersEnabled?.addEventListener('change', async () => {
+els.settingsUnifiSpeakersEnabled?.addEventListener('change', async (event) => {
+    // Safari form restore must not toggle Speakers off (that stops playback).
+    if (event && event.isTrusted === false) return;
+    if (Date.now() < radioIgnoreSpeakersEnabledUntil) return;
+    if (!settingsModalOpen) return;
     const show = Boolean(els.settingsUnifiSpeakersEnabled.checked);
     try {
         const data = await unifiApi({ action: 'speakers_enabled', show }, 8000);
@@ -19396,12 +19412,19 @@ els.settingsUnifiStationsRestore?.addEventListener('click', async () => {
 els.unifiRadioVolume?.addEventListener('input', () => {
     if (els.unifiRadioVolumeLabel) els.unifiRadioVolumeLabel.textContent = `${els.unifiRadioVolume.value}%`;
 });
-els.unifiRadioVolume?.addEventListener('change', async () => {
+els.unifiRadioVolume?.addEventListener('change', async (event) => {
+    // Safari restores the range input when reopening a minimised tab and fires change —
+    // that used to call radio_volume → stop+restart and cut the music.
+    if (event && event.isTrusted === false) return;
+    if (Date.now() < radioIgnoreVolumeChangesUntil) return;
+    if (!radioPlayerOpen) return;
     const volume = Number(els.unifiRadioVolume.value);
+    const current = Number(unifiDash?.radio?.volume);
+    if (Number.isFinite(current) && current === volume) return;
     const targets = unifiSelectedSpeakerIds();
     try {
         // May restart an active talkback stream so the new gain applies.
-        const data = await unifiApi({ action: 'radio_volume', volume, targets }, 45000);
+        const data = await unifiApi({ action: 'radio_volume', volume, targets, apply_stream_gain: true }, 45000);
         if (!data?.ok && data?.error) throw new Error(data.error);
         if (data.radio) applyRadioCommandResult(data.radio);
         if (unifiDash && data.radio) unifiDash.radio = data.radio;
@@ -20272,7 +20295,9 @@ syncRadioAnnounceChrome();
 els.radioPlayerModal?.addEventListener('change', async (event) => {
     const speaker = event.target.closest('input[data-unifi-speaker]');
     if (!speaker) return;
+    if (event.isTrusted === false) return;
     if (Date.now() < radioIgnoreSpeakerChangesUntil) return;
+    if (!radioPlayerOpen) return;
     const targets = unifiSelectedSpeakerIds();
     writeUnifiSpeakerPick(targets);
     // Apply live while Playing / AirPlay, and always persist so other browsers sync.

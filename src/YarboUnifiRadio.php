@@ -1450,14 +1450,27 @@ final class YarboUnifiRadio
                 : ($status['targets'] ?? []);
         }
         $state = $this->loadState();
+        $prevVolume = max(0, min(100, (int) ($state['volume'] ?? 60)));
         $wasPlaying = (!empty($state['playing']) && is_array($state['streams']) && $state['streams'] !== [])
             || (is_array($state['homepod_targets'] ?? null) && $state['homepod_targets'] !== []);
         $stationId = isset($state['station_id']) ? (string) $state['station_id'] : '';
+        // Safari form restore can POST the same (or stale) volume after a phone reopen.
+        // Only stop+restart ffmpeg when the client asks for stream gain and the value changed.
+        $applyStreamGain = !empty($input['apply_stream_gain']) || !empty($input['restart']);
         $state['volume'] = $volume;
         if ($targets !== []) {
             $state['targets'] = $targets;
         }
         $this->writeState($state);
+
+        if ($volume === $prevVolume && $wasPlaying) {
+            return [
+                'ok' => true,
+                'error' => null,
+                'volume' => $volume,
+                'radio' => $this->status(),
+            ];
+        }
 
         // Hardware volume is optional; stream volume is applied by restarting play.
         foreach (YarboHomepod::filterProtectIds($targets) as $cameraId) {
@@ -1471,7 +1484,7 @@ final class YarboUnifiRadio
             YarboHomepod::fromEnv($this->projectRoot)->setVolume($homepodIds, $volume);
         }
 
-        if ($wasPlaying && $stationId !== '' && $targets !== []) {
+        if ($applyStreamGain && $wasPlaying && $stationId !== '' && $targets !== []) {
             // Protect / AirPlay bridge loudness is baked into ffmpeg — restart to apply.
             // HomePod-only radio can keep the RAOP session and only change volume above.
             $protectIds = YarboHomepod::filterProtectIds($targets);
@@ -1540,6 +1553,29 @@ final class YarboUnifiRadio
             return [
                 'ok' => false,
                 'error' => 'Tick at least one speaker',
+                'radio' => $this->status(),
+                'airplay' => $airplay->status(),
+            ];
+        }
+
+        $prevTargets = [];
+        if (is_array($state['targets'] ?? null)) {
+            foreach ($state['targets'] as $id) {
+                $id = trim((string) $id);
+                if ($id !== '') {
+                    $prevTargets[] = $id;
+                }
+            }
+        }
+        $prevSorted = $prevTargets;
+        $nextSorted = $targets;
+        sort($prevSorted);
+        sort($nextSorted);
+        // Same ticks as last time — persist only, never rebuild streams (Safari restore).
+        if ($prevSorted === $nextSorted && !array_key_exists('volume', $input)) {
+            return [
+                'ok' => true,
+                'error' => null,
                 'radio' => $this->status(),
                 'airplay' => $airplay->status(),
             ];
