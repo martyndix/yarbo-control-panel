@@ -50,7 +50,7 @@ def wait_job(agent, job_id: str, timeout: float = 5.0) -> dict:
 
 def main() -> int:
     agent = load_agent()
-    assert agent.AGENT_VERSION == 124, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 125, agent.AGENT_VERSION
     agent.install_border_router_route = lambda: "nora"  # type: ignore[method-assign]
     agent.format_discovery_diag = lambda diag=None: "[diag test]"  # type: ignore[method-assign]
     agent.discovery_diag = lambda: {  # type: ignore[method-assign]
@@ -139,11 +139,25 @@ def main() -> int:
     assert "checksum" in (agent.pairing_code_problem("31436531014") or "").lower()
     assert "error 28" in agent.friendly_commission_error("CHIP Error 0x0000001C: Uninitialized").lower()
     assert "in use" in agent.friendly_commission_error("CHIP Error 0x00000028: In use").lower()
+    agent.matter_server_log_hint = lambda: ""  # type: ignore[method-assign]
     seen_fail = agent.friendly_commission_error(
         "Commission with code failed for node 29. (error_code 1)"
     ).lower()
-    assert "lan subnet" in seen_fail, seen_fail
+    assert "seen on thread" in seen_fail and "myggbett" in seen_fail, seen_fail
+    assert "lan subnet" not in seen_fail, seen_fail
+    agent.matter_server_log_hint = (  # type: ignore[method-assign]
+        lambda: "Failed to establish secure session to device: CHIP Error 0x00000003: Incorrect state"
+    )
+    pase_fail = agent.friendly_commission_error(
+        "Commission with code failed for node 79. (error_code 1)"
+    ).lower()
+    assert "incorrect state" in pase_fail and "secure pairing" in pase_fail, pase_fail
+    assert agent.commission_log_looks_pase_failed(
+        "Failed to establish secure session to device: CHIP Error 0x00000003: Incorrect state"
+    )
+    assert callable(agent.recover_commission_stack)
     agent.discovery_diag = lambda: {"matterc_seen": False, "matterc": ["no _matterc replies"]}
+    agent.matter_server_log_hint = lambda: ""  # type: ignore[method-assign]
     assert "never found" in agent.friendly_commission_error(
         "Commission with code failed for node 29. (error_code 1)"
     ).lower()

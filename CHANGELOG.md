@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.118] - 2026-11-28
+
+### Fixed
+
+- Pairing an IKEA MYGGBETT (and other Thread-only sensors) no longer shows the misleading “plug had a LAN address / this sensor has none” toast when the sensor was already found on Thread. That path was normal (`v4=none`) and already works for sensors you have paired. When the Matter log shows **CHIP incorrect state** / failed secure session after other pairing today, Add device now restarts the Matter stack once, cleans the half-finished node, and retries; the toast asks for a fresh Turn On Pairing Mode code. Pairing also prefers a PIO from the same HomePod as the Thread hop when more than one router advertises. Matter agent **v125**.
+
 ## [5.0.117] - 2026-11-27
 
 ### Added

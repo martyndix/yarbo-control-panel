@@ -42,7 +42,7 @@ DOCKER_IMAGE = os.environ.get(
 DOCKER_NAME = os.environ.get("YARBO_MATTER_DOCKER_NAME", "yarbo-matter-server")
 SHARED_MATTER_NAME = os.environ.get("YARBO_SHARED_MATTER_NAME", "matter-server")
 STORAGE = ROOT / "data" / "matter-server"
-AGENT_VERSION = 124
+AGENT_VERSION = 125
 STICKY_HOLD = 4.0
 STICKY_STATE_KEYS = ("on", "brightness", "color_hex", "hue", "saturation", "color_temp")
 CMD_CHANNEL = "cmd"
@@ -3141,12 +3141,17 @@ def parse_ra_packet(data: bytes, src: str = "") -> dict[str, list[dict[str, Any]
             plen = int(opt[2])
             flags = int(opt[3])
             if 0 < plen <= 128:
-                found["pios"].append({
+                row: dict[str, Any] = {
                     "prefix": ipv6_network_text(opt[16:32], plen),
                     "length": plen,
                     "onlink": bool(flags & 0x80),
                     "auto": bool(flags & 0x40),
-                })
+                }
+                # Remember which router sent the PIO. A Thread hop only publishes
+                # prefixes it advertised; a PIO from another router is a black hole.
+                if via.lower().startswith("fe80:"):
+                    row["via"] = via
+                found["pios"].append(row)
         elif otype == 24 and olen >= 8 and via.lower().startswith("fe80:"):
             plen = int(opt[2])
             lifetime = struct.unpack("!I", opt[4:8])[0]
@@ -3241,7 +3246,15 @@ def solicit_routers(iface: str) -> dict[str, Any]:
     rows = parse_rdisc6_rios(text) if text else []
     if rows:
         _last_ra_proof = "rdisc6"
-        return {"sent": True, "rios": rows, "pios": [], "error": ""}
+        # rdisc6 only lists routes. Collect PIOs (and their via) from a raw RS so
+        # pairing can source from the same router as the Thread hop.
+        pios: list[dict[str, Any]] = []
+        try:
+            local_pios = solicit_routers_once(iface, wait_s=1.2)
+            pios = list(local_pios.get("pios") or [])
+        except Exception as exc:  # noqa: BLE001
+            print(f"matter: pio solicit after rdisc6: {exc}", flush=True)
+        return {"sent": True, "rios": rows, "pios": pios, "error": ""}
     local = solicit_routers_once(iface)
     if local.get("rios") or local.get("pios"):
         _last_ra_proof = "ra"
@@ -3831,17 +3844,25 @@ def pio_flag_text(pio: dict[str, Any]) -> str:
 
 def format_pio_label(pios: list[dict[str, Any]], accessory_prefix: str) -> str:
     """pio= text. `same` when the only prefix is the one the sensor already uses."""
-    shown: list[tuple[str, str]] = []
+    shown: list[str] = []
     for pio in pios:
         prefix = str(pio.get("prefix") or "")
         if not prefix or _is_tailscale_ula(prefix):
             continue
-        shown.append((prefix, pio_flag_text(pio)))
+        via = str(pio.get("via") or "").split("%", 1)[0]
+        label = f"{prefix},{pio_flag_text(pio)}"
+        if via.lower().startswith("fe80:"):
+            label = f"{label}@{via}"
+        shown.append(label)
     if not shown:
         return "none"
-    if len(shown) == 1 and accessory_prefix and shown[0][0].lower() == accessory_prefix.lower():
+    if (
+        len(shown) == 1
+        and accessory_prefix
+        and shown[0].split(",", 1)[0].lower() == accessory_prefix.lower()
+    ):
         return "same"
-    return ";".join(f"{prefix},{flags}" for prefix, flags in shown)
+    return ";".join(shown)
 
 
 def format_rio_label(rows: list[dict[str, str]]) -> str:
@@ -3849,12 +3870,12 @@ def format_rio_label(rows: list[dict[str, str]]) -> str:
     return ",".join(parts) or "none"
 
 
-def select_pio_source(iface: str, accessory_prefix: str) -> str:
+def select_pio_source(iface: str, accessory_prefix: str, hop: str = "") -> str:
     """Address in an autonomous PIO the border router can publish into Thread.
 
-    The address is left configured. fd58 is not substituted: a prefix the Pi
-    invents is not a PIO the HomePod learned. When the only PIO is the accessory
-    prefix, the existing address in that prefix is kept.
+    Prefer a PIO from the same router as the Thread hop when via tags exist.
+    Untagged PIOs (or a hop with no matching PIO) keep the previous behaviour so
+    already-paired Thread sensors are not broken. fd58 is not substituted.
     """
     autos = [
         pio for pio in _last_pios
@@ -3862,6 +3883,18 @@ def select_pio_source(iface: str, accessory_prefix: str) -> str:
     ]
     if not autos:
         return ""
+    hop_l = str(hop or "").split("%", 1)[0].lower()
+    tagged = [
+        pio for pio in autos
+        if str(pio.get("via") or "").split("%", 1)[0].lower().startswith("fe80:")
+    ]
+    if hop_l.startswith("fe80:") and tagged:
+        from_hop = [
+            pio for pio in tagged
+            if str(pio.get("via") or "").split("%", 1)[0].lower() == hop_l
+        ]
+        if from_hop:
+            autos = from_hop
     others = [
         pio for pio in autos
         if not accessory_prefix or str(pio.get("prefix")).lower() != accessory_prefix.lower()
@@ -3898,7 +3931,7 @@ def install_thread_return_route(iface: str, hop: str, mesh_prefix: str) -> str:
         return ""
     _last_pio_label = format_pio_label(_last_pios, mesh_prefix)
     _last_ra_adv = "none"
-    src = select_pio_source(iface, mesh_prefix)
+    src = select_pio_source(iface, mesh_prefix, hop)
     _last_pair_src = src or "none"
     if not mesh_prefix:
         return src or "none"
@@ -5069,6 +5102,21 @@ def commission_error_looks_retryable(err: str) -> bool:
     return any(n in low for n in needles)
 
 
+def commission_log_looks_pase_failed(logs: str = "") -> bool:
+    """Matter server logs show PASE / secure-session failure (often CHIP 0x03)."""
+    low = str(logs or "").lower()
+    needles = (
+        "incorrect state",
+        "0x00000003",
+        "chip error 0x03",
+        "failed to establish secure session",
+        "secure pairing failed",
+        "pasesession",
+        "pase session",
+    )
+    return any(n in low for n in needles)
+
+
 def commission_error_looks_discovery(err: str) -> bool:
     """Discovery / mDNS never saw the accessory — worth one NIC rebind retry."""
     low = str(err or "").lower()
@@ -5115,6 +5163,27 @@ def cleanup_failed_commission_node(err: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001
         print(f"matter: cleanup node {node_id} failed: {exc}", flush=True)
+
+
+def recover_commission_stack(reason: str = "") -> None:
+    """Restart Matter after a half-finished PASE so the next try is not Incorrect state."""
+    detail = f" ({reason})" if reason else ""
+    print(f"matter: recovering commission stack{detail}", flush=True)
+    try:
+        reset_ws()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: reset after pase fail: {exc}", flush=True)
+    name = matter_runtime_container()
+    try:
+        run_docker(["restart", name], timeout=40.0)
+        wait_matter_port(30.0)
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: restart after pase fail: {exc}", flush=True)
+        return
+    try:
+        ensure_listening()
+    except Exception as exc:  # noqa: BLE001
+        print(f"matter: listen after pase recover: {exc}", flush=True)
 
 
 def friendly_commission_error(err: str) -> str:
@@ -5183,7 +5252,7 @@ def friendly_commission_error(err: str) -> str:
             "That pairing code was rejected. Use the full 11-digit code from Apple Home → "
             "Turn On Pairing Mode (XXXX-XXX-XXXX), not the sticker QR and not a partial PIN."
         )
-    # python-matter-server NodeCommissionFailed (error_code 1) — usually DNS-SD discovery.
+    # python-matter-server NodeCommissionFailed (error_code 1) — discovery or PASE.
     if (
         "commission with code failed" in low
         or "nodecommissionfailed" in low
@@ -5194,14 +5263,31 @@ def friendly_commission_error(err: str) -> str:
             seen = bool(discovery_diag().get("matterc_seen"))
         except Exception:  # noqa: BLE001
             seen = False
+        logs = ""
+        try:
+            logs = matter_server_log_hint()
+        except Exception:  # noqa: BLE001
+            logs = ""
+        raw = " ".join(detail.split())[:120]
+        chip = f" chip={raw}" if raw else ""
+        if seen and (
+            commission_log_looks_pase_failed(logs)
+            or "incorrect state" in low
+            or "0x00000003" in low
+        ):
+            return (
+                "The sensor was found on Thread, but the secure pairing session failed "
+                "(CHIP incorrect state). That can happen after other pairing today or a "
+                "half-finished try. Wait about 30 seconds, Turn On Pairing Mode again for a "
+                "fresh code, then Add device."
+                f"{chip}"
+            )
         if seen:
             lan = ""
             try:
                 lan = accessory_lan_address()
             except Exception:  # noqa: BLE001
                 lan = ""
-            raw = " ".join(detail.split())[:120]
-            chip = f" chip={raw}" if raw else ""
             if lan:
                 return (
                     f"The accessory's LAN address {lan} did not finish pairing. "
@@ -5209,10 +5295,9 @@ def friendly_commission_error(err: str) -> str:
                     f"{chip}"
                 )
             return (
-                "The IKEA plug paired because it had an address on the LAN subnet. "
-                "This sensor has none. Pairing is sent from a LAN address, and the Pi "
-                "tells the HomePod that prefix is a route back here. "
-                "Use a fresh Turn On Pairing Mode code."
+                "The sensor was seen on Thread (no LAN address — normal for MYGGBETT / "
+                "Timmerflotte) but pairing did not finish. Use a fresh Turn On Pairing Mode "
+                "code and keep a HomePod online."
                 f"{chip}"
             )
         return (
@@ -5606,10 +5691,26 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
                 )
         err = str(rpc.get("error") or "")
         server_gave_up = "matter server timed out" in err.lower()
-        if not rpc.get("ok") and not server_gave_up and commission_error_looks_retryable(err):
+        first_logs = ""
+        try:
+            first_logs = matter_server_log_hint()
+        except Exception:  # noqa: BLE001
+            first_logs = ""
+        pase_failed = commission_log_looks_pase_failed(first_logs) or commission_error_looks_retryable(err)
+        if not rpc.get("ok") and not server_gave_up and pase_failed:
             print(f"matter: commission retry after {err!r}", flush=True)
             cleanup_failed_commission_node(err)
-            time.sleep(2.0)
+            if commission_log_looks_pase_failed(first_logs) or "incorrect state" in err.lower():
+                # Other pairing today can leave CHIP in Incorrect state; bounce once.
+                recover_commission_stack(err[:80])
+                if shielded:
+                    begin_tailscale_matter_shield()
+                try:
+                    install_border_router_route()
+                except Exception as exc:  # noqa: BLE001
+                    print(f"matter: border-router after pase recover: {exc}", flush=True)
+            else:
+                time.sleep(2.0)
             prepare_for_commission()
             rpc = matter_rpc(
                 "commission_with_code",
@@ -5645,7 +5746,7 @@ def run_commission_with_code(code: str) -> dict[str, Any]:
             cleanup_failed_commission_node(detail)
             diag = discovery_diag()
             msg = friendly_commission_error(detail)
-            logs = matter_server_log_hint()
+            logs = first_logs or matter_server_log_hint()
             if logs and "server=" not in msg:
                 msg = f"{msg} server={logs}"
             if "[diag " not in msg.lower():

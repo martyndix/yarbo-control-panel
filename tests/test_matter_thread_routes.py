@@ -19,7 +19,7 @@ def qname(parts):
 
 def main() -> int:
     agent = load()
-    assert agent.AGENT_VERSION == 124, agent.AGENT_VERSION
+    assert agent.AGENT_VERSION == 125, agent.AGENT_VERSION
     agent.browse_mdns_sources = lambda label, seconds=1.0: []
     sample = """
 Soliciting ff02::2 on eth0...
@@ -348,6 +348,7 @@ Router lifetime           :         1800
             "prefix": "fd10:d687:e7bf:4ba8::/64",
             "onlink": True,
             "auto": True,
+            "via": border_agent,
         }],
     }
 
@@ -381,8 +382,35 @@ Router lifetime           :         1800
     ) == "same"
     assert agent._last_rio_rows and agent._last_rio_rows[0]["via"] == border_agent
     assert agent._last_pio_label.startswith("fd10:d687:e7bf:4ba8::/64,AL"), agent._last_pio_label
+    assert border_agent in agent._last_pio_label, agent._last_pio_label
     assert border_agent in agent._last_mesh_sources
     assert "fd10:d687:e7bf:4ba8::1" in agent._last_mesh_sources
+    # Prefer the Thread hop's PIO when another router also advertised one.
+    agent._last_pios = [
+        {
+            "prefix": "fd10:d687:e7bf:4ba8::/64",
+            "onlink": True,
+            "auto": True,
+            "via": reflector,
+        },
+        {
+            "prefix": "fd11:2233:4455::/64",
+            "onlink": True,
+            "auto": True,
+            "via": border_agent,
+        },
+    ]
+    agent.subprocess.run = lambda cmd, **kwargs: Result(
+        "2: eth0    inet6 fd10:d687:e7bf:4ba8:2ecf:67ff:fe70:97e7/64 scope global\n"
+        "2: eth0    inet6 fd11:2233:4455::5050/64 scope global\n"
+    )
+    assert agent.select_pio_source("eth0", "fdef:badd:6106::/64", border_agent) == "fd11:2233:4455::5050"
+    assert agent.select_pio_source("eth0", "fdef:badd:6106::/64", reflector).startswith("fd10:")
+    ra = bytes([134, 0, 0, 0, 64, 0]) + struct.pack("!HII", 1800, 0, 0)
+    pio = bytes([3, 4, 64, 0xC0]) + struct.pack("!II", 86400, 14400) + (b"\x00" * 4)
+    pio += socket.inet_pton(socket.AF_INET6, "fd10:d687:e7bf:4ba8::")
+    parsed_pio = agent.parse_ra_packet(ra + pio, border_agent)
+    assert parsed_pio["pios"] and parsed_pio["pios"][0].get("via") == border_agent, parsed_pio
     text = agent.format_discovery_diag({
         "agent": agent.AGENT_VERSION,
         "thread_route": "fdef:badd:6106::/64 via " + border_agent,

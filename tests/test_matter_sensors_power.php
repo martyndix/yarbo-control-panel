@@ -295,7 +295,7 @@ assert_true(str_contains($agent, 'ELECTRICAL_POWER = 0x0090'), 'agent Electrical
 assert_true(str_contains($agent, 'BOOLEAN_STATE = 0x0045'), 'agent Boolean State cluster');
 assert_true(str_contains($agent, 'OCCUPANCY_SENSING = 0x0406'), 'agent Occupancy Sensing cluster');
 assert_true(str_contains($agent, 'HUMIDITY_MEASUREMENT = 0x0405'), 'agent Humidity cluster');
-assert_true(str_contains($agent, 'AGENT_VERSION = 124'), 'agent v124');
+assert_true(str_contains($agent, 'AGENT_VERSION = 125'), 'agent v125');
 
 $histRoot = sys_get_temp_dir() . '/yarbo-climate-hist-' . bin2hex(random_bytes(3));
 mkdir($histRoot . '/data/sensor-history', 0775, true);
