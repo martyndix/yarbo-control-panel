@@ -165,7 +165,32 @@ final class YarboUnifiRadio
         $timedOut = $endsAt > 0 && time() >= $endsAt;
         // Finite clips (Announcement) must return to Idle when ffmpeg exits or ends_at passes.
         // HomePod-only radio stays Playing while homepod_targets is set (no local ffmpeg pid).
-        if ($timedOut || ($alive === [] && !$homepodAlive && ($state['playing'] ?? false))) {
+        $markedPlaying = !empty($state['playing']);
+        $trackedGone = $alive === [] && !$homepodAlive && $markedPlaying;
+        // Browser status polls resume when a phone returns to the page. Tracked shell
+        // pids can look dead while nohup ffmpeg is still feeding the speakers — do not
+        // clear Playing or reap those streams, or going back to the tab cuts the music.
+        $liveFfmpeg = $trackedGone && !$timedOut && $stationIdNow !== 'announce'
+            ? $this->listPanelRadioFfmpegPids()
+            : [];
+        if ($trackedGone && $liveFfmpeg !== []) {
+            $adopted = [];
+            $oldRows = is_array($state['streams'] ?? null) ? $state['streams'] : [];
+            foreach ($liveFfmpeg as $i => $pid) {
+                $cam = '';
+                if (isset($oldRows[$i]) && is_array($oldRows[$i])) {
+                    $cam = trim((string) ($oldRows[$i]['camera_id'] ?? ''));
+                }
+                if ($cam === '' || $cam === 'orphan') {
+                    $cam = 'stream-' . ($i + 1);
+                }
+                $adopted[] = ['camera_id' => $cam, 'pid' => $pid];
+            }
+            $state['streams'] = $adopted;
+            $state['playing'] = true;
+            $this->writeState($state);
+            $alive = $adopted;
+        } elseif ($timedOut || $trackedGone) {
             if ($timedOut && $alive !== []) {
                 foreach ($alive as $row) {
                     $pid = (int) ($row['pid'] ?? 0);
@@ -2019,6 +2044,33 @@ final class YarboUnifiRadio
     }
 
     /**
+     * Live panel radio/AirPlay ffmpeg pids (Protect talkback, fan-out, remux).
+     *
+     * @return list<int>
+     */
+    public function listPanelRadioFfmpegPids(): array
+    {
+        $out = (string) @shell_exec('ps -eo pid=,args= 2>/dev/null');
+        if ($out === '') {
+            return [];
+        }
+        $pids = [];
+        foreach (preg_split('/\R/', $out) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || !preg_match('/^(\d+)\s+(.+)$/s', $line, $m)) {
+                continue;
+            }
+            $pid = (int) $m[1];
+            if ($pid <= 1 || !$this->isPanelRadioFfmpegArgs((string) $m[2])) {
+                continue;
+            }
+            $pids[] = $pid;
+        }
+
+        return array_values(array_unique($pids));
+    }
+
+    /**
      * Kill panel radio/AirPlay ffmpeg processes that are no longer tracked.
      * Orphans (PPID 1 after nohup) burn CPU/network and stall the Pi — recover_speed
      * used to miss Classic FM talkback because argv has udp://…:7004, not "unifi-radio".
@@ -2034,20 +2086,8 @@ final class YarboUnifiRadio
                 $keep[$pid] = true;
             }
         }
-        $out = (string) @shell_exec('ps -eo pid=,args= 2>/dev/null');
-        if ($out === '') {
-            return;
-        }
-        foreach (preg_split('/\R/', $out) ?: [] as $line) {
-            $line = trim($line);
-            if ($line === '' || !preg_match('/^(\d+)\s+(.+)$/s', $line, $m)) {
-                continue;
-            }
-            $pid = (int) $m[1];
-            if ($pid <= 1 || isset($keep[$pid])) {
-                continue;
-            }
-            if (!$this->isPanelRadioFfmpegArgs((string) $m[2])) {
+        foreach ($this->listPanelRadioFfmpegPids() as $pid) {
+            if (isset($keep[$pid])) {
                 continue;
             }
             $this->killPidTree($pid);

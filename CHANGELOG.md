@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.123] - 2026-11-28
+
+### Fixed
+
+- Radio keeps playing when you leave the panel and come back. Returning to the phone tab no longer stops Protect/HomePod streams — playback is server-owned until you press **Stop** or turn Speakers off. Status polls that see a dead tracked pid while ffmpeg is still sending also leave the stream alone instead of cutting it.
+
 ## [5.0.122] - 2026-11-28
 
 ### Changed

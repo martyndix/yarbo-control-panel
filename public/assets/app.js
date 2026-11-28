@@ -5053,10 +5053,9 @@ function syncRadioPlayerChrome({ unifiModuleOn, speakersEnabled, radio } = {}) {
         if (radioPlayerOpen) closeRadioPlayerModal({ stopIfNeeded: false });
         setRadioPlayingBadge(false);
         stopRadioStatusPoll();
-        if (unifiModuleOn === false && (unifiDash?.radio?.playing || radio?.playing)) {
-            unifiApi({ action: 'radio_stop' }, 8000).catch(() => {});
-            if (unifiDash?.radio) unifiDash.radio.playing = false;
-        }
+        // Playback is server-owned (Protect / HomePod). Never radio_stop from chrome
+        // sync — a phone putting the tab away and coming back used to cut music when
+        // UniFi looked briefly "off" before hub status landed. Only Stop / Speakers off.
         return;
     }
     const live = radio || unifiDash?.radio || null;
