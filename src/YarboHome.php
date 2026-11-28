@@ -6360,10 +6360,7 @@ final class YarboHome
             }
             $row = [
                 'id' => $id,
-                'name' => YarboHub::normalizeDisplayName(
-                    (string) ($store['names'][$id] ?? $device['name'] ?? $id),
-                    self::PAPER_NAME_MAX,
-                ) ?: $id,
+                'name' => $this->paperAccessLabel($store, $device),
                 'kind' => $kind,
                 'role' => $this->contactRoleFor($device, $store),
                 // Filled = physically open from DPS / contact — never unlock/on.
@@ -6387,6 +6384,46 @@ final class YarboHome
         }
 
         return $out;
+    }
+
+    /**
+     * ACCESS tile title. Lockable doors keep their name. Open/close sensors use the
+     * Home room when assigned (glyph already says door vs window), same as the Home
+     * Doors/Windows lists.
+     *
+     * @param array{names?: array<string, string>, rooms?: array<string, string>, room_defs?: list<array{id?: string, name?: string}>} $store
+     * @param array<string, mixed> $device
+     */
+    private function paperAccessLabel(array $store, array $device): string
+    {
+        $id = trim((string) ($device['id'] ?? ''));
+        $fallback = YarboHub::normalizeDisplayName(
+            (string) ($store['names'][$id] ?? $device['name'] ?? $id),
+            self::PAPER_NAME_MAX,
+        );
+        if (!self::isLockableDoor($device)) {
+            $roomId = trim((string) ($store['rooms'][$id] ?? ''));
+            if ($roomId !== '') {
+                foreach ($store['room_defs'] ?? [] as $def) {
+                    if (!is_array($def) || (string) ($def['id'] ?? '') !== $roomId) {
+                        continue;
+                    }
+                    $roomName = YarboHub::normalizeDisplayName(
+                        (string) ($def['name'] ?? ''),
+                        self::PAPER_NAME_MAX,
+                    );
+                    if ($roomName !== '') {
+                        return $roomName;
+                    }
+                    break;
+                }
+            }
+        }
+        if ($fallback !== '') {
+            return $fallback;
+        }
+
+        return $id !== '' ? $id : 'Door';
     }
 
     /**
