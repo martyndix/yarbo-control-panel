@@ -50,6 +50,34 @@ assert_true(($view['speakers_enabled'] ?? true) === false, 'publicView reflects 
 assert_true(($view['stations'] ?? ['x']) === [], 'stations hidden when off');
 
 $unifi->setSpeakersEnabled(true);
+
+// Stale Announcement ends_at on a normal station must not Idle / stop_all on status().
+file_put_contents($root . '/data/unifi-radio-state.json', json_encode([
+    'playing' => true,
+    'station_id' => 'classic-fm',
+    'station_name' => 'Classic FM',
+    'station_url' => 'https://example.com/classic.mp3',
+    'clip_path' => null,
+    'volume' => 60,
+    'streams' => [],
+    'homepod_targets' => ['homepod:aa:bb:cc:dd:ee:ff'],
+    'targets' => ['homepod:aa:bb:cc:dd:ee:ff'],
+    'started_at' => time() - 120,
+    'ends_at' => time() - 30,
+    'resume_after' => null,
+    'error' => null,
+], JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+$staleStatus = $radio->status();
+assert_true(($staleStatus['playing'] ?? false) === true, 'stale ends_at leaves HomePod radio Playing');
+assert_true(($staleStatus['station_id'] ?? '') === 'classic-fm', 'stale ends_at keeps station');
+assert_true(($staleStatus['ends_at'] ?? null) === null, 'stale ends_at cleared for non-announce');
+$clearedState = json_decode((string) file_get_contents($root . '/data/unifi-radio-state.json'), true);
+assert_true(
+    is_array($clearedState) && array_key_exists('ends_at', $clearedState) && $clearedState['ends_at'] === null,
+    'state ends_at cleared'
+);
+assert_true(!empty($clearedState['homepod_targets']), 'status did not clear Homepod targets');
+
 $unifi->save([
     'host' => '192.168.1.1',
     'protect_api_key' => 'test-protect-key',
@@ -465,6 +493,11 @@ assert_true(str_contains($radioSrc, 'killOrphanRadioFfmpeg'), 'reaps orphan talk
 assert_true(str_contains($radioSrc, 'listPanelRadioFfmpegPids'), 'status can see live ffmpeg without tracked pids');
 assert_true(str_contains($radioSrc, 'status() must not kill radio'), 'status is read-only for live radio');
 assert_true(str_contains($radioSrc, 'Do not reap orphans from status()'), 'status no longer reaps orphans');
+assert_true(str_contains($radioSrc, 'announceTimedOut'), 'timeout only for announcements');
+assert_true(str_contains($radioSrc, 'leftover ends_at'), 'clears stale ends_at on radio stations');
+assert_true(str_contains($radioSrc, 'Never pass null to Homepod::stop'), 'status never Homepod stop_all');
+assert_true(str_contains($radioSrc, 'never fall through to play()'), 'setTargets while Playing does not rebuild');
+assert_true(str_contains($radioSrc, 'Never call play()/stopLocked from volume'), 'setVolume no full restart');
 assert_true(str_contains($radioSrc, 'withRadioLock'), 'serializes play/stop under radio lock');
 assert_true(str_contains($radioSrc, '-f adts'), 'matches ADTS talkback argv');
 assert_true(
@@ -478,7 +511,8 @@ assert_true(
 assert_true(str_contains($change, '## [5.0.123]'), 'changelog 5.0.123');
 assert_true(str_contains($change, '## [5.0.124]'), 'changelog 5.0.124');
 assert_true(str_contains($change, '## [5.0.125]'), 'changelog 5.0.125');
-assert_true(str_contains($change, 'minimised'), 'changelog Safari minimise');
+assert_true(str_contains($change, '## [5.0.126]'), 'changelog 5.0.126');
+assert_true(str_contains($change, 'stop_all'), 'changelog Homepod stop_all');
 assert_true(str_contains($radioSrc, 'apply_stream_gain'), 'setVolume requires apply_stream_gain to restart');
 assert_true(str_contains($radioSrc, 'Same ticks as last time'), 'setTargets no-op for identical speakers');
 $matcher = new ReflectionMethod(YarboUnifiRadio::class, 'isPanelRadioFfmpegArgs');
