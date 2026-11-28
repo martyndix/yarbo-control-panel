@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.124] - 2026-11-28
+
+### Fixed
+
+- Safari on iPhone reloading the panel no longer stops radio. Status polls are read-only for live stations (they no longer reap talkback ffmpeg), and speaker checkbox restores after a reload are ignored so they cannot fire `radio_targets`. Only **Stop**, Speakers off, or an announcement ending stops playback.
+
 ## [5.0.123] - 2026-11-28
 
 ### Fixed

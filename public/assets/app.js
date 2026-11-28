@@ -4943,6 +4943,8 @@ let radioStatusPollTimer = 0;
 let radioStatusPollGen = 0;
 /** Ignore remote Idle/Playing for a moment after this tab's own Play/Stop/Announcement. */
 let radioLocalCommandUntil = 0;
+/** Ignore speaker checkbox change while the list is being rebuilt (Safari restore). */
+let radioIgnoreSpeakerChangesUntil = 0;
 
 function radioIsAnnouncement(radio = {}) {
     const id = String(radio?.station_id || '');
@@ -5113,9 +5115,8 @@ function closeRadioPlayerModal({ stopIfNeeded = false } = {}) {
     els.radioOpen?.classList.remove('is-active');
     els.radioOpen?.setAttribute('aria-expanded', 'false');
     syncBodyModalClass();
-    if (stopIfNeeded) {
-        unifiApi({ action: 'radio_stop' }, 8000).catch(() => {});
-    }
+    // stopIfNeeded is ignored — closing the modal must never stop server playback.
+    void stopIfNeeded;
 }
 
 function renderUnifiSpeakers(data, { replace = false } = {}) {
@@ -5162,6 +5163,9 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
                 selectedIds = null; // first paint: tick all
             }
             const selected = selectedIds === null ? null : new Set(selectedIds);
+            // Safari iPhone can fire change on restored checkboxes after a reload;
+            // ignore those so we do not radio_targets (rebuild/stop) while Playing.
+            radioIgnoreSpeakerChangesUntil = Date.now() + 2500;
             list.innerHTML = speakers.map((s) => {
                 const id = s.native_id || String(s.id || '').replace(/^unifi:camera:/, '');
                 const checked = selected === null ? true : selected.has(id);
@@ -5172,6 +5176,7 @@ function renderUnifiSpeakers(data, { replace = false } = {}) {
         }
     } else if (list && acceptRemote && fromRadio.length) {
         // Keep open tabs in sync without rebuilding the whole list.
+        radioIgnoreSpeakerChangesUntil = Date.now() + 2500;
         syncSpeakerChecksFromIds(fromRadio);
     }
 
@@ -20267,6 +20272,7 @@ syncRadioAnnounceChrome();
 els.radioPlayerModal?.addEventListener('change', async (event) => {
     const speaker = event.target.closest('input[data-unifi-speaker]');
     if (!speaker) return;
+    if (Date.now() < radioIgnoreSpeakerChangesUntil) return;
     const targets = unifiSelectedSpeakerIds();
     writeUnifiSpeakerPick(targets);
     // Apply live while Playing / AirPlay, and always persist so other browsers sync.
