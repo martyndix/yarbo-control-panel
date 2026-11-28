@@ -297,7 +297,8 @@ assert_true(!preg_match('/function syncRadioPlayerChrome[\s\S]*?unifiModuleOn ==
 assert_true(str_contains($js, 'radioIgnoreSpeakerChangesUntil'), 'Safari speaker restore ignored');
 assert_true(str_contains($js, 'armRadioFormIgnore'), 'Safari pageshow arms form ignore');
 assert_true(str_contains($js, 'radioIgnoreVolumeChangesUntil'), 'Safari volume restore ignored');
-assert_true(str_contains($js, 'apply_stream_gain'), 'volume restart only when user moves slider');
+assert_true(str_contains($js, 'radioUserGesture'), 'radio mutations require user gesture');
+assert_true(str_contains($js, 'RADIO_MUTATION_ACTIONS'), 'radio mutation action allowlist');
 assert_true(str_contains($js, 'closing the modal must never stop'), 'closing modal never radio_stop');
 assert_true(str_contains($js, 'openRadioPlayerModal'), 'Radio Player modal open');
 assert_true(str_contains($js, 'UNIFI_SPEAKER_PICK_KEY'), 'speaker ticks remembered');
@@ -497,7 +498,7 @@ assert_true(str_contains($radioSrc, 'announceTimedOut'), 'timeout only for annou
 assert_true(str_contains($radioSrc, 'leftover ends_at'), 'clears stale ends_at on radio stations');
 assert_true(str_contains($radioSrc, 'Never pass null to Homepod::stop'), 'status never Homepod stop_all');
 assert_true(str_contains($radioSrc, 'never fall through to play()'), 'setTargets while Playing does not rebuild');
-assert_true(str_contains($radioSrc, 'Never call play()/stopLocked from volume'), 'setVolume no full restart');
+assert_true(str_contains($radioSrc, 'never kill/respawn talkback'), 'setVolume never kills streams');
 assert_true(str_contains($radioSrc, 'withRadioLock'), 'serializes play/stop under radio lock');
 assert_true(str_contains($radioSrc, '-f adts'), 'matches ADTS talkback argv');
 assert_true(
@@ -512,9 +513,13 @@ assert_true(str_contains($change, '## [5.0.123]'), 'changelog 5.0.123');
 assert_true(str_contains($change, '## [5.0.124]'), 'changelog 5.0.124');
 assert_true(str_contains($change, '## [5.0.125]'), 'changelog 5.0.125');
 assert_true(str_contains($change, '## [5.0.126]'), 'changelog 5.0.126');
+assert_true(str_contains($change, '## [5.0.127]'), 'changelog 5.0.127');
+assert_true(str_contains($change, 'stopLivePictures'), 'changelog update badge stopLivePictures');
 assert_true(str_contains($change, 'stop_all'), 'changelog Homepod stop_all');
-assert_true(str_contains($radioSrc, 'apply_stream_gain'), 'setVolume requires apply_stream_gain to restart');
 assert_true(str_contains($radioSrc, 'Same ticks as last time'), 'setTargets no-op for identical speakers');
+$updatePhp = (string) file_get_contents(dirname(__DIR__) . '/public/api/update.php');
+assert_true(!str_contains($updatePhp, "stopLivePictures();\n    json_response(array_merge(\$update->status"), 'update badge GET must not stopLivePictures');
+assert_true(str_contains($unifiPhp, 'Never touch radio talkback'), 'killRecordedFfmpeg skips radio');
 $matcher = new ReflectionMethod(YarboUnifiRadio::class, 'isPanelRadioFfmpegArgs');
 $matcher->setAccessible(true);
 $classic = '/usr/bin/ffmpeg -nostdin -f adts udp://192.168.1.50:7004';

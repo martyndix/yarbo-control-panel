@@ -29,7 +29,8 @@ if ($method === 'GET') {
         json_response($https->status());
     }
 
-    (new YarboUnifi($projectRoot))->stopLivePictures();
+    // Badge / page-load status must not stop camera (or risk radio) ffmpeg.
+    // stopLivePictures runs only for check/update/rollback below.
     json_response(array_merge($update->status(true), ['service' => $update->serviceCheck()]));
 }
 

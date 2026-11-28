@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.127] - 2026-11-28
+
+### Fixed
+
+- Reloading the panel no longer stops radio. Three reload paths are closed: the update badge check no longer runs `stopLivePictures` (which could kill a recycled talkback ffmpeg PID), camera cleanup refuses radio/udp/adts processes, and the browser blocks Play/Stop/volume/speaker API calls unless they come from a real tap. Volume never kills streams; AirPlay “client gone” status no longer tears processes down on poll.
+
 ## [5.0.126] - 2026-11-28
 
 ### Fixed

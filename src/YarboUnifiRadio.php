@@ -117,6 +117,8 @@ final class YarboUnifiRadio
         // unless a real client session is active (play-begins hook / TCP watcher).
         // Grace: play_ends / flaky ss can flicker for several seconds between tracks
         // and during the initial handshake — do not tear the bridge down yet.
+        // status() only clears Playing here — never kill processes (page-load polls
+        // used to stop radio when session flicker looked like client-gone).
         if (
             trim((string) ($state['station_id'] ?? '')) === 'airplay'
             && (!empty($state['playing']) || $alive !== [] || $homepodAlive)
@@ -126,28 +128,11 @@ final class YarboUnifiRadio
                 $sess = $airplay->session();
                 $goneFor = time() - (int) ($sess['updated_at'] ?? 0);
                 if ($goneFor < 0 || $goneFor >= 15) {
-                    foreach ($alive as $row) {
-                        $pid = (int) ($row['pid'] ?? 0);
-                        if ($pid > 1) {
-                            $this->killPidTree($pid);
-                        }
-                    }
-                    if ($homepodAlive) {
-                        YarboHomepod::fromEnv($this->projectRoot)->stop($homepodTargets);
-                        $this->stopHomepodBridgeHttp();
-                    }
                     $airplay->markSessionActive(false);
                     $state['playing'] = false;
-                    $state['station_id'] = null;
-                    $state['station_name'] = null;
-                    $state['station_url'] = null;
-                    $state['streams'] = [];
-                    $state['homepod_targets'] = [];
-                    $state['ends_at'] = null;
+                    // Keep station_id airplay + streams so an explicit Stop / new Play
+                    // can still clean up; do not kill from status.
                     $this->writeState($state);
-                    $alive = [];
-                    $homepodTargets = [];
-                    $homepodAlive = false;
                 }
             }
         }
@@ -1461,19 +1446,14 @@ final class YarboUnifiRadio
         }
         $state = $this->loadState();
         $prevVolume = max(0, min(100, (int) ($state['volume'] ?? 60)));
-        $wasPlaying = (!empty($state['playing']) && is_array($state['streams']) && $state['streams'] !== [])
-            || (is_array($state['homepod_targets'] ?? null) && $state['homepod_targets'] !== []);
-        $stationId = isset($state['station_id']) ? (string) $state['station_id'] : '';
-        // Safari form restore can POST the same (or stale) volume after a phone reopen.
-        // Only stop+restart ffmpeg when the client asks for stream gain and the value changed.
-        $applyStreamGain = !empty($input['apply_stream_gain']) || !empty($input['restart']);
         $state['volume'] = $volume;
+        $state['ends_at'] = null;
         if ($targets !== []) {
             $state['targets'] = $targets;
         }
         $this->writeState($state);
 
-        if ($volume === $prevVolume && $wasPlaying) {
+        if ($volume === $prevVolume) {
             return [
                 'ok' => true,
                 'error' => null,
@@ -1482,7 +1462,7 @@ final class YarboUnifiRadio
             ];
         }
 
-        // Hardware volume is optional; stream volume is applied by restarting play.
+        // Hardware + HomePod volume only — never kill/respawn talkback ffmpeg from here.
         foreach (YarboHomepod::filterProtectIds($targets) as $cameraId) {
             $this->unifi->setCameraSpeakerVolume($cameraId, $volume);
         }
@@ -1492,60 +1472,6 @@ final class YarboUnifiRadio
         );
         if ($homepodIds !== []) {
             YarboHomepod::fromEnv($this->projectRoot)->setVolume($homepodIds, $volume);
-        }
-
-        // Never call play()/stopLocked from volume — that is what Safari form restores
-        // used to trigger, cutting music on page reload. Soft-respawn Protect ffmpeg to
-        // the existing talkback URL (no new talkback session) when gain must change.
-        if ($applyStreamGain && $wasPlaying && $stationId !== '' && $stationId !== 'announce') {
-            $contentUrl = trim((string) ($state['station_url'] ?? ''));
-            $ffmpeg = $this->unifi->ffmpegPath();
-            if ($stationId === 'airplay') {
-                // AirPlay bridge gain needs a controlled rebuild; leave playing alone here.
-            } elseif ($contentUrl !== '' && $ffmpeg !== '') {
-                $newStreams = [];
-                foreach (is_array($state['streams'] ?? null) ? $state['streams'] : [] as $row) {
-                    if (!is_array($row)) {
-                        continue;
-                    }
-                    $cam = trim((string) ($row['camera_id'] ?? ''));
-                    $talkback = trim((string) ($row['talkback_url'] ?? ''));
-                    $oldPid = (int) ($row['pid'] ?? 0);
-                    if ($cam === '' || $talkback === '') {
-                        if ($cam !== '') {
-                            $newStreams[] = $row;
-                        }
-                        continue;
-                    }
-                    $newPid = $this->spawnFfmpeg(
-                        $ffmpeg,
-                        $contentUrl,
-                        $talkback,
-                        (string) ($row['codec'] ?? 'aac'),
-                        22050,
-                        $cam,
-                        $volume,
-                        false,
-                    );
-                    if ($newPid > 1) {
-                        if ($oldPid > 1 && $oldPid !== $newPid) {
-                            $this->killPidTree($oldPid);
-                        }
-                        $row['pid'] = $newPid;
-                        $newStreams[] = $row;
-                    } else {
-                        $newStreams[] = $row;
-                    }
-                }
-                $state = $this->loadState();
-                $state['volume'] = $volume;
-                $state['ends_at'] = null;
-                if ($newStreams !== []) {
-                    $state['streams'] = $newStreams;
-                    $state['playing'] = true;
-                }
-                $this->writeState($state);
-            }
         }
 
         return [

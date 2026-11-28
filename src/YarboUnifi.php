@@ -2021,8 +2021,18 @@ final class YarboUnifi
         }
         $pid = (int) trim((string) file_get_contents($path));
         @unlink($path);
-        $cmd = @file_get_contents('/proc/' . $pid . '/cmdline');
-        if (!is_string($cmd) || !str_contains($cmd, 'ffmpeg')) {
+        $raw = @file_get_contents('/proc/' . $pid . '/cmdline');
+        if (!is_string($raw) || $raw === '') {
+            return;
+        }
+        $cmd = str_replace("\0", ' ', $raw);
+        // Only live-picture MJPEG ffmpeg. Never touch radio talkback (udp/adts) —
+        // a recycled PID in unifi-stream.pid used to kill Classic FM on page reload
+        // when update.php / stop_pictures ran.
+        if (!str_contains($cmd, 'ffmpeg') || !str_contains($cmd, '-f mjpeg') || !str_contains($cmd, 'pipe:1')) {
+            return;
+        }
+        if (str_contains($cmd, 'udp://') || str_contains($cmd, 'adts') || str_contains($cmd, '-f rtp')) {
             return;
         }
         $this->killPidTree($pid);
