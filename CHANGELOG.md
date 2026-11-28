@@ -6,6 +6,12 @@ This project follows a simple Keep a Changelog style with newest entries first.
 
 ## [Unreleased]
 
+## [5.0.125] - 2026-11-28
+
+### Fixed
+
+- Safari on iPhone no longer stops radio when you reopen a minimised tab. Restoring the volume slider used to fire `radio_volume` (stop+restart talkback). Volume / speaker / Speakers-enabled restores are ignored on pageshow, and the server only restarts ffmpeg when the volume actually changes with `apply_stream_gain`.
+
 ## [5.0.124] - 2026-11-28
 
 ### Fixed
